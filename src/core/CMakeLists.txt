@@ -1,7 +1,9 @@
 add_library(remin_core STATIC
+  autosave.cpp
   pane/pane.cpp
   serialization.cpp
   workspace_core.cpp
+  workspace_lock.cpp
 )
 
 target_include_directories(remin_core PUBLIC

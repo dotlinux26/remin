@@ -49,6 +49,8 @@ struct WorkspaceEvent {
         TabAdded,
         TabRemoved,
         PaneSplit,
+        PaneRemoved,
+        PaneResized,
         SnapshotCreated,
         StateDirty,
     };

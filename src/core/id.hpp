@@ -5,6 +5,7 @@
 #include <string_view>
 #include <random>
 #include <sstream>
+#include <locale>
 
 namespace remin::core {
 
@@ -26,11 +27,15 @@ public:
     [[nodiscard]] bool operator<(const Id& o) const noexcept { return value_ < o.value_; }
 
     // Generate a new unique id (v4-ish, hex without dashes for compactness).
+    // Explicitly classic-locale so hex output is identical regardless of the
+    // process locale (GTK calls setlocale, which can insert thousands
+    // separators into numeric output otherwise).
     static Id generate() {
         std::random_device rd;
         std::mt19937_64 gen(rd());
         std::uniform_int_distribution<uint64_t> dist;
         std::ostringstream os;
+        os.imbue(std::locale::classic());
         os << std::hex << dist(gen) << dist(gen);
         return Id{os.str()};
     }

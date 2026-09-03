@@ -1,42 +1,66 @@
 #pragma once
 
 #include <gtkmm.h>
-#include <adwaita.h>
-#include <vte/vte.h>
 #include <string>
+#include <functional>
+
+struct _VteTerminal;
+typedef struct _VteTerminal VteTerminal;
 
 namespace remin::gui {
 
-// A single terminal pane backed by a VTE widget. VTE provides the PTY,
-// scrollback, selection, and terminal emulation — Remin doesn't reinvent it.
-//
-// Each TerminalPane owns its own VteTerminal and shell child process.
+// Lightweight wrapper around a VTE GTK4 terminal widget.
+// Encapsulates PTY spawn, scrollback, and input detection.
 class TerminalPane {
 public:
     TerminalPane(const std::string& shell, const std::string& cwd);
     ~TerminalPane();
 
-    TerminalPane(const TerminalPane&) = delete;
-    TerminalPane& operator=(const TerminalPane&) = delete;
-
-    // The widget to place in a container.
+    // Access the widget for embedding in a container.
     Gtk::Widget& widget();
 
-    // Capture current scrollback (text) for snapshotting.
-    std::string capture_scrollback();
-
-    // Feed user keystrokes / paste into the terminal.
+    // Feed input from the host side (e.g. copied text).
     void feed(std::string_view data);
 
-    void set_title(std::string title) { title_ = std::move(title); }
-    const std::string& title() const { return title_; }
+    // Read the current scrollback buffer text.
+    std::string capture_scrollback();
+
+    // The short title shown in the tab strip.
+    [[nodiscard]] const char* title() const { return title_.c_str(); }
+
+    // Called on every text commit (keystroke). The host wires this to the
+    // autosave's note_activity.
+    void set_input_callback(std::function<void()> cb) { on_input_ = std::move(cb); }
+
+    // Called once per completed command line (VTE "commit" chunk ending in a
+    // newline), trimmed. The host uses this to build a command-history sidebar.
+    void set_command_callback(std::function<void(std::string)> cb) {
+        on_command_ = std::move(cb);
+    }
+
+    // -- Find (VTE regex search over the terminal contents) --
+    void set_search_text(const std::string& text);
+    bool search_next();
+    bool search_previous();
+    void clear_search();
+
+    // -- Color profile (foreground / background) --
+    void set_colors(const Gdk::RGBA& fg, const Gdk::RGBA& bg);
+    void use_default_colors();
 
 private:
-    VteTerminal* vte_{nullptr};   // owned by Gtk::Widget
-    Gtk::Widget* widget_{nullptr};
+    // VTE C callback trampoline.
+    static void on_commit_trampoline(GtkWidget* widget, const char* text,
+                                     guint size, gpointer user_data);
+
     std::string shell_;
     std::string cwd_;
     std::string title_;
+    VteTerminal* vte_{nullptr};
+    Gtk::Widget* widget_{nullptr};
+    std::function<void()> on_input_;
+    std::function<void(std::string)> on_command_;
+    std::string commit_buf_;
 };
 
 } // namespace remin::gui

@@ -69,13 +69,49 @@ int main() {
     CHECK(!win_id.empty());
 
     // Add a tab with a single pane.
-    auto initial_pane = PaneTree::leaf(Pane{PaneId::generate(), PaneState{}});
+    auto pane1 = Pane{PaneId::generate(), PaneState{}};
+    auto initial_pane = PaneTree::leaf(pane1);
     auto tab_id = core.add_tab(win_id, "Recon", std::move(initial_pane));
     CHECK(!tab_id.empty());
 
     // Split it.
     auto pane2 = core.split_pane(tab_id, PaneTree::Kind::SplitVertical, 0.5);
     CHECK(!pane2.empty());
+
+    // Count panes in the tab tree.
+    auto tree_of = [&](const TabId& tid) -> PaneTree& {
+        for (auto& w : core.current_workspace()->windows)
+            for (auto& t : w.tabs) if (t.id == tid) return t.pane_tree;
+        throw std::runtime_error("tab missing");
+    };
+    auto count_panes = [](const PaneTree& t) {
+        std::vector<const Pane*> v;
+        t.collect_panes(v);
+        return v.size();
+    };
+    CHECK(count_panes(tree_of(tab_id)) == 2);
+
+    // set_pane_ratio finds the parent split and stores the ratio.
+    CHECK(core.set_pane_ratio(tab_id, pane2, 0.25));
+    const auto& tree = tree_of(tab_id);
+    const PaneTree* split = nullptr;
+    // The root must be a split now (pane1 | pane2).
+    if (tree.kind() != PaneTree::Kind::Pane) split = &tree;
+    CHECK(split != nullptr);
+    if (split) CHECK(split->ratio() == 0.25);
+
+    // Removing a pane collapses the split back to a single pane.
+    CHECK(core.remove_pane(tab_id, pane2));
+    CHECK(count_panes(tree_of(tab_id)) == 1);
+    CHECK(tree_of(tab_id).kind() == PaneTree::Kind::Pane);
+    CHECK(tree_of(tab_id).pane() && tree_of(tab_id).pane()->id == pane1.id);
+
+    // Removing the last pane in a split-rooted tree with multiple panes works.
+    auto pane3 = core.split_pane(tab_id, PaneTree::Kind::SplitHorizontal, 0.5);
+    CHECK(!pane3.empty());
+    CHECK(count_panes(tree_of(tab_id)) == 2);
+    CHECK(core.remove_pane(tab_id, pane3));
+    CHECK(count_panes(tree_of(tab_id)) == 1);
 
     // Verify the current workspace serializes and round-trips.
     json j;

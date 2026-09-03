@@ -183,6 +183,62 @@ PaneTree* find_pane(PaneTree* tree, const PaneId& id) {
     return find_pane(tree->second(), id);
 }
 
+// Remove a leaf pane. If a split node ends up with a single surviving child,
+// that child replaces the split (so we never keep one-sided splits).
+// Returns true if id was found and the tree was modified.
+bool remove_pane_from_tree(PaneTree& node, const PaneId& id) {
+    if (node.kind() == PaneTree::Kind::Pane) {
+        if (node.pane() && node.pane()->id == id) {
+            node = PaneTree{};  // empty node; caller will prune
+            return true;
+        }
+        return false;
+    }
+
+    bool removed = false;
+    if (node.first()) removed |= remove_pane_from_tree(*node.first(), id);
+    if (!removed && node.second()) removed |= remove_pane_from_tree(*node.second(), id);
+    if (!removed) return false;
+
+    // Prune empty/single-child splits.
+    auto child_alive = [](PaneTree* n) -> bool {
+        return n && n->kind() != PaneTree::Kind::Pane ? true : (n != nullptr && n->pane().has_value());
+    };
+
+    const bool first_alive = child_alive(node.first());
+    const bool second_alive = child_alive(node.second());
+
+    if (first_alive && second_alive) return true;  // still a valid split
+
+    // Exactly one child (or node) survives → promote it.
+    if (first_alive && node.first()) {
+        node = std::move(*node.first());
+    } else if (second_alive && node.second()) {
+        node = std::move(*node.second());
+    } else {
+        node = PaneTree{};
+    }
+    return true;
+}
+
+// Set the ratio on the split node that is the pane's direct parent.
+bool set_split_ratio(PaneTree& node, const PaneId& pane, double ratio) {
+    if (node.kind() == PaneTree::Kind::Pane) return false;
+    if (node.first() && node.first()->kind() == PaneTree::Kind::Pane &&
+        node.first()->pane() && node.first()->pane()->id == pane) {
+        node.set_ratio(ratio);
+        return true;
+    }
+    if (node.second() && node.second()->kind() == PaneTree::Kind::Pane &&
+        node.second()->pane() && node.second()->pane()->id == pane) {
+        node.set_ratio(ratio);
+        return true;
+    }
+    if (node.first() && set_split_ratio(*node.first(), pane, ratio)) return true;
+    if (node.second() && set_split_ratio(*node.second(), pane, ratio)) return true;
+    return false;
+}
+
 } // namespace
 
 PaneId WorkspaceCore::split_pane(const TabId& tab, PaneTree::Kind kind, double ratio) {
@@ -221,10 +277,17 @@ PaneId WorkspaceCore::split_pane(const TabId& tab, PaneTree::Kind kind, double r
 }
 
 bool WorkspaceCore::remove_pane(const TabId& tab, const PaneId& pane) {
-    (void)tab;
-    (void)pane;
-    // Removal of an arbitrary leaf while preserving the tree is non-trivial;
-    // deferred to a later phase. No-op for now.
+    if (!ws_current_) return false;
+    for (auto& w : ws_current_->windows) {
+        for (auto& t : w.tabs) {
+            if (t.id != tab) continue;
+            if (!remove_pane_from_tree(t.pane_tree, pane)) return false;
+            if (w.focus_pane_id == pane) w.focus_pane_id.reset();
+            storage_->save_workspace(*ws_current_);
+            emit(WorkspaceEvent::Type::PaneRemoved, ws_current_->id, w.id, tab, pane);
+            return true;
+        }
+    }
     return false;
 }
 
@@ -247,12 +310,11 @@ bool WorkspaceCore::set_pane_ratio(const TabId& tab, const PaneId& pane, double 
     for (auto& w : ws_current_->windows) {
         for (auto& t : w.tabs) {
             if (t.id != tab) continue;
-            auto* hit = find_pane(&t.pane_tree, pane);
-            // Climb up: the ratio lives on the *split* node, not the leaf.
-            // For simplicity we search splits by locating parent — deferred.
-            // Simplification: adjust via a recursive pass is omitted here.
-            (void)hit;
-            return false;
+            if (ratio < 0.0 || ratio > 1.0) return false;
+            if (!set_split_ratio(t.pane_tree, pane, ratio)) return false;
+            storage_->save_workspace(*ws_current_);
+            emit(WorkspaceEvent::Type::PaneResized, ws_current_->id, w.id, tab, pane);
+            return true;
         }
     }
     return false;

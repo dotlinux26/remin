@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Remin
+GenericName=Terminal Workspace
+Comment=Save, restore and carry your terminal workspace
+Exec=remin gui
+Icon=remin
+Terminal=false
+Categories=System;TerminalEmulator;Utility;
+StartupWMClass=remin
+Keywords=terminal;workspace;remind;save;restore;

@@ -1,0 +1,93 @@
+#pragma once
+
+#include "core/autosave.hpp"
+#include "core/workspace_core.hpp"
+
+#include <string>
+
+namespace remin::gui {
+
+// Orchestration layer between the UI and the domain (the "C" in
+// View → Controller → Core → Storage/Runtime).
+//
+// MainWindow never touches WorkspaceCore / Storage / Autosaver directly — it
+// emits commands here. Core keeps state + invariants; this controller keeps
+// orchestration (multi-step application operations such as open/close/rename,
+// terminal/note tab lifecycle, split/resize, snapshot). Autosave policy is
+// configured here (one system, per-resource thresholds), never per widget.
+// Note bodies live in the same generic storage blob store as scrollback,
+// keyed by the note id, routed through Storage — never via a direct file write.
+class SessionController {
+public:
+    SessionController(remin::core::WorkspaceCore* core,
+                      remin::core::Storage* storage,
+                      remin::core::Autosaver* autosaver);
+
+    [[nodiscard]] remin::core::WorkspaceCore* core() const { return core_; }
+    [[nodiscard]] remin::core::Autosaver* autosaver() const { return autosaver_; }
+
+    // -- Workspaces --
+    bool open_workspace(const remin::core::WorkspaceId& id);
+    bool close_workspace();
+    bool rename_workspace(const std::string& name);
+
+    // -- Windows --
+    remin::core::WindowId add_window(const std::string& title);
+    bool rename_window(const remin::core::WindowId& id, const std::string& title);
+
+    // -- Terminal tabs --
+    struct TerminalTab {
+        remin::core::WindowId window;
+        remin::core::TabId tab;
+        remin::core::PaneId root_pane;
+    };
+    TerminalTab new_terminal_tab(const std::string& title);
+
+    // -- Panes (split/resize) --
+    remin::core::PaneId split_pane(const remin::core::TabId& tab,
+                                   remin::core::PaneTree::Kind kind,
+                                   double ratio = 0.5);
+    bool remove_pane(const remin::core::TabId& tab, const remin::core::PaneId& pane);
+    bool set_pane_ratio(const remin::core::TabId& tab,
+                        const remin::core::PaneId& pane, double ratio);
+
+    // -- Notes --
+    // Names a new note; its body is persisted/loaded via the storage blob
+    // store keyed by the returned id.
+    std::string new_note();
+    std::string load_note(const std::string& noteId);
+
+    // Explicit file persistence for a note (Save / Save As / temp-file).
+    // A note has an optional assigned file path; until it does, an explicit
+    // save writes the body to an auto-generated temp file (if autosave-to-temp
+    // is enabled) so nothing typed is ever lost.
+    [[nodiscard]] std::string note_path(const std::string& noteId) const;
+    void set_note_path(const std::string& noteId, const std::string& path);
+
+    // Write note content to an arbitrary file path (used by Save As and the
+    // temp-file path). Returns true on success.
+    bool write_note_file(const std::string& path, const std::string& content);
+
+    // Deterministic temp path for a note id (used when it has no assigned path).
+    [[nodiscard]] std::string note_temp_path(const std::string& noteId) const;
+
+    // Setting: persist each unnamed note's body to its temp file on autosave.
+    [[nodiscard]] bool autosave_temp_enabled() const;
+    void set_autosave_temp_enabled(bool enabled);
+
+    // Setting: when a note's assigned file changes on disk, reload it silently
+    // instead of prompting. Defaults to off (prompt with Reload/Keep).
+    [[nodiscard]] bool auto_reload_enabled() const;
+    void set_auto_reload_enabled(bool enabled);
+
+    // -- Snapshots --
+    remin::core::SnapshotId create_snapshot();
+    bool restore_snapshot(const remin::core::SnapshotId& snap);
+
+private:
+    remin::core::WorkspaceCore* core_;
+    remin::core::Storage* storage_;
+    remin::core::Autosaver* autosaver_;
+};
+
+} // namespace remin::gui

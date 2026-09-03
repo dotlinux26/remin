@@ -33,6 +33,8 @@ add_subdirectory(src/cli)
 
 if(REMIN_BUILD_GUI)
   add_subdirectory(src/gui)
+  remin_install_resources(${CMAKE_CURRENT_SOURCE_DIR}/resources)
+  remin_install_app_icon(${CMAKE_CURRENT_SOURCE_DIR}/resources)
 endif()
 
 add_subdirectory(src/app)

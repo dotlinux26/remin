@@ -5,6 +5,8 @@ set(REMIN_TEST_SOURCES
   unit/workspace_core_test.cpp
   unit/pane_tree_test.cpp
   unit/serialization_test.cpp
+  unit/autosave_test.cpp
+  unit/workspace_lock_test.cpp
 )
 
 foreach(test_src ${REMIN_TEST_SOURCES})

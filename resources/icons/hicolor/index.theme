@@ -1,0 +1,11 @@
+[Icon Theme]
+Name=Remin
+Comment=Remin icon theme
+Directories=scalable/apps
+
+[scalable/apps]
+Size=128
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=Applications

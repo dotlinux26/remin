@@ -31,7 +31,9 @@ std::unique_ptr<PtySession> PtyProviderLinux::spawn(const std::string& shell,
     if (pid == 0) {
         // Child: exec the shell.
         if (!cwd.empty()) {
-            chdir(cwd.c_str());
+            // best-effort; the shell may still start in / if chdir fails
+            const int rc = chdir(cwd.c_str());
+            (void)rc;
         }
         // Set TERM for our managed terminal (Remin owns the terminal).
         setenv("TERM", "xterm-256color", 1);

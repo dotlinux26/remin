@@ -1,52 +1,221 @@
-/* Remin — Dark theme
+/* Remin — Dark theme.
  *
  * Palette derived from logo.svg (do not edit logo.svg):
- *   gradient: #4f46e5 (indigo) → #6366f1 → #06b6d4 (cyan)
+ *   gradient: #4f46e5 (indigo) → #6366f1 → #06b6d4 (cyan), lightened for dark bg
  *
- * Semantic variables — no hard-coded colors in C++. Dark on surface.
+ * GTK CSS uses @define-color (not var()); colors are defined once here and
+ * referenced by @name throughout. No colors are hard-coded in C++.
  */
 
-:root {
-  --bg:            #0f1220;
-  --surface:       #161a2c;
-  --surface-hover: #1e2440;
-  --border:        #262c4a;
-  --text:          #e6e9f7;
-  --text-muted:    #8b92ad;
+@define-color bg             #0f1220;
+@define-color surface        #161a2c;
+@define-color surface_hover  #1e2440;
+@define-color border         #262c4a;
+@define-color text           #e6e9f7;
+@define-color text_muted     #8b92ad;
+@define-color accent         #818cf8;
+@define-color accent_2       #22d3ee;
+@define-color accent_soft    rgba(129, 140, 248, 0.14);
 
-  /* Accent from logo indigo → cyan, lightened for dark bg */
-  --accent:        #818cf8;
-  --accent-2:      #22d3ee;
-  --accent-soft:   rgba(129, 140, 248, 0.14);
-
-  --terminal-bg:   #0b0e1a;
-  --terminal-fg:   #cdd6f4;
-  --terminal-accent: #6366f1;
+/* Always-visible scrollbars (overlay scrolling off look) */
+scrollbar {
+  background-color: transparent;
+}
+scrollbar.vertical {
+  min-width: 10px;
+}
+scrollbar.horizontal {
+  min-height: 10px;
+}
+scrollbar slider {
+  background-color: rgba(139, 146, 173, 0.45);
+  border-radius: 99px;
+  min-width: 8px;
+  min-height: 8px;
+  margin: 2px;
+}
+scrollbar slider:hover {
+  background-color: @accent;
+}
+scrollbar trough {
+  background-color: transparent;
+  border: none;
 }
 
 window.remin-window {
-  background-color: var(--bg);
+  background-color: @bg;
 }
 
 /* Text-only navigation: borders + selection state instead of icons */
 .remin-tab {
-  color: var(--text-muted);
+  color: @text_muted;
   border-bottom: 2px solid transparent;
-  padding: 6px 12px;
+  padding: 2px 8px;
   background: transparent;
+  min-width: 96px;
+  min-height: 28px;
+  border-radius: 0;
 }
 
 .remin-tab:checked {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  background: var(--accent-soft);
+  color: @accent;
+  border-bottom-color: @accent;
+  background: transparent;
+}
+
+/* Square, fixed-size buttons in the tab bar (+ new tab buttons) */
+.remin-tab-btn {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: @surface;
+}
+
+.remin-tab-btn:hover {
+  background-color: @surface_hover;
+}
+
+.remin-tab-btn image {
+  -gtk-icon-size: 16px;
+}
+
+/* Small, rounded close buttons on tabs */
+.remin-tab-close {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 9999px;
+  font-size: 10px;
+  background-color: transparent;
+  color: @text_muted;
+}
+
+.remin-tab-close:hover {
+  background-color: rgba(248, 113, 113, 0.25);
+  color: #f87171;
+}
+
+/* A tab = [switch button][close button] side by side; keep them a uniform height */
+.remin-tab-group {
+  border-radius: 6px;
+}
+.remin-tab-group .remin-tab {
+  border-radius: 6px 0 0 6px;
+}
+.remin-tab-group .remin-tab-close {
+  border-radius: 0 6px 6px 0;
+}
+
+/* Active tab highlight (the .active class is applied to the switch button). */
+.remin-tab.active {
+  color: @accent;
+  border-bottom-color: @accent;
+  background-color: @accent_soft;
 }
 
 .remin-header-label {
-  color: var(--text);
+  color: @text;
 }
 
 .remin-status {
-  color: var(--text-muted);
+  color: @text_muted;
   font-feature-settings: "tnum";
+}
+
+/* Autosave badge — pill overlay in top-right corner */
+#autosave-badge {
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.autosave-ok {
+  background-color: rgba(52, 211, 153, 0.22);
+  color: #34d399;
+}
+
+.autosave-fail {
+  background-color: rgba(248, 113, 113, 0.22);
+  color: #f87171;
+}
+
+/* Toolbar below header */
+.remin-toolbar {
+  background-color: @surface;
+  border-bottom: 1px solid @border;
+}
+
+.remin-tool-btn {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: @surface;
+}
+
+.remin-tool-btn:hover {
+  background-color: @surface_hover;
+}
+
+.remin-tool-btn image {
+  -gtk-icon-size: 16px;
+}
+
+/* Right-click context menu (terminal panes) */
+.remin-context-menu {
+  border: 1px solid @border;
+  border-radius: 8px;
+  background-color: @surface;
+}
+
+.remin-menu-item {
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  background-color: transparent;
+  color: @text;
+}
+
+.remin-menu-item:hover {
+  background-color: @surface_hover;
+  color: @accent;
+}
+
+/* Line-number gutter in the note editor */
+.remin-gutter {
+  background-color: @surface;
+  color: @text_muted;
+}
+
+/* Resizable left sidebar */
+.remin-sidebar {
+  background-color: @surface;
+  border-right: 1px solid @border;
+}
+
+.remin-sidebar-title {
+  color: @text_muted;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.remin-history-item {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: @text;
+}
+
+.remin-history-item:hover {
+  background-color: @surface_hover;
 }
