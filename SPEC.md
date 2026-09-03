@@ -94,17 +94,17 @@ remin/
              └────────┬────────┘
                       │
              ┌────────▼────────┐
-             │  Host Compositor │
+             │  Host Compositor│
              │ (KDE/Xfce/GNOME)│
              └────────┬────────┘
                       │
                ┌──────▼──────┐
                │  Remin GUI  │   ← optional nested environment
-               │ (compositor) │
+               │ (compositor)│
                └──────┬──────┘
                       │
            ┌──────────┼──────────┐
-           ▼          ▼          ▼
+                  ▼                ▼                 ▼
        Terminal     Apps       Shell
 ```
 
@@ -141,12 +141,12 @@ Can also run split-screen alongside host desktop applications:
 ```
 ┌──────────────────────────────────────┐
 │          Host Desktop (Kali)         │
-│  terminal   browser   file manager  │
+│  terminal   browser   file manager   │
 ├──────────────────────────────────────┤
 │          Remin Environment           │
-│  ┌────────┐ ┌────────┐ ┌──────────┐ │
-│  │ Shell  │ │ Files  │ │ Monitor  │ │
-│  └────────┘ └────────┘ └──────────┘ │
+│  ┌────────┐ ┌────────┐ ┌──────────┐  │
+│  │ Shell  │ │ Files  │ │ Monitor  │  │
+│  └────────┘ └────────┘ └──────────┘  │
 └──────────────────────────────────────┘
 ```
 
@@ -383,16 +383,22 @@ pty_backend = "posix"             # posix (forkpty)
 
 ## 9. Future Roadmap
 
+> Rev-a: **GUI là V1.** DE/compositor độc lập là V2.
+
 ### v1.0 (current)
-- Core workspace save/restore
-- CLI interface
-- PTY/shell integration
-- History capture
-- Scrollback capture
+- Remin Core (Workspace Engine: Workspace/Window/Tab/Pane, GUI/CLI agnostic)
+- Linux PTY integration
+- Workspace model + snapshot/restore
+- **GUI workspace** (VTE-based terminal emulator, nested trong DE host)
+- Window / Tab / Pane layout management
+- History capture + Search
+- CLI frontend (điều khiển cùng WorkspaceCore)
 
 ### v2.0
-- GUI frontend (native terminal emulator + workspace manager)
-- Nested desktop mode (Wayland compositor)
+- Wayland-native compositor
+- Standalone session (login → Remin)
+- Login/session integration
+- Full Remin desktop environment
 - Workspace sharing (export/import)
 - Plugin system (custom save hooks, auto-save triggers)
 
@@ -438,8 +444,8 @@ remin-gui          # GUI frontend (if separate binary)
 | Cross-machine | no (needs SSH) | yes (export/import) |
 | History preservation | limited | full scrollback + history |
 | Restore context | manual | automated |
-| Nested environment | no | yes (v2) |
-| GUI integration | no | yes (v2) |
+| Nested environment | no | **yes (v1)** — nested GUI workspace trong DE host |
+| GUI integration | no | **yes (v1)** — GUI workspace |
 | Portable snapshots | no | yes (.remin files) |
 
 ---

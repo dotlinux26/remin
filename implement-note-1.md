@@ -1,7 +1,188 @@
 # Implementation Note #1 — Remin
 
 > Giai đoạn: Lên kế hoạch triển khai (pre-implementation)
-> Dành cho: cuộc trao đổi QA giữa người build và chủ dự án (a).
+
+---
+
+## 2.5. ĐIỀU CHỈNH CONCEPT QUAN TRỌNG (rev-a)
+
+> Cập nhật sau khi chốt lại với chủ dự án. Có một lệch concept mạnh trong
+> bản gốc: doc cũ coi **CLI = V1, GUI/compositor = V2**. Sai.
+
+### Nguyên tắc mới
+
+**GUI không phải phần phụ. GUI chính là cách Remin thể hiện workspace model.**
+
+```
+                 REMIN
+                   │
+          Workspace Engine
+                   │
+       ┌───────────┼───────────┐
+       │           │           │
+    Window        Tab         Pane
+       │           │           │
+       └───────────┼───────────┘
+                   │
+              Terminal
+                   │
+                  PTY
+                   │
+             bash/zsh/fish
+```
+
+### V1 = Nested CLI-oriented workspace environment (chạy trong DE hiện có)
+
+Remin **chưa cần** là một Desktop Environment hoàn chỉnh ngay ngày đầu.
+
+V1 là:
+
+> **Nested CLI-oriented workspace environment chạy bên trong DE hiện có.**
+
+Ví dụ trên Kali Xfce — host DE vẫn quản lý **một cửa sổ Remin**, Remin
+quản lý toàn bộ thế giới **bên trong cửa sổ đó**:
+
+```
+┌──────────── Kali Xfce ────────────────────────┐
+│ panel                                         │
+│                                               │
+│   ┌────────────── Remin ──────────────────┐   │
+│   │ GitLab Audit                          │   │
+│   │ ┌───────────┬───────────────────────┐ │   │
+│   │ │ nmap      │ ffuf                  │ │   │
+│   │ │           │                       │ │   │
+│   │ ├───────────┴───────────────────────┤ │   │
+│   │ │ shell                             │ │   │
+│   │ └───────────────────────────────────┘ │   │
+│   └───────────────────────────────────────┘   │
+└────────────────────────────────────────────────┘
+```
+
+### V2 = Remin Desktop Environment thực sự
+
+Sau này mới tiến tới:
+
+```
+Login
+  ↓
+Remin session
+  ↓
+Remin compositor
+  ↓
+CLI workspace
+```
+
+tức **Remin Desktop Environment thực sự** (Wayland-native compositor,
+standalone session, login integration).
+
+### Điểm khởi đầu đúng
+
+Không bắt đầu bằng `CLI → save → restore`.
+
+Mà bắt đầu bằng **Workspace State**:
+
+```
+                 Workspace State
+                       │
+          ┌────────────┼────────────┐
+          ↓            ↓            ↓
+       Window         Tab          Pane
+          │            │            │
+          └────────────┼────────────┘
+                       ↓
+                 Terminal State
+                       │
+              ┌────────┼────────┐
+              ↓        ↓        ↓
+             CWD     History  Scrollback
+                       │
+                       ↓
+                      PTY
+```
+
+**GUI render cái model này. CLI cũng điều khiển chính cái model này.**
+
+```bash
+remin workspace list
+remin workspace open "GitLab Audit"
+remin window rename "GitLab Audit"
+remin snapshot create
+remin history
+remin restore
+```
+
+GUI:
+
+```
+click Rename   →  cùng WorkspaceCore
+click Snapshot →  cùng WorkspaceCore
+click Restore  →  cùng WorkspaceCore
+```
+
+→ **GUI và CLI đều gọi cùng `WorkspaceCore`** (core không biết mình bị điều khiển bởi GUI hay CLI).
+
+### `restore` không còn "spawn shell trong terminal hiện tại"
+
+Với Remin GUI:
+
+```
+remin-gui
+   │
+   ├── Window Manager
+   ├── Tab Manager
+   ├── Pane/Layout Manager
+   └── Terminal Manager
+             │
+             └── PTY
+```
+
+`restore` = **workspace reconstruction**:
+
+```
+Snapshot
+   ↓
+Workspace reconstruction
+   ↓
+Window
+   ↓
+Tabs
+   ↓
+Pane tree
+   ↓
+PTY instances
+   ↓
+shell
+```
+
+PTY vẫn là **OS/library territory** — Remin không reinvent PTY.
+
+### Chia lại version
+
+```text
+V1
+├── Remin Core
+├── Linux PTY integration
+├── Workspace model
+├── GUI workspace
+├── Window / Tab / Pane
+├── History
+├── Search
+├── Snapshot / Restore
+└── Linux nested environment
+
+V2
+├── Wayland-native compositor
+├── standalone session
+├── login/session integration
+└── full Remin desktop environment
+```
+
+**GUI là V1. DE/compositor độc lập là V2.**
+
+> Remin remembers your workspace.
+> Browser nhớ `Window→Tabs→Pages`; Remin nhớ `Workspace→Windows→Tabs→Panes→Shell sessions`.
+
+---
 
 ---
 
@@ -17,25 +198,27 @@ và bắt tay vào code. **Không được code trước khi trả lời hết n
 
 | Mục | Giá trị |
 |-----|---------|
-| Ngôn ngữ | C++17, Linux-first |
+| Ngôn ngữ | C++17/20, Linux-first |
 | License | MIT |
-| Binary | `remin` (CLI), `remin-gui` (v2, tùy chọn) |
-| Mục tiêu v1 | Save/restore workspace CLI. Zero external deps ở core. |
-| V2 mơ ước | GUI terminal emulator + nested compositor (Wayland) |
+| Binary | `remin` (CLI) + `remin-gui` (V1 — nested GUI workspace) |
+| Mục tiêu V1 | Nested CLI-oriented workspace environment với GUI + CLI cùng dùng `WorkspaceCore` |
+| V2 mơ ước | Remin Desktop Environment: Wayland-native compositor + standalone session |
 
 ---
 
-## 3. Kế hoạch triển khai theo pha
+## 3. Kế hoạch triển khai theo pha (rev-a — GUI-first)
+
+> **GUI là V1. DE/compositor độc lập là V2.**
 
 ### Phase 0 — Nền tảng dự án
 - [ ] CMake project skeleton
 - [ ] VSCode / clangd + compile_commands.json
 - [ ] `.clang-format`, `.gitignore`, CONTRIBUTING.md
 - [ ] CI cơ bản (GitHub Actions: build + test)
-- [ ] Wiring CLI arg-parsing tối giản
 
-### Phase 1 — Core model (không phụ thuộc GUI/PTY)
+### Phase 1 — Core model + Workspace Engine (không phụ thuộc GUI/PTY)
 - [ ] Cấu trúc dữ liệu: `Workspace`, `Window`, `Tab`, `Pane`, `Snapshot`
+- [ ] `WorkspaceCore` — API duy nhất mà cả GUI lẫn CLI cùng gọi
 - [ ] Serialize/Deserialize ra JSON
 - [ ] Storage layer: ghi/đọc workspace index + snapshot files
 - [ ] Unit test cho pure logic (không cần PTY, không cần terminal)
@@ -47,23 +230,34 @@ và bắt tay vào code. **Không được code trước khi trả lời hết n
 - [ ] Capture scrollback buffer
 - [ ] Capture command history (đọc HISTFILE hoặc hook prompt)
 
-### Phase 3 — CLI frontend
-- [ ] `remin save / restore / list / delete / export / import / info / diff`
-- [ ] `--json`, `--quiet`, `--verbose`
-- [ ] In bảng workspace (manually, không cần lib)
-- [ ] Confirm prompt trước restore
+### Phase 3 — GUI workspace (GIAI ĐOẠN CHÍNH CỦA V1)
+- [ ] Terminal emulator (libvterm hoặc VTE) render Pane
+- [ ] Window / Tab / Pane layout renderer
+- [ ] Window Manager (tạo/focus/close/rename window)
+- [ ] Tab Manager (tạo/focus/close tab)
+- [ ] Pane/Layout Manager (split vertical/horizontal, resize)
+- [ ] History panel + Search
+- [ ] Snapshot / Restore UI (button + dialog)
+- [ ] Chạy nested: Remin là 1 cửa sổ bên trong DE host
 
-### Phase 4 — V1 hardening
+### Phase 4 — CLI frontend (điều khiển CÙNG WorkspaceCore)
+- [ ] `remin workspace list / open / rename`
+- [ ] `remin window ...`, `remin tab ...`, `remin pane ...`
+- [ ] `remin snapshot create / list / restore`
+- [ ] `remin history`, `remin search`
+- [ ] `--json`, `--quiet`, `--verbose`
+
+### Phase 5 — V1 hardening
 - [ ] Error handling + exit codes có ý nghĩa
 - [ ] Xử lý lock (tránh 2 process ghi cùng lúc)
 - [ ] Tests tích hợp (end-to-end trên PTY thật)
 - [ ] Package tối thiểu (tarball / CMake install)
 
-### V2 (để sau)
-- [ ] Terminal emulator GUI (libvterm hoặc tự viết)
-- [ ] Nested compositor (Wayland)
-- [ ] Export/import portable .remin file
-- [ ] Plugin system
+### V2 (Remin Desktop Environment — để sau)
+- [ ] Wayland-native compositor
+- [ ] Standalone session (login → Remin)
+- [ ] Login/session integration
+- [ ] Full Remin desktop environment
 
 ---
 
@@ -110,14 +304,18 @@ sequences. Chiến lược:
 **Q4: Scrollback "thật" (A) rất tốn công. Anh chấp nhận v1 chỉ lưu command
 history (B), còn scrollback đầy đủ để v2 không?**
 
-### 4.5 GUI (nếu v1 cần, không thì bỏ)
+### 4.5 GUI — CỐT LÕI CỦA V1
+
+> Rev-a: GUI **không phải** tùy chọn. GUI là cách Remin thể hiện workspace model.
 
 | Thư viện | Ghi chú |
 |----------|---------|
-| libvterm | terminal emulator cấp thấp, C |
-| Nested compositor | Wayland — cực nặng, để v2 |
+| VTE (libvte-2.91) | GTK terminal widget, render + emulation sẵn, battle-tested |
+| libvterm | terminal emulation cấp thấp (C), tự render bằng toolkit khác |
+| SDL2 / GTK3 / Qt6 | toolkit vẽ giao diện |
 
-**Q5: GUI có vào v1 không, hay v1 chỉ CLI thuần?** (SPEC đề xuất v1 bỏ GUI)
+**Q5 (rev-a): Chốt stack GUI:** VTE/GTK hay libvterm + toolkit khác?
+Đề xuất: **VTE + GTK3** cho terminal emulation + widget đầy đủ (nhanh, ít code).
 
 ### 4.6 Portable format (.remin export file)
 
@@ -164,7 +362,7 @@ history (B), còn scrollback đầy đủ để v2 không?**
 | Q2 | Compiler? | clang dev / gcc CI |
 | Q3 | JSON zerodep hay dùng lib? | dùng nlohmann/json |
 | Q4 | Scrollback thật hay chỉ history ở v1? | chỉ history v1 |
-| Q5 | GUI có vào v1? | bỏ, v1 CLI thuần |
+| Q5 | GUI có vào V1? | Có — GUI là cốt lõi V1 (rev-a) |
 | Q6 | Format .remin export? | tarball |
 | Q7 | C++17 hay C++20? | C++20 |
 | Q8 | PTY I/O dùng epoll? | epoll |
@@ -193,40 +391,38 @@ lõi dưới đây. Những câu này quyết định toàn bộ kiến trúc v1
 
 ---
 
-### AQ1 — Mô hình Control flow
+### AQ1 — Mô hình Control flow (rev-a: GUI-based)
 
-**Câu hỏi:** Khi `remin restore` chạy, nó phải làm gì?
+**Câu hỏi:** Khi `remin restore` chạy trong **GUI**, nó hoạt động thế nào?
 
-- **A)** `remin` spawn shell mới trong terminal hiện tại, tự nó đóng vai trò
-  "wrapper" — tức `remin` là PID 1 của session, sau đó fork ra shell thật.
-  → `remin` phải biết quản lý PTY (phức tạp, nhưng kiểm soát được layout).
+- **A)** `remin-gui` khởi động, tự nó là Window/Tab/Pane manager, tự fork
+  PTY cho mỗi pane, và `WorkspaceCore` tái lập cây pane từ snapshot.
 
-- **B)** `remin restore` chỉ tạo file script `.remin-session`, rồi gọi
-  `exec $SHELL` với các env vars đã restore. User tự nhìn script để biết
-  cần làm gì. → Đơn giản, nhưng chỉ "gợi ý", không restore thật.
+- **B)** `remin-gui` chỉ render, còn restore delegate xuống tmux/screen
+  backend. → Phụ thuộc tmux.
 
-- **C)** `remin restore` viết ra tmux socket script / screen config rồi
-  launch `tmux new-session` từ state đã lưu. → tận dụng tmux, nhưng
-  `"remin ≠ tmux"` (SPEC nói sẽ khác tmux, nhưng cách này rất thực dụng).
+**Đề xuất:** (A) — Remin quản lý PTY trực tiếp, không dựa tmux. `restore`
+= workspace reconstruction (Snapshot → Window → Tab → Pane tree → PTY → shell).
 
-**AQ1a:**
-- Nếu (A): cần fork PTY, quản lý terminal emulator internally → cần xác
-  nhận dùng `forkpty()` hay viết abstraction layer.
-- Nếu (C): chỉ cần generate tmux config → v1 cực nhanh, nhưng phụ thuộc
-  tmux.
+**AQ1a:** Nếu (A) cần xác nhận dùng `forkpty()` trực tiếp hay abstraction
+`PTYProvider` interface (để sau này port).
 
 ---
 
-### AQ2 — Scrollback capture: "thật" hay "giả"?
+### AQ2 — Scrollback capture: "thật" hay "giả" (rev-a: GUI)
 
-**Câu hỏi:** Khi `remin save` chạy, scrollback (nội dung text đã hiển thị
-trên terminal) được capture như thế nào?
+**Câu hỏi:** Trong **GUI**, việc capture scrollback được làm thế nào?
 
-- **A) Thật:** Remin wrap mỗi terminal, khi user chạy `remin save`, nó
-  đọc buffer trong pty master fd → chính xác những gì user thấy.
+Vì V1 là GUI, nếu dùng **VTE** thì:
+- VTE tự quản lý scrollback buffer (text đã hiển thị trong widget).
+- `remin-gui` chỉ cần đọc buffer từ VTE widget rồi lưu vào snapshot.
+- Không cần tự viết ANSI parser — VTE lo phần đó.
 
-- **B) Giả:** Remin chỉ ghi lại `HISTFILE` (command history) + `cwd` +
-  `env`. Scrollback "visual" mất, nhưng command history đủ để gợi nhớ.
+Nếu dùng **CLI** thuần (không tab GUI):
+- Phải wrap PTY, tự parse ANSI escape.
+
+**AQ2a:** Confirm GUI dùng **VTE** (scrollback "thật" miễn phí) → v1
+capture scrollback dễ dàng.
 
 - **C) Hybrid:** v1 dùng (B), v2 mới làm (A).
 
@@ -253,7 +449,7 @@ chạy? (Cần hook hoặc đọc từ disk.)
 
 **AQ3a:**
 - Nếu (A): chấp nhận file có thể lớn, giảm bug serialization.
-- Nếu (B): cần format binary rõ ràng (version field, endian约定).
+- Nếu (B): cần format binary rõ ràng (version field, endianness).
 - Nếu (C): phức tạp nhất nhưng tối ưu nhất.
 
 ---
@@ -273,25 +469,21 @@ thì sao?
 
 ---
 
-### AQ5 — Terminal emulator trong GUI mode
+### AQ5 — Terminal emulator trong GUI mode (rev-a)
 
-**Câu hỏi:** v1 có cần terminal emulator GUI hay chỉ cần CLI?
+**Câu hỏi:** GUI V1 dùng terminal emulator thế nào?
 
-- **A) CLI thuần:** v1 chỉ CLI, `remin save/restore` chạy trên terminal
-  hiện có. → Đơn giản nhất.
+- **A) VTE (GTK terminal widget):** render + emulation sẵn, scrollback
+  "thật" miễn phí. Battle-tested. → Đề xuất.
 
-- **B) Terminal emulator đầu tiên:** v1 viết terminal emulator tối giản
-  (1 tab, 1 pane), sau đó v2 thêm workspace logic. → Phức tạp nhưng
-  có thể demo.
+- **B) libvterm + toolkit khác (SDL2/Qt):** tự render lại, thêm việc.
 
-- **C) Dùng `vte` (GTK terminal widget) hoặc `libvterm` + SDL2:** tér
-  máquina evaporar na GUI. → Có thể dùng GTK/VTE để render terminal,
-  nhúng vào app. Thư viện VTE của GNOME làm terminal widget, load
-  được terminal info, render UTF-8 OK. Hoặc dùng xterm.js nếu viết
-  app Electron (nhưng SPEC nói không Electron).
+- **C) Tự viết terminal emulator:** rất tốn công, bug-ridden.
 
-**AQ5a:** Nếu (C): cần link `libvte-2.91-dev` (GTK3) hoặc `vte-2.91` (GTK4).
-Đây là dependency lớn nhất nhưng đáng giá nếu muốn GUI thật.
+**AQ5a:** Confirm dùng **VTE + GTK3** (link `libvte-2.91-dev`). Đây là
+dependency lớn nhất nhưng đáng giá — GUI là cốt lõi V1.
+
+> Lưu ý rev-a: phương án (A) CLI thuần đã bị loại — GUI không phải phần phụ.
 
 ---
 
@@ -472,11 +664,11 @@ remin/
 
 | # | Lĩnh vực | Câu hỏi ngắn | Đề xuất |
 |---|---------|-------------|---------|
-| AQ1 | Control flow | Remin wrap shell hay chỉ generate script? | (A) wrap shell |
-| AQ2 | Scrollback | Capture scrollback thật hay chỉ history? | (C) history v1 |
+| AQ1 | Control flow | Remin render + quản lý PTY trực tiếp hay delegate tmux? | (A) PTY trực tiếp |
+| AQ2 | Scrollback | VTE buffer "thật" hay chỉ history? | (A) VTE buffer thật (rev-a) |
 | AQ3 | Snapshot format | JSON / Binary / Hybrid? | (A) JSON |
 | AQ4 | File lock | Lock, atomic, hay bỏ qua? | (B) atomic rename |
-| AQ5 | GUI v1 | CLI thuần hay terminal emulator? | (A) CLI thuần |
+| AQ5 | GUI V1 | Kỹ thuật render terminal emulator? | (A) VTE + GTK3 (rev-a) |
 | AQ6 | Linking | Static, dynamic, hay hybrid? | (C) mostly static |
 | AQ7 | License | MIT confirm? | MIT |
 | AQ8 | Terminal type | Bất kỳ hay giới hạn? | (C) detect + fallback |
