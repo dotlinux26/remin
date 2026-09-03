@@ -185,4 +185,321 @@ history (B), còn scrollback đầy đủ để v2 không?**
 
 ---
 
+## 8. Bảng tóm tắt những câu hỏi then chốt (AIQ — Asking Important Questions)
+
+Trước khi bắt tay vào code, chủ dự án **phải** trả lời những câu hỏi cốt
+lõi dưới đây. Những câu này quyết định toàn bộ kiến trúc v1, không chỉ
+"thư viện" mà là **cách tiếp cận**.
+
+---
+
+### AQ1 — Mô hình Control flow
+
+**Câu hỏi:** Khi `remin restore` chạy, nó phải làm gì?
+
+- **A)** `remin` spawn shell mới trong terminal hiện tại, tự nó đóng vai trò
+  "wrapper" — tức `remin` là PID 1 của session, sau đó fork ra shell thật.
+  → `remin` phải biết quản lý PTY (phức tạp, nhưng kiểm soát được layout).
+
+- **B)** `remin restore` chỉ tạo file script `.remin-session`, rồi gọi
+  `exec $SHELL` với các env vars đã restore. User tự nhìn script để biết
+  cần làm gì. → Đơn giản, nhưng chỉ "gợi ý", không restore thật.
+
+- **C)** `remin restore` viết ra tmux socket script / screen config rồi
+  launch `tmux new-session` từ state đã lưu. → tận dụng tmux, nhưng
+  `"remin ≠ tmux"` (SPEC nói sẽ khác tmux, nhưng cách này rất thực dụng).
+
+**AQ1a:**
+- Nếu (A): cần fork PTY, quản lý terminal emulator internally → cần xác
+  nhận dùng `forkpty()` hay viết abstraction layer.
+- Nếu (C): chỉ cần generate tmux config → v1 cực nhanh, nhưng phụ thuộc
+  tmux.
+
+---
+
+### AQ2 — Scrollback capture: "thật" hay "giả"?
+
+**Câu hỏi:** Khi `remin save` chạy, scrollback (nội dung text đã hiển thị
+trên terminal) được capture như thế nào?
+
+- **A) Thật:** Remin wrap mỗi terminal, khi user chạy `remin save`, nó
+  đọc buffer trong pty master fd → chính xác những gì user thấy.
+
+- **B) Giả:** Remin chỉ ghi lại `HISTFILE` (command history) + `cwd` +
+  `env`. Scrollback "visual" mất, nhưng command history đủ để gợi nhớ.
+
+- **C) Hybrid:** v1 dùng (B), v2 mới làm (A).
+
+**AQ2a:** Nếu (A) → cần ANSI escape sequence parser. Thư viện `libvterm`
+làm tốt việc này nhưng là C lib (có thể link). Viết tay = hàng nghìn
+dòng code + bug-filled.
+
+**AQ2b:** Nếu command history (B): làm sao đọc `HISTFILE` nếu shell đang
+chạy? (Cần hook hoặc đọc từ disk.)
+
+---
+
+### AQ3 — Snapshot format: JSON hay Binary?
+
+**Câu hỏi:** Khi lưu state workspace ra disk, dùng JSON hay binary?
+
+- **A) JSON:** human-readable, dễ debug, dùng nlohmann/json. Cute nhưng
+  scrollback lớn (hàng triệu byte) sẽ tạo file JSON khổng lồ.
+
+- **B) Binary:** compact, nhanh, cần custom serialization (có thể dùng
+  flatbuffers / capnp hoặc tự viết struct packing).
+
+- **C) Hybrid:** metadata = JSON, scrollback binary (file riêng).
+
+**AQ3a:**
+- Nếu (A): chấp nhận file có thể lớn, giảm bug serialization.
+- Nếu (B): cần format binary rõ ràng (version field, endian约定).
+- Nếu (C): phức tạp nhất nhưng tối ưu nhất.
+
+---
+
+### AQ4 — Lock & concurrent access
+
+**Câu hỏi:** Nếu user mở 2 terminal cùng lúc, cả 2 đều đang `remin save`
+thì sao?
+
+- **A) File lock:** dùng `flock()` trên lock file, tránh ghi đè.
+- **B) Copy-on-write:** mỗi snapshot ghi ra file mới (UUID), index chỉ
+  update atomic → không cần lock.
+- **C) Không xử lý ở v1:** user tự biết không chạy cùng lúc.
+
+**AQ4a:** Nếu (B) thì cần cam kết file system hỗ trợ atomic rename
+(ext4, xfs OK, tmpfs thì OK).
+
+---
+
+### AQ5 — Terminal emulator trong GUI mode
+
+**Câu hỏi:** v1 có cần terminal emulator GUI hay chỉ cần CLI?
+
+- **A) CLI thuần:** v1 chỉ CLI, `remin save/restore` chạy trên terminal
+  hiện có. → Đơn giản nhất.
+
+- **B) Terminal emulator đầu tiên:** v1 viết terminal emulator tối giản
+  (1 tab, 1 pane), sau đó v2 thêm workspace logic. → Phức tạp nhưng
+  có thể demo.
+
+- **C) Dùng `vte` (GTK terminal widget) hoặc `libvterm` + SDL2:** tér
+  máquina evaporar na GUI. → Có thể dùng GTK/VTE để render terminal,
+  nhúng vào app. Thư viện VTE của GNOME làm terminal widget, load
+  được terminal info, render UTF-8 OK. Hoặc dùng xterm.js nếu viết
+  app Electron (nhưng SPEC nói không Electron).
+
+**AQ5a:** Nếu (C): cần link `libvte-2.91-dev` (GTK3) hoặc `vte-2.91` (GTK4).
+Đây là dependency lớn nhất nhưng đáng giá nếu muốn GUI thật.
+
+---
+
+### AQ6 — Static hay dynamic linking?
+
+**Câu hỏi:** Build binary v1 link static hay dynamic?
+
+- **A) Static binary:** `g++ -static` → binary lớn (5-10MB) nhưng
+  portable, copy sang máy khác chạy được ngay.
+
+- **B) Dynamic:** binary nhỏ (500KB), nhưng cần libstdc++ / glibc
+  trên máy đích.
+
+- **C) Mostly static:** link static C++ runtime, dynamic libc → portable
+  hơn nhưng vẫn nhỏ hơn static hoàn toàn.
+
+**AQ6a:** Nếu anh muốn distribute binary compact, (C) hay (B). Nếu
+muốn "copy 1 file chạy được everywhere", (A).
+
+---
+
+### AQ7 — MIT hay BSD hay GPL?
+
+**Câu hỏi:** SPEC nói MIT. Confirm chưa?
+
+MIT:
+- ✅ Cho phép binary closed-source
+- ✅ Rất tự do, nhiều dự án OSS dùng
+- ⚠️ Không bắt buộc contribute-back (nếu anh muốn)
+
+GPL v3:
+- ⚠️ Nếu distribute binary phải share source
+- ✅ Bảo vệagainst proprietary forks
+- ✅ Phổ biến trong Linux ecosystem
+
+**AQ7a:** Nếu anh muốn Remin separate binary MIT + core library GPL
+(ngớ ngẩn cho dự án nhỏ), hoặc MIT cho mọi thứ (đơn giản nhất).
+
+---
+
+### AQ8 — Terminals allowed: filesystem restrictions?
+
+**Câu hỏi:** Remin khi `restore` chạy ở đâu? Có giới hạn terminal
+nào không?
+
+- **A) Bất kỳ terminal nào** (xterm, alacritty, kitty, gnome-terminal...)
+  nhưng cần stdout == xterm-compatible.
+
+- **B) Chỉ trong terminal đang chạy:** `remin save` ghi lại terminal
+  hiện tại, `remin restore` phải chạy ở cùng terminal type.
+
+- **C) Bất kỳ, với fallback:** detect terminal type, nếu không detected
+  thì dùng xterm defaults.
+
+**AQ8a:** Nếu (A) hoặc (C): cần detect `$TERM` (xterm-256color, linux...).
+
+---
+
+### AQ9 — Multi-user hay single-user?
+
+**Câu hỏi:** Remin có cần support nhiều user trên cùng máy không?
+
+- **A) Single-user:** workspace chỉ lưu ở `$HOME/.local/share/remin/`.
+  Đơn giản.
+
+- **B) Multi-user:** workspace ở `/var/lib/remin/<uid>/` hoặc dùng XDG
+  data dir. Phức tạp hơn nhưng đúng cách Linux.
+
+**AQ9a:** Nếu (A): chỉ cần `getenv("HOME")`. Nếu (B): cần `getuid()` +
+XDG spec.
+
+---
+
+## 9. Danh sách system calls & Linux APIs quan trọng
+
+Những API này **bắt buộc** phải biết khi implement Remin v1:
+
+### PTY & Process
+
+| System call / API | Mục đích | Head file |
+|-------------------|----------|-----------|
+| `posix_openpt()` | Mở PTY master | `<fcntl.h>` |
+| `grantpt()` / `unlockpt()` | Unlock PTY slave | `<stdlib.h>` |
+| `ptsname()` | Lấy tên `/dev/pts/N` | `<stdlib.h>` |
+| `forkpty()` | Fork process trong PTY mới | `<pty.h>` |
+| `waitpid()` | Chờ process con | `<sys/wait.h>` |
+| `execvp()` / `execvpe()` | Launch shell | `<unistd.h>` |
+| `read()` / `write()` trên master fd | I/O tới shell qua PTY | `<unistd.h>` |
+| `kill(pid, signal)` | Gửi signal (SIGHUP khi logout) | `<signal.h>` |
+
+### File system
+
+| System call / API | Mục đích | Head file |
+|-------------------|----------|-----------|
+| `stat()` / `lstat()` | Kiểm tra file tồn tại | `<sys/stat.h>` |
+| `getcwd()` | Lấy CWD hiện tại | `<unistd.h>` |
+| `chdir()` | Đổi CWD | `<unistd.h>` |
+| `opendir()` / `readdir()` | Scan workspace dir | `<dirent.h>` |
+| `mkdir()` (recursive) | Tạo workspace dir structure | `<sys/stat.h>` |
+| `rename()` | Atomic move file | `<stdio.h>` |
+
+### Terminal info
+
+| System call / API | Mục đích | Head file |
+|-------------------|----------|-----------|
+| `isatty()` | Kiểm tra fd có phải terminal | `<unistd.h>` |
+| `ioctl(fd, TIOCGWINSZ, &ws)` | Lấy kích thước terminal | `<sys/ioctl.h>` |
+| `tgetent()` / ` terminfo` | Lấy term info (width, keys) | `<curses.h>` |
+| `$TERM` env | Detect terminal type | getenv |
+
+### Process / Environment
+
+| System call / API | Mục đích | Head file |
+|-------------------|----------|-----------|
+| `getenv()` / `setenv()` | Đọc/ghi env vars | `<stdlib.h>` |
+| `getuid()` / `geteuid()` | UID hiện tại | `<unistd.h>` |
+| `getpwuid()` | Lấy user info (home dir) | `<pwd.h>` |
+| `gethostname()` | Lấy hostname (dùng export file) | `<unistd.h>` |
+
+### IO Multiplexing (PTY I/O loop)
+
+| System call / API | Mục đích | Head file |
+|-------------------|----------|-----------|
+| `poll()` | Multiplex read từ nhiều fd | `<poll.h>` |
+| `select()` | Phiên bản cũ hơn poll | `<sys/select.h>` |
+| `epoll` | Linux-native, nhanh nhất | `<sys/epoll.h>` |
+
+---
+
+## 10. Câu hỏi về kiến trúc code
+
+### ARCH1 — Single-binary hay multi-binary?
+
+- **A) Single binary `remin`:** mọi lệnh (`save`, `restore`, `list`...)
+  là subcommands của cùng 1 binary. → Đơn giản, install 1 file.
+
+- **B) Multi-binary:** `remin-core` (library), `remin` (CLI),
+  `remin-daemon` (background autosave), `remin-gui` → modular hơn
+  nhưng phức tạp hơn cho packaging.
+
+**Đề xuất:** (A) cho v1.
+
+### ARCH2 — Có daemon không?
+
+- **A) Không daemon:** user tự chạy `remin save` khi muốn. → Đơn giản.
+
+- **B) Daemon `remin daemon`:** chạy background, tự autosave mỗi N
+  phút. → Tiện hơn nhưng thêm complexity (IPC, signal handling,
+  service file systemd).
+
+**Đề xuất:** (A) cho v1, (B) cho v2.
+
+### ARCH3 — CMake structure?
+
+```
+remin/
+├── CMakeLists.txt          (root)
+├── src/
+│   ├── core/CMakeLists.txt
+│   ├── terminal/CMakeLists.txt
+│   ├── ui/cli/CMakeLists.txt
+│   └── main.cpp
+├── tests/
+│   └── CMakeLists.txt
+└── extern/                 (libs nếu dùng: nlohmann, CLI11...)
+```
+
+**ARCH3a:**
+- Dùng `FetchContent` để pull dependencies (nếu có)?
+- Hay `git submodule`?
+- Hay `pkg-config` / `find_package`?
+
+**Đề xuất:** `FetchContent` nếu header-only, `find_package` nếu system lib.
+
+---
+
+## 11. Bảng tóm tắt quyết định cần a xác nhận
+
+| # | Lĩnh vực | Câu hỏi ngắn | Đề xuất |
+|---|---------|-------------|---------|
+| AQ1 | Control flow | Remin wrap shell hay chỉ generate script? | (A) wrap shell |
+| AQ2 | Scrollback | Capture scrollback thật hay chỉ history? | (C) history v1 |
+| AQ3 | Snapshot format | JSON / Binary / Hybrid? | (A) JSON |
+| AQ4 | File lock | Lock, atomic, hay bỏ qua? | (B) atomic rename |
+| AQ5 | GUI v1 | CLI thuần hay terminal emulator? | (A) CLI thuần |
+| AQ6 | Linking | Static, dynamic, hay hybrid? | (C) mostly static |
+| AQ7 | License | MIT confirm? | MIT |
+| AQ8 | Terminal type | Bất kỳ hay giới hạn? | (C) detect + fallback |
+| AQ9 | Multi-user | Single hay multi? | (A) single-user |
+| ARCH1 | Binary | Single hay multi binary? | (A) single binary |
+| ARCH2 | Daemon | Có daemon autosave? | (A) không daemon v1 |
+| ARCH3 | Deps mgmt | FetchContent / submodule / pkg-config? | FetchContent |
+
+---
+
+## 12. Gợi ý workflow cho a khi trả lời
+
+```
+Đọc file này
+    │
+    ├── Trả lời AQ1-AQ11 (có thể viết ngay vào file này)
+    │
+    └── Gửi lại cho tôi
+            │
+            └── Tôi sẽ update SPEC.md + implement-note-1.md
+                rồi bắt tay implement Phase 0
+```
+
+---
+
 *File này sẽ được cập nhật sau khi anh trả lời QA. Không viết code cho tới khi chốt.*
