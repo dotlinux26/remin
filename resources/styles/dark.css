@@ -1,0 +1,52 @@
+/* Remin — Dark theme
+ *
+ * Palette derived from logo.svg (do not edit logo.svg):
+ *   gradient: #4f46e5 (indigo) → #6366f1 → #06b6d4 (cyan)
+ *
+ * Semantic variables — no hard-coded colors in C++. Dark on surface.
+ */
+
+:root {
+  --bg:            #0f1220;
+  --surface:       #161a2c;
+  --surface-hover: #1e2440;
+  --border:        #262c4a;
+  --text:          #e6e9f7;
+  --text-muted:    #8b92ad;
+
+  /* Accent from logo indigo → cyan, lightened for dark bg */
+  --accent:        #818cf8;
+  --accent-2:      #22d3ee;
+  --accent-soft:   rgba(129, 140, 248, 0.14);
+
+  --terminal-bg:   #0b0e1a;
+  --terminal-fg:   #cdd6f4;
+  --terminal-accent: #6366f1;
+}
+
+window.remin-window {
+  background-color: var(--bg);
+}
+
+/* Text-only navigation: borders + selection state instead of icons */
+.remin-tab {
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  padding: 6px 12px;
+  background: transparent;
+}
+
+.remin-tab:checked {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.remin-header-label {
+  color: var(--text);
+}
+
+.remin-status {
+  color: var(--text-muted);
+  font-feature-settings: "tnum";
+}
