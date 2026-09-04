@@ -69,10 +69,22 @@ process (the *authority*, since there is no daemon):
 The `Application` (`application.cpp`) owns a `WorkspaceSession` and hands the
 session (controller + core + autosaver) to each `MainWindow`.
 
-## Tab abstraction
+## Tab / Surface abstraction
 
 Every tab type shares a common lifecycle so new kinds (terminal, note, later
-log/diff/search/ssh) can be added without rewriting `MainWindow`:
+browser, C2, BloodHound, Docker/K8s, Git) can be added without rewriting
+`MainWindow`. The long-term abstraction is **Work Surface**:
+
+```text
+Tab
+└── Surface
+      ├── TerminalSurface
+      ├── NoteSurface
+      ├── BrowserSurface
+      └── PluginSurface
+```
+
+Current V1 interface (will evolve into `ISurface`):
 
 ```cpp
 enum class TabKind { Terminal, Note /*, future... */ };
@@ -81,11 +93,26 @@ class TabView {
 public:
     virtual ~TabView() = default;
     virtual TabKind kind() const = 0;
-    virtual void activate() = 0;    // grab focus in active editor/terminal
+    virtual const std::string& title() const = 0;
+    virtual void set_title(const std::string&) = 0;
+    virtual void activate() = 0;
     virtual void deactivate() = 0;
-    virtual void focus_search() = 0; // Ctrl+F dispatch target
+    virtual bool focus_search() = 0;
 };
 ```
+
+GUI doesn't know what "C2 tab" is. It only knows:
+
+```text
+Surface
+├── title
+├── icon
+├── state
+├── view
+└── lifecycle
+```
+
+Plugin (or built-in surface) manages everything inside.
 
 `TabKind` is *semantic* state. The tab icon is only its **presentation** — a
 mapper `TabKind → icon-name` (`remin-terminal` / `remin-note`) rendered as a
