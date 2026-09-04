@@ -73,7 +73,7 @@ MainWindow::MainWindow(SessionController* controller,
     // Click outside find bar to close it
     auto click_ctrl = Gtk::GestureClick::create();
     click_ctrl->set_button(0); // Any button
-click_ctrl->signal_pressed().connect([this, click_ctrl](int, double x, double y) {
+click_ctrl->signal_released().connect([this, click_ctrl](int, double x, double y) {
         if (!find_bar_ || !find_bar_->get_visible()) return;
         // Find the widget at the click coordinates
         auto* root = get_child();
@@ -95,7 +95,7 @@ click_ctrl->signal_pressed().connect([this, click_ctrl](int, double x, double y)
     // Click outside terminal/note area to clear focus (allows global shortcuts like Ctrl+F/H to work)
     auto focus_click_ctrl = Gtk::GestureClick::create();
     focus_click_ctrl->set_button(0);
-    focus_click_ctrl->signal_pressed().connect([this](int, double x, double y) {
+    focus_click_ctrl->signal_released().connect([this](int, double x, double y) {
         // Find the widget at the click coordinates
         auto* root = get_child();
         if (!root) return;
