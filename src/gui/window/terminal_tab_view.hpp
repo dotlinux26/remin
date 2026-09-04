@@ -73,6 +73,13 @@ public:
         on_history_ = std::move(cb);
     }
 
+    // Apply colors to all terminal panes in this tab
+    void set_all_pane_colors(const Gdk::RGBA& fg, const Gdk::RGBA& bg) {
+        for (auto& [id, pane] : panes_) {
+            pane->set_colors(fg, bg);
+        }
+    }
+
     // Callback to request closing the entire tab (when last pane is closed)
     void set_close_tab_request_callback(std::function<void()> cb) {
         on_close_tab_request_ = std::move(cb);
@@ -84,6 +91,7 @@ private:
     Gtk::Widget& build_node(const remin::core::PaneTree& node);
     void activate_pane(const remin::core::PaneId& pane);
     void show_pane_menu(Gtk::Widget& pane_widget, double x, double y);
+    void load_and_apply_saved_colors();
 
     SessionController* controller_;
     MainWindow* main_window_;

@@ -137,6 +137,7 @@ private:
     Gtk::Button* replace_btn_{nullptr};
     Gtk::Button* replace_all_btn_{nullptr};
     Gtk::Button* find_close_{nullptr};
+    Gtk::Label* find_match_label_{nullptr};
     Gtk::Image* find_icon_{nullptr};
     Gtk::Image* replace_icon_{nullptr};
 

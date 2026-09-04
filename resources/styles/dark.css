@@ -34,45 +34,81 @@ list > row {
 /* Dialogs (MessageDialog, Dialog, etc.) — force LIGHT theme appearance
    because they always have white backgrounds regardless of app theme.
    Override text/entry/button colors to dark-on-white. */
-/* Dialog: dark theme - dark backgrounds, light text */
-dialog {
-  background-color: @bg;
-  color: @text;
+/* All dialogs: force light theme appearance (white bg, black text) even in dark mode - high specificity */
+dialog,
+message-dialog,
+file-chooser-dialog,
+about-dialog,
+font-chooser-dialog,
+color-chooser-dialog,
+app-chooser-dialog,
+print-dialog,
+page-setup-dialog,
+assistant-dialog,
+preferences-dialog {
+  background-color: #ffffff;
+  color: #1f2437;
 }
-dialog > * {
-  background-color: @bg;
-  color: @text;
+dialog > *,
+message-dialog > *,
+file-chooser-dialog > *,
+about-dialog > * {
+  background-color: #ffffff;
+  color: #1f2437;
 }
-dialog button {
-  background-color: @surface;
+dialog button,
+message-dialog button,
+file-chooser-dialog button,
+about-dialog button {
+  background-color: transparent;
   border: none;
   border-radius: 2px;
   padding: 6px 16px;
   margin: 0 4px;
-  color: @text;
+  color: #1f2437;
 }
-dialog button:hover {
-  background-color: @surface_hover;
+dialog button:hover,
+message-dialog button:hover,
+file-chooser-dialog button:hover {
+  background-color: #eceefb;
 }
 dialog button:active,
-dialog button:checked {
-  background-color: @accent_soft;
+dialog button:checked,
+message-dialog button:active,
+message-dialog button:checked {
+  background-color: rgba(79, 70, 229, 0.10);
 }
-dialog button:focus {
+dialog button:focus,
+message-dialog button:focus,
+file-chooser-dialog button:focus {
   outline: none;
   box-shadow: none;
 }
-dialog entry {
-  background-color: @surface;
-  border: 1px solid @border;
-  color: @text;
+dialog entry,
+message-dialog entry,
+file-chooser-dialog entry {
+  background-color: #ffffff;
+  border: 1px solid #e2e6f2;
+  color: #1f2437;
 }
-dialog entry:focus {
-  border-color: @accent;
+dialog entry:focus,
+message-dialog entry:focus,
+file-chooser-dialog entry:focus {
+  border-color: #4f46e5;
 }
 dialog label,
-dialog textview {
-  color: @text;
+dialog textview,
+message-dialog label,
+message-dialog textview,
+file-chooser-dialog label,
+file-chooser-dialog textview {
+  color: #1f2437;
+}
+/* Catch-all for any text elements inside dialogs */
+dialog *,
+message-dialog *,
+file-chooser-dialog * {
+  color: #1f2437;
 }
 
 /* Notebook tabs (settings dialog) — single focus ring (accent blue) */
@@ -173,6 +209,11 @@ window.remin-window {
 .remin-find-bar image,
 popover.menu image {
   color: @text;
+}
+
+/* Sidebar toggle icon: force black (original color) in both themes */
+.remin-sidebar-toggle image {
+  color: #1f2437;
 }
 
 /* Tab bar: clean bar with a single divider below, breathing room above.
@@ -518,21 +559,21 @@ button.remin-tool-btn image {
   background-color: transparent;
   background-image: none;
   box-shadow: none;
-  color: @text;
+  color: #1f2437;
   font-size: 13px;
 }
 
 .remin-context-menu-item:hover {
-  background-color: @accent_soft;
-  color: @accent;
+  background-color: #eceefb;
+  color: #4f46e5;
 }
 
 .remin-context-menu-item:disabled {
-  color: @text_muted;
+  color: #9ca3b8;
 }
 
 .remin-context-menu-separator {
-  background-color: @border;
+  background-color: #e2e6f2;
   min-height: 1px;
   margin: 4px 8px;
   border: none;
@@ -548,6 +589,7 @@ button.remin-tool-btn image {
 .remin-sidebar {
   background-color: @surface;
   border-right: none;  /* Remove right border line */
+  margin-left: 8px;  /* Match header/toolbar left margin */
 }
 
 .remin-sidebar-title {
@@ -648,11 +690,7 @@ button.remin-find-btn image {
   font-weight: 500;
 }
 
-/* Center the back button in its container */
-.remin-dir-back {
-  margin-left: auto;
-  margin-right: auto;
-}
+/* Center the back button in its container - use halign on widget instead */
 
 .remin-directory-ext {
   font-size: 11px;

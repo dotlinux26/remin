@@ -98,6 +98,10 @@ public:
     [[nodiscard]] std::optional<ColorProfile> color_profile() const;
     void set_color_profile(const ColorProfile& profile);
 
+    // Terminal colors (global fg/bg for all terminal panes)
+    [[nodiscard]] std::optional<ColorProfile> terminal_colors() const;
+    void set_terminal_colors(const std::string& fg, const std::string& bg);
+
     // -- Command history persistence --
     void add_command_history(const std::string& command);
     [[nodiscard]] std::vector<std::string> get_command_history() const;

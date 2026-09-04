@@ -68,62 +68,20 @@ void SettingsDialog::setup_terminal_page() {
     title->set_halign(Gtk::Align::START);
     page->append(*title);
 
-    auto* colors_frame = Gtk::make_managed<Gtk::Frame>("Color Profile");
-    colors_frame->set_hexpand(true);
-    auto* colors_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 8);
-    colors_box->set_margin(12);
-    colors_frame->set_child(*colors_box);
+    // Color Profile is now managed globally via the terminal's header menu.
+    // Changes there apply to ALL terminal panes across ALL tabs.
+    auto* info_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 8);
+    info_box->set_margin(12);
+    auto* info_label = Gtk::make_managed<Gtk::Label>(
+        "Terminal colors are managed globally. Open any terminal tab and use "
+        "the header menu → Color Profile to change colors for ALL terminal panes "
+        "across all tabs.");
+    info_label->set_wrap(true);
+    info_label->set_halign(Gtk::Align::START);
+    info_label->add_css_class("dim-label");
+    info_box->append(*info_label);
+    page->append(*info_box);
 
-    auto* fg_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
-    fg_box->set_halign(Gtk::Align::START);
-    auto* fg_label = Gtk::make_managed<Gtk::Label>("Foreground");
-    fg_label->set_valign(Gtk::Align::CENTER);
-    fg_label->set_size_request(120, -1);
-    fg_color_btn_ = Gtk::make_managed<Gtk::ColorButton>();
-    fg_color_btn_->set_use_alpha(false);
-    fg_color_btn_->signal_color_set().connect(
-        sigc::mem_fun(*this, &SettingsDialog::on_color_foreground_changed));
-    fg_box->append(*fg_label);
-    fg_box->append(*fg_color_btn_);
-    colors_box->append(*fg_box);
-
-    auto* bg_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
-    bg_box->set_halign(Gtk::Align::START);
-    auto* bg_label = Gtk::make_managed<Gtk::Label>("Background");
-    bg_label->set_valign(Gtk::Align::CENTER);
-    bg_label->set_size_request(120, -1);
-    bg_color_btn_ = Gtk::make_managed<Gtk::ColorButton>();
-    bg_color_btn_->set_use_alpha(false);
-    bg_color_btn_->signal_color_set().connect(
-        sigc::mem_fun(*this, &SettingsDialog::on_color_background_changed));
-    bg_box->append(*bg_label);
-    bg_box->append(*bg_color_btn_);
-    colors_box->append(*bg_box);
-
-    auto* save_colors = Gtk::make_managed<Gtk::Button>("Save Color Profile");
-    save_colors->set_halign(Gtk::Align::START);
-    save_colors->signal_clicked().connect(
-        sigc::mem_fun(*this, &SettingsDialog::save_color_profile));
-    colors_box->append(*save_colors);
-
-    // Load saved color profile
-    if (controller_) {
-        auto profile = controller_->color_profile();
-        if (profile) {
-            if (!profile->foreground.empty()) {
-                Gdk::RGBA fg;
-                gdk_rgba_parse(fg.gobj(), profile->foreground.c_str());
-                fg_color_btn_->set_rgba(fg);
-            }
-            if (!profile->background.empty()) {
-                Gdk::RGBA bg;
-                gdk_rgba_parse(bg.gobj(), profile->background.c_str());
-                bg_color_btn_->set_rgba(bg);
-            }
-        }
-    }
-
-    page->append(*colors_frame);
     notebook_->append_page(*page, "Terminal");
 }
 

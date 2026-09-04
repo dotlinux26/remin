@@ -25,7 +25,7 @@ void ContextMenu::show(Gtk::Widget& anchor, double x, double y,
         auto* btn = Gtk::make_managed<Gtk::Button>(item.label);
         btn->add_css_class("remin-context-menu-item");
         btn->set_sensitive(item.sensitive);
-        btn->set_halign(Gtk::Align::START);
+        btn->set_halign(Gtk::Align::FILL);
         btn->set_hexpand(true);
         auto cb = item.on_click;
         btn->signal_clicked().connect([cb, popover]() {

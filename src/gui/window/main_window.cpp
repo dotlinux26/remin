@@ -75,10 +75,12 @@ MainWindow::MainWindow(SessionController* controller,
     click_ctrl->set_button(0); // Any button
 click_ctrl->signal_pressed().connect([this, click_ctrl](int, double x, double y) {
         if (!find_bar_ || !find_bar_->get_visible()) return;
-        // Get the widget that was actually clicked (event target)
-        auto* event_widget = click_ctrl->get_widget();
+        // Find the widget at the click coordinates
+        auto* root = get_child();
+        if (!root) return;
+        auto* target = root->pick(x, y, Gtk::PickFlags::DEFAULT);
         // Check if the clicked widget or its ancestors include find_bar_
-        for (auto* w = event_widget; w; w = w->get_parent()) {
+        for (auto* w = target; w; w = w->get_parent()) {
             if (w == find_bar_) return; // Click is inside find_bar
         }
         // Also check coordinates as fallback
@@ -94,19 +96,28 @@ click_ctrl->signal_pressed().connect([this, click_ctrl](int, double x, double y)
     auto focus_click_ctrl = Gtk::GestureClick::create();
     focus_click_ctrl->set_button(0);
     focus_click_ctrl->signal_pressed().connect([this](int, double x, double y) {
-        // Check if click is on a non-terminal/note widget (header, toolbar, tab bar, sidebar, status bar)
+        // Find the widget at the click coordinates
+        auto* root = get_child();
+        if (!root) return;
+        auto* target = root->pick(x, y, Gtk::PickFlags::DEFAULT);
+        if (!target) return;
+
+        // Ignore clicks inside find_bar_ (buttons, entries, etc.)
+        for (auto* w = target; w; w = w->get_parent()) {
+            if (w == find_bar_) return;
+        }
+
+        // Check if focus is in a terminal pane or note editor
         auto* focus_widget = get_focus();
         if (!focus_widget) return;
-        
-        // Walk up to find if focus is in a terminal pane or note editor
+
         bool focus_in_editable = false;
         for (auto* w = focus_widget; w; w = w->get_parent()) {
-            if (w == find_bar_) { focus_in_editable = true; break; }
             if (dynamic_cast<TerminalTabView*>(w)) { focus_in_editable = true; break; }
             if (dynamic_cast<NoteTabView*>(w)) { focus_in_editable = true; break; }
         }
         if (!focus_in_editable) return;
-        
+
         // Check if click is outside the focused editable widget
         auto allocation = focus_widget->get_allocation();
         if (x < allocation.get_x() || x > allocation.get_x() + allocation.get_width() ||
@@ -177,6 +188,7 @@ void MainWindow::setup_header() {
     sidebar_toggle_btn_ = Gtk::make_managed<Gtk::Button>();
     sidebar_toggle_btn_->set_has_frame(false);
     sidebar_toggle_btn_->add_css_class("remin-toolbar-btn");
+    sidebar_toggle_btn_->add_css_class("remin-sidebar-toggle");
     sidebar_toggle_btn_->set_icon_name("sidebar-show-symbolic");
     sidebar_toggle_btn_->set_tooltip_text("Toggle Sidebar (Ctrl+P)");
     sidebar_toggle_btn_->signal_clicked().connect(
@@ -473,6 +485,8 @@ void MainWindow::setup_content_stack() {
     content_stack_->set_hexpand(true);
     content_stack_->set_vexpand(true);
     content_stack_->set_transition_type(Gtk::StackTransitionType::SLIDE_LEFT_RIGHT);
+    // Right margin for workspace content (match sidebar left margin)
+    content_stack_->set_margin_end(8);
 
     // Main paned: [sidebar | content_stack]
     main_paned_ = Gtk::make_managed<Gtk::Paned>();
@@ -739,6 +753,14 @@ void MainWindow::setup_find_bar() {
     find_bar_->append(*find_entry_);
     find_bar_->append(*replace_icon);
     find_bar_->append(*replace_entry_);
+
+    // Match count label
+    find_match_label_ = Gtk::make_managed<Gtk::Label>("");
+    find_match_label_->add_css_class("remin-find-match-label");
+    find_match_label_->set_visible(false);
+    find_match_label_->set_margin_start(8);
+    find_bar_->append(*find_match_label_);
+
     find_bar_->append(*find_prev_);
     find_bar_->append(*find_next_);
     find_bar_->append(*replace_btn_);
@@ -1458,7 +1480,6 @@ void MainWindow::on_terminal_color_profile() {
         tabs_[active_tab_]->kind() != TabKind::Terminal) {
         return;
     }
-    auto* t = static_cast<TerminalTabView*>(tabs_[active_tab_].get());
 
     auto dialog = Gtk::make_managed<Gtk::Dialog>("Terminal Color Profile", *this, true);
     dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
@@ -1484,11 +1505,20 @@ void MainWindow::on_terminal_color_profile() {
     dialog->get_content_area()->append(*box);
     dialog->present();
 
-    dialog->signal_response().connect([this, t, dialog, fg_btn, bg_btn](int response) {
+    dialog->signal_response().connect([this, dialog, fg_btn, bg_btn](int response) {
         if (response == Gtk::ResponseType::OK) {
-            auto* pane = t->focused_pane();
-            if (pane) {
-                pane->set_colors(fg_btn->get_rgba(), bg_btn->get_rgba());
+            Gdk::RGBA fg = fg_btn->get_rgba();
+            Gdk::RGBA bg = bg_btn->get_rgba();
+            // Apply to ALL terminal panes across ALL tabs
+            for (auto& tab_ptr : tabs_) {
+                if (tab_ptr->kind() == TabKind::Terminal) {
+                    auto* term_tab = static_cast<TerminalTabView*>(tab_ptr.get());
+                    term_tab->set_all_pane_colors(fg, bg);
+                }
+            }
+            // Save to session controller for persistence
+            if (controller_) {
+                controller_->set_terminal_colors(fg.to_string(), bg.to_string());
             }
         }
         dialog->close();

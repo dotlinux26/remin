@@ -150,6 +150,7 @@ void NoteTabView::save_as() {
     dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
     dialog->add_button("Save", Gtk::ResponseType::OK);
     dialog->set_modal(true);
+    dialog->set_current_folder(Gio::File::create_for_path(Glib::get_home_dir()));
     dialog->set_current_name((title_ == "note" ? "note" : title_) + ".md");
     dialog->signal_response().connect([this, dialog](int response) {
         if (response == Gtk::ResponseType::OK) {

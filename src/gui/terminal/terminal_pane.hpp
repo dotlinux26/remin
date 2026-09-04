@@ -42,6 +42,8 @@ public:
     void set_search_text(const std::string& text);
     bool search_next();
     bool search_previous();
+    int get_match_count() const;
+    bool has_match() const;
     void clear_search();
 
     // -- Color profile (foreground / background) --

@@ -69,6 +69,8 @@ TerminalTabView::TerminalTabView(SessionController* controller,
 
     // Wire command history from this tab to the controller
     rebuild();
+    // Apply saved terminal colors to all panes
+    load_and_apply_saved_colors();
 }
 
 TerminalTabView::~TerminalTabView() = default;
@@ -103,6 +105,21 @@ void TerminalTabView::add_history(const std::string& command) {
     if (controller_) controller_->add_command_history(command);
     // Notify MainWindow's global sidebar
     if (on_history_) on_history_(command);
+}
+
+// Load and apply saved terminal colors to all panes in this tab
+void TerminalTabView::load_and_apply_saved_colors() {
+    if (!controller_) return;
+    auto colors = controller_->terminal_colors();
+    if (!colors) return;
+    
+    Gdk::RGBA fg, bg;
+    gdk_rgba_parse(fg.gobj(), colors->foreground.c_str());
+    gdk_rgba_parse(bg.gobj(), colors->background.c_str());
+    
+    for (auto& [id, pane] : panes_) {
+        pane->set_colors(fg, bg);
+    }
 }
 
 void TerminalTabView::show_pane_menu(Gtk::Widget& pane_widget, double x, double y) {
@@ -166,6 +183,17 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
     }
     raw->set_command_callback([this](std::string cmd) { add_history(std::move(cmd)); });
     panes_.emplace(new_pane.str(), std::move(pane));
+
+    // Apply saved terminal colors to the new pane immediately
+    if (controller_) {
+        auto colors = controller_->terminal_colors();
+        if (colors) {
+            Gdk::RGBA fg, bg;
+            gdk_rgba_parse(fg.gobj(), colors->foreground.c_str());
+            gdk_rgba_parse(bg.gobj(), colors->background.c_str());
+            raw->set_colors(fg, bg);
+        }
+    }
 
     // The split takes focus on the newly-created pane.
     active_pane_ = new_pane;

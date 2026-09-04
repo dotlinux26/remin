@@ -453,21 +453,21 @@ notebook > header > tabs > tab:checked {
   background-color: transparent;
   background-image: none;
   box-shadow: none;
-  color: @text;
+  color: #1f2437;
   font-size: 13px;
 }
 
 .remin-context-menu-item:hover {
-  background-color: @accent_soft;
-  color: @accent;
+  background-color: #eceefb;
+  color: #4f46e5;
 }
 
 .remin-context-menu-item:disabled {
-  color: @text_muted;
+  color: #9ca3b8;
 }
 
 .remin-context-menu-separator {
-  background-color: @border;
+  background-color: #e2e6f2;
   min-height: 1px;
   margin: 4px 8px;
   border: none;
@@ -483,6 +483,7 @@ notebook > header > tabs > tab:checked {
 .remin-sidebar {
   background-color: @surface;
   border-right: none;  /* Remove right border line */
+  margin-left: 8px;  /* Match header/toolbar left margin */
 }
 
 .remin-sidebar-title {
@@ -622,31 +623,71 @@ button.remin-find-btn image {
   outline: none;
 }
 
-/* Dialog buttons: 2px radius, gap, no black borders */
+/* All dialogs: consistent light theme appearance */
+dialog,
+dialog > * {
+  background-color: #ffffff;
+  color: #1f2437;
+}
 dialog button {
-  background-color: @surface;
+  background-color: transparent;
   border: none;
   border-radius: 2px;
   padding: 6px 16px;
   margin: 0 4px;
+  color: #1f2437;
 }
 dialog button:hover {
-  background-color: @surface_hover;
+  background-color: #eceefb;
 }
 dialog button:active,
 dialog button:checked {
-  background-color: @accent_soft;
+  background-color: rgba(79, 70, 229, 0.10);
 }
 dialog button:focus {
   outline: none;
   box-shadow: none;
 }
 dialog entry {
-  background-color: @surface;
-  border: 1px solid @border;
+  background-color: #ffffff;
+  border: 1px solid #e2e6f2;
+  color: #1f2437;
 }
 dialog entry:focus {
-  border-color: @accent;
+  border-color: #4f46e5;
+}
+dialog label,
+dialog textview {
+  color: #1f2437;
+}
+
+/* Dialog buttons: 2px radius, gap, no black borders */
+dialog button {
+  background-color: transparent;
+  border: none;
+  border-radius: 2px;
+  padding: 6px 16px;
+  margin: 0 4px;
+  color: #1f2437;
+}
+dialog button:hover {
+  background-color: #eceefb;
+}
+dialog button:active,
+dialog button:checked {
+  background-color: rgba(79, 70, 229, 0.10);
+}
+dialog button:focus {
+  outline: none;
+  box-shadow: none;
+}
+dialog entry {
+  background-color: #ffffff;
+  border: 1px solid #e2e6f2;
+  color: #1f2437;
+}
+dialog entry:focus {
+  border-color: #4f46e5;
 }
 
 /* Notebook tabs (settings dialog) — single focus ring (accent blue) */

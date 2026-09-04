@@ -16,6 +16,8 @@ constexpr const char* kAutoReloadKey = "settings:autoreload";
 constexpr const char* kThemeDarkKey = "settings:theme-dark";
 constexpr const char* kColorProfileFgKey = "settings:color-profile-fg";
 constexpr const char* kColorProfileBgKey = "settings:color-profile-bg";
+constexpr const char* kTerminalFgKey = "settings:terminal-fg";
+constexpr const char* kTerminalBgKey = "settings:terminal-bg";
 // Reserved, prefixed ids in the shared blob store must be mutated safely; the
 // blob interface is keyed by PaneId, so we wrap metadata strings in PaneId.
 remin::core::PaneId meta_id(const std::string& key) {
@@ -218,6 +220,23 @@ void SessionController::set_color_profile(const ColorProfile& profile) {
     if (!storage_) return;
     storage_->store_scrollback(meta_id(kColorProfileFgKey), profile.foreground);
     storage_->store_scrollback(meta_id(kColorProfileBgKey), profile.background);
+}
+
+std::optional<SessionController::ColorProfile> SessionController::terminal_colors() const {
+    if (!storage_) return std::nullopt;
+    const std::string fg = storage_->load_scrollback(meta_id(kTerminalFgKey));
+    const std::string bg = storage_->load_scrollback(meta_id(kTerminalBgKey));
+    if (fg.empty() && bg.empty()) return std::nullopt;
+    ColorProfile profile;
+    profile.foreground = fg;
+    profile.background = bg;
+    return profile;
+}
+
+void SessionController::set_terminal_colors(const std::string& fg, const std::string& bg) {
+    if (!storage_) return;
+    storage_->store_scrollback(meta_id(kTerminalFgKey), fg);
+    storage_->store_scrollback(meta_id(kTerminalBgKey), bg);
 }
 
 void SessionController::add_command_history(const std::string& command) {
