@@ -424,7 +424,7 @@ void MainWindow::setup_tab_bar() {
     tab_bar_->add_css_class("remin-tab-bar");
     tab_bar_->set_margin_top(4);
     tab_bar_->set_margin_bottom(4);
-    tab_bar_->set_margin_start(8);
+    tab_bar_->set_margin_start(0);  // No gap on first tab
     tab_bar_->set_margin_end(8);
     tab_bar_->set_hexpand(false); // Don't let tab bar expand beyond scroller
     tab_scroller_->set_child(*tab_bar_);
@@ -575,7 +575,7 @@ void MainWindow::setup_sidebar() {
 
     auto* directory_tab = Gtk::make_managed<Gtk::Button>("Files");
     directory_tab->add_css_class("remin-sidebar-tab");
-    directory_tab->set_hexpand(true);
+    directory_tab->set_hexpand(false);
     directory_tab->signal_clicked().connect([this]() { set_sidebar_mode("directory"); });
 
     tab_bar->append(*history_tab);
