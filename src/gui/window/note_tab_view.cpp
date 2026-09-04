@@ -63,8 +63,15 @@ void NoteTabView::activate() {
 void NoteTabView::deactivate() {}
 
 bool NoteTabView::focus_search() {
-    if (editor_) editor_->show_find();
+    if (editor_) editor_->show_find(false);
     return true;
+}
+
+void NoteTabView::show_find_replace(bool show_replace) {
+    if (editor_) {
+        editor_->clear_find_replace_entries();
+        editor_->show_find(show_replace);
+    }
 }
 
 void NoteTabView::build_sidebar() {
@@ -296,6 +303,21 @@ void NoteTabView::prompt_reload() {
         dialog->close();
     });
     dialog->present();
+}
+
+void NoteTabView::load_file(const std::filesystem::path& path) {
+    std::ifstream file(path);
+    if (file) {
+        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        editor_->set_text(content);
+        set_title(path.filename().string());
+        // Set the watched path so it can detect changes
+        watched_path_ = path;
+        last_mtime_ = std::filesystem::last_write_time(path);
+        last_size_ = std::filesystem::file_size(path);
+        start_watcher();
+    }
+    update_sidebar();
 }
 
 } // namespace remin::gui

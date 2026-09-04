@@ -35,6 +35,7 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     // GTK reserves horizontal space between the numbers and the edit surface
     // (they never overlap) and scrolls the gutter in sync with the text.
     view_->set_gutter(Gtk::TextWindowType::LEFT, *gutter_);
+    gutter_->set_visible(true); // Ensure gutter is visible
 
     scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
     scroller_->set_hexpand(true);
@@ -63,10 +64,10 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     auto* rlbl = Gtk::make_managed<Gtk::Label>("Replace:");
     replace_entry_ = Gtk::make_managed<Gtk::Entry>();
     replace_entry_->set_hexpand(true);
-    auto* repl = Gtk::make_managed<Gtk::Button>("Replace");
-    repl->signal_clicked().connect(sigc::mem_fun(*this, &NoteEditor::do_replace));
-    auto* alle = Gtk::make_managed<Gtk::Button>("Replace all");
-    alle->signal_clicked().connect(sigc::mem_fun(*this, &NoteEditor::do_replace_all));
+    replace_btn_ = Gtk::make_managed<Gtk::Button>("Replace");
+    replace_btn_->signal_clicked().connect(sigc::mem_fun(*this, &NoteEditor::do_replace));
+    replace_all_btn_ = Gtk::make_managed<Gtk::Button>("Replace all");
+    replace_all_btn_->signal_clicked().connect(sigc::mem_fun(*this, &NoteEditor::do_replace_all));
     auto* close = Gtk::make_managed<Gtk::Button>("✕");
     close->signal_clicked().connect([this]() { find_bar_->set_visible(false); });
 
@@ -76,8 +77,8 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     find_bar_->append(*next);
     find_bar_->append(*rlbl);
     find_bar_->append(*replace_entry_);
-    find_bar_->append(*repl);
-    find_bar_->append(*alle);
+    find_bar_->append(*replace_btn_);
+    find_bar_->append(*replace_all_btn_);
     find_bar_->append(*close);
     find_bar_->set_visible(false);
     append(*find_bar_);
@@ -94,9 +95,17 @@ void NoteEditor::set_text(const std::string& text) {
     update_line_numbers();
 }
 
-void NoteEditor::show_find() {
+void NoteEditor::show_find(bool show_replace) {
     find_bar_->set_visible(true);
+    replace_entry_->set_visible(show_replace);
+    replace_btn_->set_visible(show_replace);
+    replace_all_btn_->set_visible(show_replace);
     find_entry_->grab_focus();
+}
+
+void NoteEditor::clear_find_replace_entries() {
+    find_entry_->set_text("");
+    replace_entry_->set_text("");
 }
 
 void NoteEditor::on_buffer_changed() {

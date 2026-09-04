@@ -5,6 +5,7 @@ add_library(remin_gui STATIC
   window/main_window.cpp
   window/terminal_tab_view.cpp
   window/note_tab_view.cpp
+  window/settings_dialog.cpp
   terminal/terminal_pane.cpp
   note/note_editor.cpp
   note/markdown_preview.cpp

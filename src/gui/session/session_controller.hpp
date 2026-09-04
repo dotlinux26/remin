@@ -80,6 +80,19 @@ public:
     [[nodiscard]] bool auto_reload_enabled() const;
     void set_auto_reload_enabled(bool enabled);
 
+    // -- User preferences (theme, color profile) --
+    // Dark/light theme preference
+    [[nodiscard]] bool theme_dark() const;
+    void set_theme_dark(bool dark);
+
+    // Terminal color profile (fg/bg colors)
+    struct ColorProfile {
+        std::string foreground;
+        std::string background;
+    };
+    [[nodiscard]] std::optional<ColorProfile> color_profile() const;
+    void set_color_profile(const ColorProfile& profile);
+
     // -- Snapshots --
     remin::core::SnapshotId create_snapshot();
     bool restore_snapshot(const remin::core::SnapshotId& snap);

@@ -12,6 +12,9 @@ constexpr const char* kTempPrefix = "remin-note-";
 constexpr const char* kPathPrefix = "note-path:";
 constexpr const char* kAutosaveTempKey = "settings:autosave-temp";
 constexpr const char* kAutoReloadKey = "settings:autoreload";
+constexpr const char* kThemeDarkKey = "settings:theme-dark";
+constexpr const char* kColorProfileFgKey = "settings:color-profile-fg";
+constexpr const char* kColorProfileBgKey = "settings:color-profile-bg";
 // Reserved, prefixed ids in the shared blob store must be mutated safely; the
 // blob interface is keyed by PaneId, so we wrap metadata strings in PaneId.
 remin::core::PaneId meta_id(const std::string& key) {
@@ -173,6 +176,34 @@ bool SessionController::auto_reload_enabled() const {
 void SessionController::set_auto_reload_enabled(bool enabled) {
     if (!storage_) return;
     storage_->store_scrollback(meta_id(kAutoReloadKey), enabled ? "1" : "0");
+}
+
+bool SessionController::theme_dark() const {
+    if (!storage_) return false;
+    const std::string val = storage_->load_scrollback(meta_id(kThemeDarkKey));
+    return val == "1";
+}
+
+void SessionController::set_theme_dark(bool dark) {
+    if (!storage_) return;
+    storage_->store_scrollback(meta_id(kThemeDarkKey), dark ? "1" : "0");
+}
+
+std::optional<SessionController::ColorProfile> SessionController::color_profile() const {
+    if (!storage_) return std::nullopt;
+    const std::string fg = storage_->load_scrollback(meta_id(kColorProfileFgKey));
+    const std::string bg = storage_->load_scrollback(meta_id(kColorProfileBgKey));
+    if (fg.empty() && bg.empty()) return std::nullopt;
+    ColorProfile profile;
+    profile.foreground = fg;
+    profile.background = bg;
+    return profile;
+}
+
+void SessionController::set_color_profile(const ColorProfile& profile) {
+    if (!storage_) return;
+    storage_->store_scrollback(meta_id(kColorProfileFgKey), profile.foreground);
+    storage_->store_scrollback(meta_id(kColorProfileBgKey), profile.background);
 }
 
 } // namespace remin::gui

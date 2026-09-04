@@ -79,7 +79,9 @@ void TerminalPane::set_search_text(const std::string& text) {
     }
     // Escape the literal text so user input is treated as plain text, not regex.
     gchar* escaped = g_regex_escape_string(text.c_str(), -1);
-    VteRegex* re = vte_regex_new_for_search(escaped, -1, 0, nullptr);
+    // Use extra_flags with VTE_REGEX_FLAGS_MULTILINE (bit 1 = 0x2) to satisfy
+    // VTE's runtime check _vte_regex_has_multiline_compile_flag.
+    VteRegex* re = vte_regex_new_for_search_full(escaped, -1, 0, 2, nullptr, nullptr);
     g_free(escaped);
     if (re) {
         vte_terminal_search_set_regex(vte_, re, 0);

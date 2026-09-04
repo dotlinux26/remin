@@ -26,7 +26,10 @@ public:
     void focus_editor() { view_->grab_focus(); }
 
     // Show the find/replace bar and focus its entry (Ctrl+F / Ctrl+H).
-    void show_find();
+    void show_find(bool show_replace = false);
+
+    // Clear find/replace entry texts.
+    void clear_find_replace_entries();
 
     // Ctrl+S explicit-save hook (the session flushes the autosaver).
     void set_on_save(std::function<void()> on_save) { on_save_ = std::move(on_save); }
@@ -37,13 +40,15 @@ public:
 
     void request_save() { if (on_save_) on_save_(); }
 
+    // Public find/replace actions
+    void do_replace();
+    void do_replace_all();
+
 private:
     void on_buffer_changed();
     void update_line_numbers();
     void update_gutter_width();
     void do_find_next(bool backwards = false);
-    void do_replace();
-    void do_replace_all();
     bool on_preview_tick();
 
     std::function<void()> on_change_;
@@ -59,6 +64,8 @@ private:
     Gtk::Box* find_bar_{nullptr};
     Gtk::Entry* find_entry_{nullptr};
     Gtk::Entry* replace_entry_{nullptr};
+    Gtk::Button* replace_btn_{nullptr};
+    Gtk::Button* replace_all_btn_{nullptr};
 
     sigc::connection preview_timer_;
     bool preview_pending_{false};

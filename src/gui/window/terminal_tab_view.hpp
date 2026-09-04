@@ -4,12 +4,14 @@
 #include "gui/terminal/terminal_pane.hpp"
 #include "gui/window/tab_view.hpp"
 
+#include <filesystem>
 #include <gtkmm.h>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace remin::gui {
 
@@ -55,10 +57,18 @@ public:
     void clear_sidebar() override; 
     void add_history(const std::string& command);
 
+    // Switch sidebar mode: History or Directory
+    void set_sidebar_mode(const std::string& mode); // "history" or "directory"
+
     // Host callback invoked by the pane's right-click "Color Profile…" item.
     // MainWindow wires this to its color profile dialog.
     void set_color_request_callback(std::function<void()> cb) {
         on_color_request_ = std::move(cb);
+    }
+
+    // Callback for opening a file in the note editor (from directory panel).
+    void set_open_file_callback(std::function<void(const std::filesystem::path&)> cb) {
+        on_open_file_ = std::move(cb);
     }
 
 private:
@@ -71,6 +81,9 @@ private:
     void build_sidebar();
     void update_sidebar();
     void show_pane_menu(Gtk::Widget& pane_widget);
+    void refresh_directory();
+    bool is_text_file(const std::filesystem::path& path);
+    void open_file_in_editor(const std::filesystem::path& path);
 
     // Apply the current divider ratios to the divider recently dragged.
     SessionController* controller_;
@@ -83,13 +96,18 @@ private:
     std::map<std::string, std::unique_ptr<TerminalPane>> panes_;
     remin::core::PaneId active_pane_;
     std::function<void()> on_color_request_;
+    std::function<void(const std::filesystem::path&)> on_open_file_;
 
-    // Left resizable sidebar (history)
+    // Left resizable sidebar (history/directory)
     Gtk::Paned* root_paned_{nullptr};
     Gtk::Box* tree_host_{nullptr};
+    Gtk::Stack* sidebar_stack_{nullptr};
     Gtk::ScrolledWindow* history_scroller_{nullptr};
     Gtk::Box* history_list_{nullptr};
+    Gtk::ScrolledWindow* directory_scroller_{nullptr};
+    Gtk::Box* directory_list_{nullptr};
     std::vector<std::string> history_;
+    std::filesystem::path current_dir_;
     Gtk::Popover* pane_menu_{nullptr};
 };
 

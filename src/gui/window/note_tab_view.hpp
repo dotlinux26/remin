@@ -46,6 +46,15 @@ public:
     // Set the note's title shown on its tab / window.
     void set_title(const std::string& title) override { title_ = title; }
 
+    // Show find/replace bar, optionally with replace UI visible. Clears entries.
+    void show_find_replace(bool show_replace);
+
+    // Access to the editor for find/replace operations
+    NoteEditor* editor() const { return editor_; }
+
+    // Load a file into this note tab
+    void load_file(const std::filesystem::path& path);
+
     // Left resizable sidebar (outline / note meta).
     void toggle_sidebar() override;
     void clear_sidebar() override;

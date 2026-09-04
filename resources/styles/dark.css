@@ -219,3 +219,16 @@ window.remin-window {
 .remin-history-item:hover {
   background-color: @surface_hover;
 }
+
+/* Active terminal pane highlight */
+.remin-pane-active {
+  border: 2px solid @accent;
+  border-radius: 4px;
+}
+
+/* Toolbar button label */
+.remin-tool-label {
+  color: @text;
+  font-size: 11px;
+  font-weight: 500;
+}

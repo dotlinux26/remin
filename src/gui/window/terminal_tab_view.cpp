@@ -3,6 +3,7 @@
 #include "terminal/shell/shell.hpp"
 
 #include <algorithm>
+#include <fstream>
 
 namespace remin::gui {
 
@@ -66,21 +67,52 @@ void TerminalTabView::build_sidebar() {
     sidebar->add_css_class("remin-sidebar");
     sidebar->set_size_request(180, -1);
 
-    auto* title = Gtk::make_managed<Gtk::Label>("History");
-    title->set_halign(Gtk::Align::START);
-    title->set_margin_start(8);
-    title->set_margin_top(6);
-    title->add_css_class("remin-sidebar-title");
-    sidebar->append(*title);
+    // Tab switcher: History | Directory
+    auto* tab_bar = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
+    tab_bar->add_css_class("remin-sidebar-tabs");
+    
+    auto* history_tab = Gtk::make_managed<Gtk::Button>("History");
+    history_tab->add_css_class("remin-sidebar-tab");
+    history_tab->set_hexpand(true);
+    history_tab->signal_clicked().connect([this]() { set_sidebar_mode("history"); });
+    
+    auto* directory_tab = Gtk::make_managed<Gtk::Button>("Directory");
+    directory_tab->add_css_class("remin-sidebar-tab");
+    directory_tab->set_hexpand(true);
+    directory_tab->signal_clicked().connect([this]() { set_sidebar_mode("directory"); });
+    
+    tab_bar->append(*history_tab);
+    tab_bar->append(*directory_tab);
+    sidebar->append(*tab_bar);
 
+    // Stack for History and Directory views
+    sidebar_stack_ = Gtk::make_managed<Gtk::Stack>();
+    sidebar_stack_->set_vexpand(true);
+    sidebar_stack_->set_transition_type(Gtk::StackTransitionType::SLIDE_LEFT_RIGHT);
+    sidebar->append(*sidebar_stack_);
+
+    // History page
     history_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
     history_scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
     history_scroller_->set_vexpand(true);
     history_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
     history_scroller_->set_child(*history_list_);
-    sidebar->append(*history_scroller_);
+    sidebar_stack_->add(*history_scroller_, "history", "History");
+
+    // Directory page
+    directory_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
+    directory_scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
+    directory_scroller_->set_vexpand(true);
+    directory_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    directory_scroller_->set_child(*directory_list_);
+    sidebar_stack_->add(*directory_scroller_, "directory", "Directory");
+
+    // Set initial directory to current working directory
+    current_dir_ = std::filesystem::current_path();
+    refresh_directory();
 
     root_paned_->set_start_child(*sidebar);
+    set_sidebar_mode("history");
 }
 
 void TerminalTabView::update_sidebar() {
@@ -267,9 +299,21 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
             // Capture phase so we see right-clicks before VTE's own handling.
             click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
             click->signal_pressed().connect([this, wid, w](int n, double, double) {
+                // Remove active class from previously active pane
+                if (!active_pane_.empty()) {
+                    if (auto* prev = pane(active_pane_)) {
+                        prev->widget().remove_css_class("remin-pane-active");
+                    }
+                }
                 active_pane_ = wid;
+                // Add active class to newly focused pane
+                w->add_css_class("remin-pane-active");
                 if (n == 3) show_pane_menu(*w);
             });
+            // Set initial active state for the first/root pane
+            if (active_pane_.empty() && pid == root_pane_) {
+                w->add_css_class("remin-pane-active");
+            }
             w->add_controller(click);
             return *w;
         }
@@ -321,6 +365,88 @@ void TerminalTabView::rebuild() {
     }
     if (!tree) return;
     tree_host_->append(build_node(*tree));
+}
+
+void TerminalTabView::set_sidebar_mode(const std::string& mode) {
+    if (!sidebar_stack_) return;
+    if (mode == "history") {
+        sidebar_stack_->set_visible_child(*history_scroller_);
+    } else if (mode == "directory") {
+        sidebar_stack_->set_visible_child(*directory_scroller_);
+        refresh_directory();
+    }
+}
+
+void TerminalTabView::refresh_directory() {
+    if (!directory_list_) return;
+    // Clear current directory list
+    while (auto* child = directory_list_->get_first_child()) directory_list_->remove(*child);
+
+    // Add parent directory entry (..) if not at root
+    if (current_dir_.has_parent_path()) {
+        auto* parent_btn = Gtk::make_managed<Gtk::Button>("..");
+        parent_btn->add_css_class("remin-directory-item");
+        parent_btn->set_halign(Gtk::Align::FILL);
+        parent_btn->signal_clicked().connect([this]() {
+            current_dir_ = current_dir_.parent_path();
+            refresh_directory();
+        });
+        directory_list_->append(*parent_btn);
+    }
+
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(current_dir_)) {
+            std::string name = entry.path().filename().string();
+            auto* btn = Gtk::make_managed<Gtk::Button>(name);
+            btn->add_css_class("remin-directory-item");
+            btn->set_halign(Gtk::Align::FILL);
+            
+            if (entry.is_directory()) {
+                btn->signal_clicked().connect([this, name]() {
+                    current_dir_ /= name;
+                    refresh_directory();
+                });
+            } else if (entry.is_regular_file()) {
+                // Check if file is readable (not binary) by trying to read first few bytes
+                btn->signal_clicked().connect([this, name]() {
+                    std::filesystem::path filepath = current_dir_ / name;
+                    if (is_text_file(filepath)) {
+                        open_file_in_editor(filepath);
+                    }
+                });
+            }
+            directory_list_->append(*btn);
+        }
+    } catch (const std::exception&) {
+        // Ignore filesystem errors
+    }
+}
+
+bool TerminalTabView::is_text_file(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+    char buffer[512];
+    file.read(buffer, sizeof(buffer));
+    std::streamsize size = file.gcount();
+    // Check for null bytes (common in binary files)
+    for (std::streamsize i = 0; i < size; ++i) {
+        if (buffer[i] == '\0') return false;
+    }
+    // Check if mostly printable ASCII
+    int printable = 0;
+    for (std::streamsize i = 0; i < size; ++i) {
+        unsigned char c = buffer[i];
+        if ((c >= 32 && c <= 126) || c == '\n' || c == '\r' || c == '\t') {
+            printable++;
+        }
+    }
+    return size == 0 || (printable * 100 / size) > 70;
+}
+
+void TerminalTabView::open_file_in_editor(const std::filesystem::path& path) {
+    if (on_open_file_) {
+        on_open_file_(path);
+    }
 }
 
 } // namespace remin::gui

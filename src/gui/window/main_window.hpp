@@ -53,6 +53,9 @@ private:
     void on_terminal_color_profile();
     void toggle_history_sidebar();
     void clear_history();
+    void on_settings();
+    void open_note_from_path(const std::filesystem::path& path);
+    void on_custom_split();
     void refresh_theme();
 
     void update_tab_bar();
@@ -60,10 +63,12 @@ private:
     void update_header();
 
     // Find bar dispatch
-    void show_find_bar();
+    void show_find_bar(bool replace = false);
     void hide_find_bar();
     void on_find_next();
     void on_find_prev();
+    void on_replace();
+    void on_replace_all();
     bool on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods);
 
     SessionController* controller_;
@@ -104,9 +109,14 @@ private:
     // Find bar (overlay)
     Gtk::Box* find_bar_{nullptr};
     Gtk::Entry* find_entry_{nullptr};
+    Gtk::Entry* replace_entry_{nullptr};
     Gtk::Button* find_next_{nullptr};
     Gtk::Button* find_prev_{nullptr};
+    Gtk::Button* replace_btn_{nullptr};
+    Gtk::Button* replace_all_btn_{nullptr};
     Gtk::Button* find_close_{nullptr};
+    Gtk::Image* find_icon_{nullptr};
+    Gtk::Image* replace_icon_{nullptr};
 
     // Autosave badge
     Gtk::Overlay* overlay_{nullptr};

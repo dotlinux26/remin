@@ -15,10 +15,19 @@ void Application::on_activate() {
         return;
     }
 
-    // Apply the system theme before building the window so CSS is in place.
-    theme_->apply_system();
-
+    // Load persisted theme preference, or fall back to system theme.
     auto* ctrl = session_->controller();
+    bool dark = false;
+    if (ctrl) {
+        dark = ctrl->theme_dark();
+    }
+    if (!ctrl || !dark) {
+        // No persisted preference, use system theme
+        auto settings = Gtk::Settings::get_default();
+        if (settings) dark = settings->property_gtk_application_prefer_dark_theme();
+    }
+    theme_->apply(dark);
+
     auto* win = new MainWindow(ctrl, session_->autosaver(), session_->core());
     window_ = win;
     win->set_theme(theme_.get());
