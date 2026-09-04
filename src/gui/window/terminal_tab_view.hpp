@@ -82,6 +82,14 @@ private:
     void update_sidebar();
     void show_pane_menu(Gtk::Widget& pane_widget);
     void refresh_directory();
+    Gtk::Widget* create_directory_row(const std::string& name, bool is_dir, const std::filesystem::path& full_path);
+    void populate_directory_expander(Gtk::Expander* expander, const std::filesystem::path& dir_path);
+    void show_directory_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir);
+    void create_new_file(const std::filesystem::path& dir);
+    void create_new_folder(const std::filesystem::path& dir);
+    void rename_item(const std::filesystem::path& path);
+    void delete_item(const std::filesystem::path& path);
+    void copy_to_clipboard(const std::string& text);
     bool is_text_file(const std::filesystem::path& path);
     void open_file_in_editor(const std::filesystem::path& path);
 
@@ -105,7 +113,7 @@ private:
     Gtk::ScrolledWindow* history_scroller_{nullptr};
     Gtk::Box* history_list_{nullptr};
     Gtk::ScrolledWindow* directory_scroller_{nullptr};
-    Gtk::Box* directory_list_{nullptr};
+    Gtk::Box* directory_tree_{nullptr};  // Root of the tree structure
     std::vector<std::string> history_;
     std::filesystem::path current_dir_;
     Gtk::Popover* pane_menu_{nullptr};

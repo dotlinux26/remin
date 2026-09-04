@@ -10,8 +10,6 @@ SettingsDialog::SettingsDialog(Gtk::Window& parent, ThemeManager* theme, Session
     : Gtk::Dialog("Settings", parent, true), theme_(theme), controller_(controller) {
     set_default_size(560, 420);
     set_resizable(true);
-    add_button("Close", Gtk::ResponseType::CLOSE);
-    set_default_response(Gtk::ResponseType::CLOSE);
 
     notebook_ = Gtk::make_managed<Gtk::Notebook>();
     notebook_->set_hexpand(true);

@@ -50,6 +50,7 @@ MainWindow::MainWindow(SessionController* controller,
     setup_find_bar();
 
     root->append(*toolbar_);
+    root->append(*find_bar_);
     root->append(*tab_bar_);
     root->append(*content_stack_);
     root->append(*status_bar_);
@@ -344,7 +345,10 @@ void MainWindow::setup_status_bar() {
 void MainWindow::setup_find_bar() {
     find_bar_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
     find_bar_->add_css_class("remin-find-bar");
-    find_bar_->set_margin(6);
+    find_bar_->set_margin_top(2);
+    find_bar_->set_margin_bottom(2);
+    find_bar_->set_margin_start(8);
+    find_bar_->set_margin_end(8);
     find_bar_->set_visible(false);
 
     auto* find_icon = Gtk::make_managed<Gtk::Image>("edit-find-symbolic");
@@ -399,9 +403,7 @@ void MainWindow::setup_find_bar() {
     find_icon_ = find_icon;
     replace_icon_ = replace_icon;
 
-    overlay_->add_overlay(*find_bar_);
-    find_bar_->set_halign(Gtk::Align::END);
-    find_bar_->set_valign(Gtk::Align::START);
+    find_bar_->set_visible(false);
 }
 
 void MainWindow::new_terminal_tab() {

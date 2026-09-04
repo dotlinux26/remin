@@ -103,12 +103,13 @@ void TerminalTabView::build_sidebar() {
     directory_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
     directory_scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
     directory_scroller_->set_vexpand(true);
-    directory_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
-    directory_scroller_->set_child(*directory_list_);
+    directory_tree_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    directory_scroller_->set_child(*directory_tree_);
     sidebar_stack_->add(*directory_scroller_, "directory", "Directory");
 
-    // Set initial directory to current working directory
-    current_dir_ = std::filesystem::current_path();
+    // Set initial directory to home directory
+    const char* home = std::getenv("HOME");
+    current_dir_ = home ? home : "/";
     refresh_directory();
 
     root_paned_->set_start_child(*sidebar);
@@ -323,6 +324,8 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
             paned->set_orientation(node.kind() == remin::core::PaneTree::Kind::SplitHorizontal
                                        ? Gtk::Orientation::HORIZONTAL
                                        : Gtk::Orientation::VERTICAL);
+            paned->set_hexpand(true);
+            paned->set_vexpand(true);
             paned->set_start_child(build_node(*node.first()));
             paned->set_end_child(build_node(*node.second()));
 
@@ -343,7 +346,10 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
         }
     }
     // Fallback: empty box (should not happen).
-    return *Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    auto* fallback = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    fallback->set_hexpand(true);
+    fallback->set_vexpand(true);
+    return *fallback;
 }
 
 void TerminalTabView::rebuild() {
@@ -378,47 +384,297 @@ void TerminalTabView::set_sidebar_mode(const std::string& mode) {
 }
 
 void TerminalTabView::refresh_directory() {
-    if (!directory_list_) return;
-    // Clear current directory list
-    while (auto* child = directory_list_->get_first_child()) directory_list_->remove(*child);
+    if (!directory_tree_) return;
+    while (auto* child = directory_tree_->get_first_child()) directory_tree_->remove(*child);
 
     // Add parent directory entry (..) if not at root
     if (current_dir_.has_parent_path()) {
-        auto* parent_btn = Gtk::make_managed<Gtk::Button>("..");
-        parent_btn->add_css_class("remin-directory-item");
-        parent_btn->set_halign(Gtk::Align::FILL);
-        parent_btn->signal_clicked().connect([this]() {
-            current_dir_ = current_dir_.parent_path();
-            refresh_directory();
-        });
-        directory_list_->append(*parent_btn);
+        auto* parent_row = create_directory_row("..", true, current_dir_.parent_path());
+        directory_tree_->append(*parent_row);
     }
 
     try {
+        std::vector<std::filesystem::directory_entry> entries;
         for (const auto& entry : std::filesystem::directory_iterator(current_dir_)) {
+            entries.push_back(entry);
+        }
+        // Sort: directories first, then files, alphabetically
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            bool a_dir = a.is_directory();
+            bool b_dir = b.is_directory();
+            if (a_dir != b_dir) return a_dir > b_dir;
+            return a.path().filename().string() < b.path().filename().string();
+        });
+
+        for (const auto& entry : entries) {
             std::string name = entry.path().filename().string();
-            auto* btn = Gtk::make_managed<Gtk::Button>(name);
-            btn->add_css_class("remin-directory-item");
-            btn->set_halign(Gtk::Align::FILL);
-            
             if (entry.is_directory()) {
-                btn->signal_clicked().connect([this, name]() {
-                    current_dir_ /= name;
-                    refresh_directory();
-                });
+                auto* row = create_directory_row(name, true, entry.path());
+                directory_tree_->append(*row);
             } else if (entry.is_regular_file()) {
-                // Check if file is readable (not binary) by trying to read first few bytes
-                btn->signal_clicked().connect([this, name]() {
-                    std::filesystem::path filepath = current_dir_ / name;
-                    if (is_text_file(filepath)) {
-                        open_file_in_editor(filepath);
-                    }
-                });
+                auto* row = create_directory_row(name, false, entry.path());
+                directory_tree_->append(*row);
             }
-            directory_list_->append(*btn);
         }
     } catch (const std::exception&) {
         // Ignore filesystem errors
+    }
+}
+
+Gtk::Widget* TerminalTabView::create_directory_row(const std::string& name, bool is_dir, const std::filesystem::path& full_path) {
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 4);
+    box->add_css_class("remin-directory-row");
+    box->set_margin_start(8);
+    box->set_margin_end(4);
+    box->set_margin_top(2);
+    box->set_margin_bottom(2);
+
+    // Icon
+    auto* icon = Gtk::make_managed<Gtk::Image>();
+    if (is_dir) {
+        icon->set_from_icon_name("folder-symbolic");
+    } else {
+        icon->set_from_icon_name("text-x-generic-symbolic");
+    }
+    icon->set_pixel_size(16);
+    icon->set_valign(Gtk::Align::CENTER);
+    box->append(*icon);
+
+    // Name label
+    auto* label = Gtk::make_managed<Gtk::Label>(name);
+    label->set_halign(Gtk::Align::START);
+    label->set_hexpand(true);
+    label->set_ellipsize(Pango::EllipsizeMode::END);
+    label->add_css_class("remin-directory-name");
+    box->append(*label);
+
+    if (is_dir) {
+        // Directory: use Expander for tree view
+        auto* expander = Gtk::make_managed<Gtk::Expander>();
+        expander->set_child(*box);
+        expander->set_expanded(false);
+        expander->property_expanded().signal_changed().connect([this, expander, full_path]() {
+            if (expander->get_expanded()) {
+                // Populate children when expanded
+                populate_directory_expander(expander, full_path);
+            }
+        });
+        // Right-click context menu for directory
+        auto click = Gtk::GestureClick::create();
+        click->set_button(3); // Right click
+        click->signal_pressed().connect([this, expander, full_path, name](int, double, double) {
+            show_directory_context_menu(*expander, full_path, name, true);
+        });
+        expander->add_controller(click);
+        return expander;
+    } else {
+        // File: simple row with double-click to open
+        auto click = Gtk::GestureClick::create();
+        click->signal_pressed().connect([this, full_path, name](int n_press, double, double) {
+            if (n_press == 2) { // Double-click
+                if (is_text_file(full_path)) {
+                    open_file_in_editor(full_path);
+                }
+            }
+        });
+        box->add_controller(click);
+
+        // Right-click context menu
+        auto right_click = Gtk::GestureClick::create();
+        right_click->set_button(3);
+        right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
+            show_directory_context_menu(*box, full_path, name, false);
+        });
+        box->add_controller(right_click);
+        return box;
+    }
+}
+
+void TerminalTabView::populate_directory_expander(Gtk::Expander* expander, const std::filesystem::path& dir_path) {
+    // Find the child box that holds the children (create if needed)
+    Gtk::Widget* child = expander->get_child();
+    Gtk::Box* box = dynamic_cast<Gtk::Box*>(child);
+    if (!box) return;
+
+    // Find or create the children container
+    Gtk::Box* children_box = nullptr;
+    for (auto* w = box->get_first_child(); w; w = w->get_next_sibling()) {
+        if (auto* b = dynamic_cast<Gtk::Box*>(w)) {
+            if (b->get_orientation() == Gtk::Orientation::VERTICAL) {
+                children_box = b;
+                break;
+            }
+        }
+    }
+    if (!children_box) {
+        children_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+        children_box->set_margin_start(16);
+        box->append(*children_box);
+    } else {
+        // Clear existing children
+        while (auto* c = children_box->get_first_child()) children_box->remove(*c);
+    }
+
+    try {
+        std::vector<std::filesystem::directory_entry> entries;
+        for (const auto& entry : std::filesystem::directory_iterator(dir_path)) {
+            entries.push_back(entry);
+        }
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            bool a_dir = a.is_directory();
+            bool b_dir = b.is_directory();
+            if (a_dir != b_dir) return a_dir > b_dir;
+            return a.path().filename().string() < b.path().filename().string();
+        });
+
+        for (const auto& entry : entries) {
+            std::string name = entry.path().filename().string();
+            if (entry.is_directory()) {
+                auto* row = create_directory_row(name, true, entry.path());
+                children_box->append(*row);
+            } else if (entry.is_regular_file()) {
+                auto* row = create_directory_row(name, false, entry.path());
+                children_box->append(*row);
+            }
+        }
+    } catch (const std::exception&) {}
+}
+
+void TerminalTabView::show_directory_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir) {
+    auto* menu = Gtk::make_managed<Gtk::Popover>();
+    menu->add_css_class("remin-context-menu");
+
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    box->set_margin(6);
+
+    auto add_item = [menu, box](const char* label, std::function<void()> cb) {
+        auto* b = Gtk::make_managed<Gtk::Button>(label);
+        b->add_css_class("remin-menu-item");
+        b->set_halign(Gtk::Align::FILL);
+        b->signal_clicked().connect([menu, cb]() {
+            menu->popdown();
+            if (cb) cb();
+        });
+        box->append(*b);
+        return b;
+    };
+
+    if (is_dir) {
+        add_item("New File", [this, path]() {
+            create_new_file(path);
+        });
+        add_item("New Folder", [this, path]() {
+            create_new_folder(path);
+        });
+        add_item("Rename", [this, path]() {
+            rename_item(path);
+        });
+        add_item("Delete", [this, path]() {
+            delete_item(path);
+        });
+    } else {
+        add_item("Open", [this, path]() {
+            if (is_text_file(path)) open_file_in_editor(path);
+        });
+        add_item("Rename", [this, path]() {
+            rename_item(path);
+        });
+        add_item("Delete", [this, path]() {
+            delete_item(path);
+        });
+    }
+    add_item("Copy Path", [this, path]() {
+        copy_to_clipboard(path.string());
+    });
+
+    menu->set_child(*box);
+    menu->set_parent(widget);
+    menu->popup();
+}
+
+void TerminalTabView::create_new_file(const std::filesystem::path& dir) {
+    auto dialog = Gtk::make_managed<Gtk::Dialog>("New File", dynamic_cast<Gtk::Window&>(*get_root()), true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Create", Gtk::ResponseType::OK);
+    auto* entry = Gtk::make_managed<Gtk::Entry>();
+    entry->set_placeholder_text("filename.txt");
+    dialog->get_content_area()->append(*entry);
+    entry->grab_focus();
+    dialog->signal_response().connect([this, dialog, entry, dir](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            std::filesystem::path new_path = dir / entry->get_text().raw();
+            std::ofstream file(new_path);
+            file.close();
+            refresh_directory();
+        }
+        dialog->close();
+    });
+    dialog->present();
+}
+
+void TerminalTabView::create_new_folder(const std::filesystem::path& dir) {
+    auto dialog = Gtk::make_managed<Gtk::Dialog>("New Folder", dynamic_cast<Gtk::Window&>(*get_root()), true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Create", Gtk::ResponseType::OK);
+    auto* entry = Gtk::make_managed<Gtk::Entry>();
+    entry->set_placeholder_text("folder_name");
+    dialog->get_content_area()->append(*entry);
+    entry->grab_focus();
+    dialog->signal_response().connect([this, dialog, entry, dir](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            std::filesystem::create_directory(dir / entry->get_text().raw());
+            refresh_directory();
+        }
+        dialog->close();
+    });
+    dialog->present();
+}
+
+void TerminalTabView::rename_item(const std::filesystem::path& path) {
+    auto dialog = Gtk::make_managed<Gtk::Dialog>("Rename", dynamic_cast<Gtk::Window&>(*get_root()), true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Rename", Gtk::ResponseType::OK);
+    auto* entry = Gtk::make_managed<Gtk::Entry>();
+    entry->set_text(path.filename().string());
+    entry->select_region(0, -1);
+    dialog->get_content_area()->append(*entry);
+    entry->grab_focus();
+    dialog->signal_response().connect([this, dialog, entry, path](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            std::filesystem::rename(path, path.parent_path() / entry->get_text().raw());
+            refresh_directory();
+        }
+        dialog->close();
+    });
+    dialog->present();
+}
+
+void TerminalTabView::delete_item(const std::filesystem::path& path) {
+    auto dialog = Gtk::make_managed<Gtk::Dialog>("Delete", dynamic_cast<Gtk::Window&>(*get_root()), true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Delete", Gtk::ResponseType::OK);
+    dialog->set_default_response(Gtk::ResponseType::CANCEL);
+    auto* label = Gtk::make_managed<Gtk::Label>("Delete " + path.filename().string() + "?");
+    dialog->get_content_area()->append(*label);
+    dialog->signal_response().connect([this, dialog, path](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            if (std::filesystem::is_directory(path)) {
+                std::filesystem::remove_all(path);
+            } else {
+                std::filesystem::remove(path);
+            }
+            refresh_directory();
+        }
+        dialog->close();
+    });
+    dialog->present();
+}
+
+void TerminalTabView::copy_to_clipboard(const std::string& text) {
+    auto display = get_display();
+    if (display) {
+        auto clipboard = display->get_clipboard();
+        clipboard->set_text(text);
     }
 }
 
