@@ -11,6 +11,9 @@ SettingsDialog::SettingsDialog(Gtk::Window& parent, ThemeManager* theme, Session
     set_default_size(560, 420);
     set_resizable(true);
 
+    // Ensure dialog gets the same theme as the main window
+    add_css_class("remin-window");
+
     notebook_ = Gtk::make_managed<Gtk::Notebook>();
     notebook_->set_hexpand(true);
     notebook_->set_vexpand(true);

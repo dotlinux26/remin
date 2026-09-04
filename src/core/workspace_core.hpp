@@ -105,9 +105,22 @@ public:
     // Mark state dirty (used by autosave scheduler).
     void mark_dirty();
 
+    // Persistence (decision D-2: core mutation only marks dirty; actual
+    // writing happens here, called by the autosave policy on flush/shutdown).
+    // Returns true if the current workspace existed and was written.
+    bool persist();
+
+    // Whether the live workspace has unpersisted changes since the last
+    // explicit persist()/save.
+    [[nodiscard]] bool dirty() const { return ws_dirty_; }
+
+    // Forcibly persist now and clear the dirty flag (used on shutdown).
+    bool persist_now() { return persist(); }
+
 private:
     Storage* storage_;
     std::optional<Workspace> ws_current_;
+    bool ws_dirty_ = false;
     WorkspaceEventCallback event_callback_;
     void emit(WorkspaceEvent::Type type, WorkspaceId ws,
               std::optional<WindowId> window = std::nullopt,

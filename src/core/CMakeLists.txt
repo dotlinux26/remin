@@ -1,6 +1,7 @@
 add_library(remin_core STATIC
   autosave.cpp
   pane/pane.cpp
+  persistence_policy.cpp
   serialization.cpp
   workspace_core.cpp
   workspace_lock.cpp

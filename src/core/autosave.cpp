@@ -4,6 +4,12 @@
 
 namespace remin::core {
 
+namespace {
+// Reserved pending_ key for the single workspace-structure entry. Uses a value
+// that can never collide with a generated PaneId/NoteId (which are UUIDs).
+const char* kWorkspaceKey = "__remin_workspace__";
+} // namespace
+
 Autosaver::Autosaver(Storage* storage)
     : storage_(storage) {}
 
@@ -18,6 +24,12 @@ void Autosaver::note_terminal_activity(const PaneId& pane) {
 void Autosaver::note_note_activity(const std::string& noteId) {
     pending_[noteId].kind = Kind::Note;
     pending_[noteId].last = now_();
+}
+
+void Autosaver::note_workspace_activity() {
+    // Single shared entry for the whole workspace structure.
+    pending_[kWorkspaceKey].kind = Kind::Workspace;
+    pending_[kWorkspaceKey].last = now_();
 }
 
 bool Autosaver::due_entry(const Entry& e) const {
@@ -56,6 +68,12 @@ bool Autosaver::write_entry(const std::string& id, const Entry& e) {
                     storage_->store_scrollback(PaneId(id), std::move(*body));
                     return true;
                 }
+            }
+            break;
+        case Kind::Workspace:
+            if (workspace_provider_) {
+                workspace_provider_();
+                return true;
             }
             break;
     }

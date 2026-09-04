@@ -36,6 +36,7 @@ public:
     enum class Kind {
         Terminal,  // payload = scrollback text captured via scrollback provider
         Note,      // payload = note body captured via note provider
+        Workspace, // payload = whole workspace structure (windows/tabs/panes)
     };
 
     explicit Autosaver(Storage* storage);
@@ -46,12 +47,19 @@ public:
         std::function<std::optional<std::string>(const PaneId&)>;
     using NoteProvider =
         std::function<std::optional<std::string>(const std::string& noteId)>;
+    // Persists the entire current workspace structure. The provider is wired by
+    // the session layer (which knows WorkspaceCore); it writes via
+    // core->persist() against the Storage interface. Takes the whole current
+    // workspace when persisting is independent of a single id.
+    using WorkspaceProvider = std::function<void()>;
     void set_scrollback_provider(ScrollbackProvider p) { scrollback_provider_ = std::move(p); }
     void set_note_provider(NoteProvider p) { note_provider_ = std::move(p); }
+    void set_workspace_provider(WorkspaceProvider p) { workspace_provider_ = std::move(p); }
 
     // Mark activity. Cheap and safe to call repeatedly; (re)ticks that resource.
     void note_terminal_activity(const PaneId& pane);
     void note_note_activity(const std::string& noteId);
+    void note_workspace_activity();
 
     // Per-kind policy thresholds.
     void set_terminal_debounce(std::chrono::milliseconds d) { terminal_debounce_ = d; }
@@ -85,6 +93,7 @@ private:
     Storage* storage_;
     ScrollbackProvider scrollback_provider_;
     NoteProvider note_provider_;
+    WorkspaceProvider workspace_provider_;
     // Keyed by pane/note id. PaneId and NoteId share the same globally-unique
     // Id generator, so ids never collide across kinds.
     std::unordered_map<std::string, Entry> pending_;

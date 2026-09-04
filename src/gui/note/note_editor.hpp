@@ -25,6 +25,10 @@ public:
 
     void focus_editor() { view_->grab_focus(); }
 
+    // Set shared row padding applied identically to the line-number gutter and
+    // the editor (pixels above + below each line). Keeps both columns in sync.
+    void set_line_spacing(int pixels);
+
     // Show the find/replace bar and focus its entry (Ctrl+F / Ctrl+H).
     void show_find(bool show_replace = false);
 
@@ -44,31 +48,40 @@ public:
     void do_replace();
     void do_replace_all();
 
+    // Dirty tracking — mirrors GtkTextBuffer::modified.
+    [[nodiscard]] bool is_modified() const;
+    void set_modified(bool m);
+
+    // Access to the underlying Gtk::TextBuffer for direct signal connections.
+    [[nodiscard]] Glib::RefPtr<Gtk::TextBuffer> buffer() const { return buffer_; }
+
+    // Vertical scroll adjustment of the editor (for editor ↔ preview sync).
+    [[nodiscard]] Glib::RefPtr<Gtk::Adjustment> vadjustment() const {
+        return scroller_ ? scroller_->get_vadjustment() : Glib::RefPtr<Gtk::Adjustment>();
+    }
+
 private:
     void on_buffer_changed();
     void update_line_numbers();
     void update_gutter_width();
     void do_find_next(bool backwards = false);
     bool on_preview_tick();
+    void apply_line_spacing();
 
     std::function<void()> on_change_;
     std::function<void()> on_save_;
     std::function<void(const std::string&)> on_preview_;
 
     Gtk::ScrolledWindow* scroller_{nullptr};
+    Gtk::ScrolledWindow* gutter_scroll_{nullptr};
     Gtk::TextView* view_{nullptr};
     Gtk::TextView* gutter_{nullptr};
     Glib::RefPtr<Gtk::TextBuffer> buffer_;
     Glib::RefPtr<Gtk::TextBuffer> gutter_buffer_;
 
-    Gtk::Box* find_bar_{nullptr};
-    Gtk::Entry* find_entry_{nullptr};
-    Gtk::Entry* replace_entry_{nullptr};
-    Gtk::Button* replace_btn_{nullptr};
-    Gtk::Button* replace_all_btn_{nullptr};
-
     sigc::connection preview_timer_;
     bool preview_pending_{false};
+    int line_spacing_{2}; // pixels above AND below each line, on both views
 };
 
 } // namespace remin::gui

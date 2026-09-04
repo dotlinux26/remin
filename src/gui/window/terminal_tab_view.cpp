@@ -1,14 +1,58 @@
 #include "gui/window/terminal_tab_view.hpp"
+#include "gui/window/main_window.hpp"
 #include "gui/session/session_controller.hpp"
+#include "gui/ui/context_menu.hpp"
 #include "terminal/shell/shell.hpp"
+
+#include <algorithm>
+#include <cstdlib>
+
+namespace {
+
+// Object-data key storing a Paned's target divider ratio so we can restore it
+// once the tree is mapped (after real allocation).
+const char* const kPanedRatioKey = "remin-paned-ratio";
+
+void set_paned_ratio(Gtk::Paned* paned, double ratio) {
+    auto* boxed = static_cast<double*>(std::malloc(sizeof(double)));
+    *boxed = std::clamp(ratio, 0.0, 1.0);
+    g_object_set_data_full(G_OBJECT(paned->gobj()), kPanedRatioKey,
+                           boxed, std::free);
+}
+
+void restore_paned_ratio(Gtk::Paned* paned) {
+    auto* boxed = static_cast<double*>(
+        g_object_get_data(G_OBJECT(paned->gobj()), kPanedRatioKey));
+    if (!boxed) return;
+    int total = paned->get_orientation() == Gtk::Orientation::HORIZONTAL
+                    ? paned->get_width() : paned->get_height();
+    if (total <= 0) return;
+    paned->set_position(static_cast<int>(*boxed * total));
+}
+
+// Depth-first walk of a widget's descendants, restoring every paned ratio.
+void walk_restore(Gtk::Widget& widget) {
+    if (auto* paned = dynamic_cast<Gtk::Paned*>(&widget)) {
+        restore_paned_ratio(paned);
+    }
+    auto* child = widget.get_first_child();
+    while (child) {
+        walk_restore(*child);
+        child = child->get_next_sibling();
+    }
+}
+
+} // anonymous namespace
 
 namespace remin::gui {
 
 TerminalTabView::TerminalTabView(SessionController* controller,
+                                 MainWindow* main_window,
                                  remin::core::WindowId window,
                                  remin::core::TabId tab,
                                  remin::core::PaneId root_pane)
     : controller_(controller),
+      main_window_(main_window),
       window_(std::move(window)),
       tab_(std::move(tab)),
       root_pane_(std::move(root_pane)),
@@ -61,7 +105,7 @@ void TerminalTabView::add_history(const std::string& command) {
     if (on_history_) on_history_(command);
 }
 
-void TerminalTabView::show_pane_menu(Gtk::Widget& pane_widget) {
+void TerminalTabView::show_pane_menu(Gtk::Widget& pane_widget, double x, double y) {
     // Tear down any existing menu popover before showing a new one.
     if (pane_menu_) {
         pane_menu_->popdown();
@@ -69,43 +113,31 @@ void TerminalTabView::show_pane_menu(Gtk::Widget& pane_widget) {
         pane_menu_ = nullptr;
     }
 
-    auto* menu = Gtk::make_managed<Gtk::Popover>();
-    menu->add_css_class("remin-context-menu");
+    auto pid = active_pane_;
+    auto* self = this;
 
-    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
-    box->set_margin(6);
+    bool has_selection = false;
+    if (auto* p = pane(pid)) has_selection = p->has_selection();
 
-    auto add_item = [menu, box](const char* label, std::function<void()> cb) {
-        auto* b = Gtk::make_managed<Gtk::Button>(label);
-        b->add_css_class("remin-menu-item");
-        b->set_halign(Gtk::Align::FILL);
-        b->signal_clicked().connect([menu, cb]() {
-            menu->popdown();
-            if (cb) cb();
-        });
-        box->append(*b);
-        return b;
-    };
+    // Build items for the shared ContextMenu.
+    std::vector<ContextMenu::Item> items;
+    items.push_back({"Copy", [self, pid]() { if (auto* p = self->pane(pid)) p->copy_clipboard(); }, has_selection});
+    items.push_back({"Paste", [self, pid]() { if (auto* p = self->pane(pid)) p->paste_clipboard(); }});
+    items.push_back({"Select All", [self, pid]() { if (auto* p = self->pane(pid)) p->select_all(); }});
+    items.push_back({ContextMenu::SEPARATOR_LABEL, {}});
+    items.push_back({"Split Horizontally (Alt+H)", [self]() { self->split(remin::core::PaneTree::Kind::SplitHorizontal); }});
+    items.push_back({"Split Vertically (Alt+V)", [self]() { self->split(remin::core::PaneTree::Kind::SplitVertical); }});
+    items.push_back({ContextMenu::SEPARATOR_LABEL, {}});
+    items.push_back({"Clear Scrollback", [self, pid]() { if (auto* p = self->pane(pid)) p->clear_scrollback(); }});
+    items.push_back({"Close Pane", [self]() { self->close_focused_pane(); }});
+    items.push_back({"Color Profile…", [self]() { if (self->on_color_request_) self->on_color_request_(); }});
 
-    add_item("Split Horizontally", [this]() {
-        split(remin::core::PaneTree::Kind::SplitHorizontal);
-    });
-    add_item("Split Vertically", [this]() {
-        split(remin::core::PaneTree::Kind::SplitVertical);
-    });
-    add_item("Close Pane", [this]() { close_focused_pane(); });
-    add_item("Color Profile…", [this]() {
-        if (on_color_request_) on_color_request_();
-    });
+    // Use the shared ContextMenu module — same look/behavior everywhere.
+    ContextMenu::show(pane_widget, x, y, items);
 
-    menu->set_child(*box);
-    menu->set_parent(pane_widget);
-    menu->signal_closed().connect([this, menu]() {
-        if (pane_menu_ == menu) pane_menu_ = nullptr;
-        menu->unparent();
-    });
-    pane_menu_ = menu;
-    menu->popup();
+    // Note: ContextMenu manages its own popover lifecycle. We can't easily track
+    // the popover pointer for cleanup like before, but the shared module handles
+    // cleanup on close. The pane_menu_ member is no longer needed for this menu.
 }
 
 std::optional<std::string> TerminalTabView::capture(const remin::core::PaneId& pane) const {
@@ -142,6 +174,25 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
 }
 
 bool TerminalTabView::close_focused_pane() {
+    // If there's only one pane (no splits), close the entire tab instead.
+    auto* core = controller_->core();
+    if (core && core->current_workspace()) {
+        for (const auto& win : core->current_workspace()->windows) {
+            if (win.id == window_) {
+                for (const auto& t : win.tabs) {
+                    if (t.id == tab_) {
+                        // Check if pane tree is a single leaf (no splits)
+                        if (t.pane_tree.kind() == remin::core::PaneTree::Kind::Pane) {
+                            // Single pane only -> close the whole tab
+                            if (on_close_tab_request_) on_close_tab_request_();
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     auto target = active_pane_.empty() ? root_pane_ : active_pane_;
     if (!controller_->remove_pane(tab_, target)) return false;
     panes_.erase(target.str());
@@ -187,50 +238,84 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
                 it = panes_.find(pid.str());
             }
             // Track focused pane on click (GTK4: use GestureClick).
+            // Only add controllers once per pane to avoid accumulation on rebuild.
             auto wid = pid;
-            auto click = Gtk::GestureClick::create();
-            click->set_button(0); // any button
-            // Capture phase so we see right-clicks before VTE's own handling.
-            click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
-            click->signal_pressed().connect([this, wid](int, double, double) {
-                // Remove active class from previously active pane
-                if (!active_pane_.empty()) {
-                    if (auto* prev = pane(active_pane_)) {
-                        prev->widget().remove_css_class("remin-pane-active");
+            auto pane_key = wid.str();
+            if (pane_controllers_added_.find(pane_key) == pane_controllers_added_.end()) {
+                auto click = Gtk::GestureClick::create();
+                click->set_button(0); // any button
+                // Capture phase so we see right-clicks before VTE's own handling.
+                click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+                click->signal_pressed().connect([this, wid](int, double, double) {
+                    // Remove active class from previously active pane
+                    if (!active_pane_.empty()) {
+                        if (auto* prev = pane(active_pane_)) {
+                            prev->widget().remove_css_class("remin-pane-active");
+                        }
                     }
-                }
-                active_pane_ = wid;
-                // Add active class to newly focused pane
-                if (auto* curr = pane(wid)) {
-                    curr->widget().add_css_class("remin-pane-active");
-                }
-            });
-            auto right_click = Gtk::GestureClick::create();
-            right_click->set_button(3); // Right-click
-            right_click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
-            right_click->signal_pressed().connect([this, wid](int, double, double) {
-                if (auto* p = pane(wid)) {
-                    show_pane_menu(p->widget());
-                }
-            });
+                    active_pane_ = wid;
+                    // Record focus in core so split targets THIS pane.
+                    controller_->focus_pane(tab_, wid);
+                    // Add active class to newly focused pane
+                    if (auto* curr = pane(wid)) {
+                        curr->widget().add_css_class("remin-pane-active");
+                    }
+                });
+                auto right_click = Gtk::GestureClick::create();
+                right_click->set_button(3); // Right-click
+                right_click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+                right_click->signal_pressed().connect([this, wid](int, double x, double y) {
+                    if (auto* p = pane(wid)) {
+                        show_pane_menu(p->widget(), x, y);
+                    }
+                });
+                it->second->widget().add_controller(click);
+                it->second->widget().add_controller(right_click);
+                pane_controllers_added_.insert(pane_key);
+            }
             // Set initial active state for the first/root pane
             if (active_pane_.empty() && pid == root_pane_) {
                 it->second->widget().add_css_class("remin-pane-active");
             }
-            it->second->widget().add_controller(click);
-            it->second->widget().add_controller(right_click);
-            return it->second->widget();
+            auto& w = it->second->widget();
+            if (auto* parent = w.get_parent()) {
+                if (auto* box = dynamic_cast<Gtk::Box*>(parent)) box->remove(w);
+                else if (auto* paned = dynamic_cast<Gtk::Paned*>(parent)) {
+                    if (paned->get_start_child() == &w) paned->set_start_child(*Gtk::make_managed<Gtk::Box>());
+                    else if (paned->get_end_child() == &w) paned->set_end_child(*Gtk::make_managed<Gtk::Box>());
+                }
+            }
+            return w;
         }
         case remin::core::PaneTree::Kind::SplitHorizontal:
         case remin::core::PaneTree::Kind::SplitVertical: {
             auto* paned = Gtk::make_managed<Gtk::Paned>();
             paned->set_orientation(node.kind() == remin::core::PaneTree::Kind::SplitHorizontal
-                                       ? Gtk::Orientation::HORIZONTAL
-                                       : Gtk::Orientation::VERTICAL);
+                                       ? Gtk::Orientation::VERTICAL
+                                       : Gtk::Orientation::HORIZONTAL);
             paned->set_hexpand(true);
             paned->set_vexpand(true);
-            paned->set_start_child(build_node(*node.first()));
-            paned->set_end_child(build_node(*node.second()));
+            auto& start_child = build_node(*node.first());
+            auto& end_child = build_node(*node.second());
+            // Ensure children are unparented before adding to new paned
+            auto unparent = [](Gtk::Widget& child) {
+                if (auto* parent = child.get_parent()) {
+                    if (auto* box = dynamic_cast<Gtk::Box*>(parent)) box->remove(child);
+                    else if (auto* paned = dynamic_cast<Gtk::Paned*>(parent)) {
+                        if (paned->get_start_child() == &child) paned->set_start_child(*Gtk::make_managed<Gtk::Box>());
+                        else if (paned->get_end_child() == &child) paned->set_end_child(*Gtk::make_managed<Gtk::Box>());
+                    }
+                }
+            };
+            unparent(start_child);
+            unparent(end_child);
+            paned->set_start_child(start_child);
+            paned->set_end_child(end_child);
+
+            // Restore the stored divider ratio so existing sibling panes keep
+            // their size after a split/rebuild instead of being resized. The
+            // actual position is applied once the tree is mapped.
+            set_paned_ratio(paned, node.ratio());
 
             // Persist the divider ratio back to core. Capture a stable copy of
             // the first child's pane id (never a reference into core state).
@@ -259,9 +344,9 @@ void TerminalTabView::rebuild() {
     if (!tree_host_) return;
     // Clear active_pane_ BEFORE destroying widgets to avoid dangling widget pointers.
     active_pane_ = {};
-    // Remove all children then rebuild from core state.
-    while (tree_host_->get_first_child()) {
-        tree_host_->remove(*tree_host_->get_first_child());
+    // Simply remove all children - GTK handles unparenting
+    while (auto* child = tree_host_->get_first_child()) {
+        tree_host_->remove(*child);
     }
     auto* core = controller_->core();
     if (!core || !core->current_workspace()) return;
@@ -276,6 +361,10 @@ void TerminalTabView::rebuild() {
     }
     if (!tree) return;
     tree_host_->append(build_node(*tree));
+    // Once the newly-built tree has been sized by the layout engine, restore
+    // each paned's divider to its stored ratio so sibling panes keep their
+    // sizes after a split/rebuild instead of being reset.
+    Glib::signal_idle().connect_once([this]() { walk_restore(*tree_host_); });
 }
 
 } // namespace remin::gui

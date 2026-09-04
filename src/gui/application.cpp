@@ -15,6 +15,26 @@ void Application::on_activate() {
         return;
     }
 
+    // Register bundled icons GResource so GTK can resolve all symbolic icon
+    // names without depending on system icon themes (Adwaita/Yaru/etc.).
+    {
+        std::string icons_path = std::string(REMIN_RESOURCE_DIR) + "/icons/icons.gresource";
+        GError* err = nullptr;
+        GResource* res = g_resource_load(icons_path.c_str(), &err);
+        if (res) {
+            g_resources_register(res);
+            auto* display = GDK_DISPLAY(gdk_display_get_default());
+            if (display) {
+                auto* icon_theme = gtk_icon_theme_get_for_display(display);
+                // Use /icons/hicolor so GTK finds icons in scalable/actions/, scalable/ui/, etc.
+                gtk_icon_theme_add_resource_path(icon_theme, "/icons/hicolor");
+            }
+        } else {
+            g_warning("remin: failed to load icons resource: %s", err ? err->message : "unknown");
+            if (err) g_error_free(err);
+        }
+    }
+
     // Load persisted theme preference, or fall back to system theme.
     auto* ctrl = session_->controller();
     bool dark = false;

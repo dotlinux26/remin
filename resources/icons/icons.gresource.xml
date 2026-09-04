@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/">
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/list-add-symbolic.svg">hicolor/scalable/actions/list-add-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/document-new-symbolic.svg">hicolor/scalable/actions/document-new-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/document-save-symbolic.svg">hicolor/scalable/actions/document-save-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/document-save-as-symbolic.svg">hicolor/scalable/actions/document-save-as-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/view-paged-symbolic.svg">hicolor/scalable/actions/view-paged-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/edit-find-symbolic.svg">hicolor/scalable/actions/edit-find-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/edit-find-replace-symbolic.svg">hicolor/scalable/actions/edit-find-replace-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/sidebar-show-symbolic.svg">hicolor/scalable/actions/sidebar-show-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/sidebar-hide-symbolic.svg">hicolor/scalable/actions/sidebar-hide-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/go-up-symbolic.svg">hicolor/scalable/actions/go-up-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/actions/utilities-terminal-symbolic.svg">hicolor/scalable/actions/utilities-terminal-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/ui/pan-start-symbolic.svg">hicolor/scalable/ui/pan-start-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/ui/pan-end-symbolic.svg">hicolor/scalable/ui/pan-end-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/ui/pan-down-symbolic.svg">hicolor/scalable/ui/pan-down-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/ui/window-close-symbolic.svg">hicolor/scalable/ui/window-close-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/places/folder-symbolic.svg">hicolor/scalable/places/folder-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/places/folder-open-symbolic.svg">hicolor/scalable/places/folder-open-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/places/user-home-symbolic.svg">hicolor/scalable/places/user-home-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/mimetypes/text-x-generic-symbolic.svg">hicolor/scalable/mimetypes/text-x-generic-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/hicolor/scalable/emblems/emblem-ok-symbolic.svg">hicolor/scalable/emblems/emblem-ok-symbolic.svg</file>
+  </gresource>
+</gresources>

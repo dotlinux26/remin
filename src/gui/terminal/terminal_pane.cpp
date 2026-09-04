@@ -18,6 +18,11 @@ TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd)
     // Native VTE terminal (C API). VTE owns PTY + scrollback + selection.
     vte_ = (VteTerminal*) vte_terminal_new();
 
+    // Ensure all terminals start in the user's home directory by default.
+    if (cwd_.empty()) {
+        if (const char* home = std::getenv("HOME")) cwd_ = home;
+    }
+
     // Spawn the shell into the terminal's PTY.
     const char* shell_argv[] = { shell_.c_str(), nullptr };
     char** envp = nullptr;
@@ -40,6 +45,11 @@ TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd)
     vte_terminal_set_scroll_on_output(vte_, TRUE);
     vte_terminal_set_enable_fallback_scrolling(vte_, TRUE);
 
+    // Make the native VTE expand to fill its container (fixes the white gap
+    // under the root terminal when its box grows but VTE stays at natural size).
+    gtk_widget_set_hexpand(GTK_WIDGET(vte_), TRUE);
+    gtk_widget_set_vexpand(GTK_WIDGET(vte_), TRUE);
+
     // Embed the native VTE into the gtkmm box via C API on gobj().
     gtk_box_append(GTK_BOX(box->gobj()), GTK_WIDGET(vte_));
 
@@ -47,11 +57,29 @@ TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd)
     g_signal_connect(GTK_WIDGET(vte_), "commit",
                      G_CALLBACK(on_commit_trampoline), this);
 
+    // Ctrl+Shift+C copy selection, Ctrl+Shift+V paste (like most terminals).
+    GtkEventController* copy_ctrl = gtk_event_controller_key_new();
+    g_signal_connect(copy_ctrl, "key-pressed", G_CALLBACK(on_key_pressed), this);
+    gtk_widget_add_controller(GTK_WIDGET(vte_), copy_ctrl);
+
     // Store a pointer to the managed box as our widget.
     widget_ = box;
+    // Hold an extra ref so the widget survives tree_host_->remove() during
+    // rebuilds. Without this, removing the widget from its parent drops the
+    // ref to 0 and GTK frees it, leaving widget_ dangling.
+    g_object_ref(widget_->gobj());
 }
 
-TerminalPane::~TerminalPane() = default;
+TerminalPane::~TerminalPane() {
+    if (widget_) {
+        // Release the extra ref we took in the constructor.
+        // If the widget is still parented (normal operation), the parent holds
+        // its own ref so this just decrements. If unparented, this frees it.
+        auto* g = widget_->gobj();
+        widget_ = nullptr;
+        g_object_unref(g);
+    }
+}
 
 Gtk::Widget& TerminalPane::widget() {
     return *widget_;
@@ -111,6 +139,26 @@ void TerminalPane::use_default_colors() {
     if (vte_) vte_terminal_set_default_colors(vte_);
 }
 
+bool TerminalPane::has_selection() const {
+    return vte_ && vte_terminal_get_has_selection(vte_);
+}
+
+void TerminalPane::copy_clipboard() {
+    if (vte_) vte_terminal_copy_clipboard_format(vte_, VTE_FORMAT_TEXT);
+}
+
+void TerminalPane::paste_clipboard() {
+    if (vte_) vte_terminal_paste_clipboard(vte_);
+}
+
+void TerminalPane::select_all() {
+    if (vte_) vte_terminal_select_all(vte_);
+}
+
+void TerminalPane::clear_scrollback() {
+    if (vte_) vte_terminal_reset(vte_, TRUE, TRUE);
+}
+
 void TerminalPane::on_commit_trampoline(GtkWidget*, const char* text, guint size, gpointer user_data) {
     auto* self = static_cast<TerminalPane*>(user_data);
     if (self->on_input_) self->on_input_();
@@ -130,6 +178,34 @@ void TerminalPane::on_commit_trampoline(GtkWidget*, const char* text, guint size
             }
             if (!line.empty()) self->on_command_(line);
         }
+    }
+}
+
+gboolean TerminalPane::on_key_pressed(GtkEventControllerKey*, guint keyval,
+                                      guint keycode, GdkModifierType state, gpointer user_data) {
+    auto* self = static_cast<TerminalPane*>(user_data);
+    if (!self || !self->vte_) return FALSE;
+
+    const bool ctrl = (state & GDK_CONTROL_MASK) != 0;
+    const bool shift = (state & GDK_SHIFT_MASK) != 0;
+    if (!ctrl || !shift) return FALSE;
+
+    switch (keyval) {
+        case GDK_KEY_C:
+        case GDK_KEY_c: {
+            // Copy the current selection into the clipboard.
+            if (vte_terminal_get_has_selection(self->vte_)) {
+                vte_terminal_copy_clipboard_format(self->vte_, VTE_FORMAT_TEXT);
+            }
+            return TRUE;
+        }
+        case GDK_KEY_V:
+        case GDK_KEY_v: {
+            vte_terminal_paste_clipboard(self->vte_);
+            return TRUE;
+        }
+        default:
+            return FALSE;
     }
 }
 

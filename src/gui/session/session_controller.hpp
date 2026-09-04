@@ -50,6 +50,11 @@ public:
     bool remove_pane(const remin::core::TabId& tab, const remin::core::PaneId& pane);
     bool set_pane_ratio(const remin::core::TabId& tab,
                         const remin::core::PaneId& pane, double ratio);
+    // Record the focused pane so split targets the pane the user is on.
+    bool focus_pane(const remin::core::TabId& tab, const remin::core::PaneId& pane);
+
+    // Close a tab (delegates to MainWindow)
+    bool close_tab(const remin::core::WindowId& window, const remin::core::TabId& tab);
 
     // -- Notes --
     // Names a new note; its body is persisted/loaded via the storage blob

@@ -95,6 +95,19 @@ bool SessionController::set_pane_ratio(const remin::core::TabId& tab,
     return core_ && core_->set_pane_ratio(tab, pane, ratio);
 }
 
+bool SessionController::focus_pane(const remin::core::TabId& tab,
+                                   const remin::core::PaneId& pane) {
+    return core_ && core_->focus_pane(tab, pane);
+}
+
+bool SessionController::close_tab(const remin::core::WindowId& window,
+                                  const remin::core::TabId& tab) {
+    // The MainWindow will handle the actual tab closing via its own method
+    // This is a placeholder - the actual closing is done by MainWindow
+    // which has access to the GUI widgets
+    return false; // Will be handled by MainWindow directly
+}
+
 std::string SessionController::new_note() {
     if (!core_) return {};
     // Notes share the pane id space (globally unique ids); the body is stored

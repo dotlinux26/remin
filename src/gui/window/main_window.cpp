@@ -19,9 +19,10 @@ MainWindow::MainWindow(SessionController* controller,
     set_title("Remin");
     set_default_size(1024, 768);
 
-    // Register bundled icon theme
+    // Register bundled icon resource path (icons loaded via GResource in Application)
     try {
         auto icon_theme = Gtk::IconTheme::get_for_display(get_display());
+        icon_theme->add_resource_path("/icons/hicolor/scalable");
         icon_theme->add_search_path(std::string(REMIN_RESOURCE_DIR) + "/icons");
     } catch (const Glib::Error&) {}
     set_icon_name("remin");
@@ -54,12 +55,13 @@ MainWindow::MainWindow(SessionController* controller,
 
     root->append(*toolbar_);
     root->append(*find_bar_);
-    root->append(*tab_bar_);
+    root->append(*tab_box_);
     root->append(*main_paned_);
     root->append(*status_bar_);
 
-    // Global key controller for accelerators
+    // Global key controller for accelerators (capture phase to intercept before VTE)
     key_ctrl_ = Gtk::EventControllerKey::create();
+    key_ctrl_->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
     key_ctrl_->signal_key_pressed().connect(
         sigc::slot<bool(unsigned int, unsigned int, Gdk::ModifierType)>(
             [this](unsigned int keyval, unsigned int, Gdk::ModifierType mods) -> bool {
@@ -71,31 +73,57 @@ MainWindow::MainWindow(SessionController* controller,
     // Click outside find bar to close it
     auto click_ctrl = Gtk::GestureClick::create();
     click_ctrl->set_button(0); // Any button
-    click_ctrl->signal_pressed().connect([this](int, double x, double y) {
-        if (find_bar_ && find_bar_->get_visible()) {
-            // Check if click is outside find_bar
-            auto allocation = find_bar_->get_allocation();
-            // Get click position relative to find_bar
-            auto* root_widget = get_child();
-            if (root_widget) {
-                // Convert root coordinates to find_bar coordinates
-                int fx = allocation.get_x();
-                int fy = allocation.get_y();
-                int fw = allocation.get_width();
-                int fh = allocation.get_height();
-                // Click position (x, y) is relative to the window root
-                // We need to check if it's within the find_bar rect
-                // The click coordinates are in window coordinates
-                if (x < fx || x > fx + fw || y < fy || y > fy + fh) {
-                    hide_find_bar();
-                }
-            }
+click_ctrl->signal_pressed().connect([this, click_ctrl](int, double x, double y) {
+        if (!find_bar_ || !find_bar_->get_visible()) return;
+        // Get the widget that was actually clicked (event target)
+        auto* event_widget = click_ctrl->get_widget();
+        // Check if the clicked widget or its ancestors include find_bar_
+        for (auto* w = event_widget; w; w = w->get_parent()) {
+            if (w == find_bar_) return; // Click is inside find_bar
+        }
+        // Also check coordinates as fallback
+        auto allocation = find_bar_->get_allocation();
+        if (x < allocation.get_x() || x > allocation.get_x() + allocation.get_width() ||
+            y < allocation.get_y() || y > allocation.get_y() + allocation.get_height()) {
+            hide_find_bar();
         }
     });
     add_controller(click_ctrl);
 
-    // Open initial terminal tab
-    new_terminal_tab();
+    // Click outside terminal/note area to clear focus (allows global shortcuts like Ctrl+F/H to work)
+    auto focus_click_ctrl = Gtk::GestureClick::create();
+    focus_click_ctrl->set_button(0);
+    focus_click_ctrl->signal_pressed().connect([this](int, double x, double y) {
+        // Check if click is on a non-terminal/note widget (header, toolbar, tab bar, sidebar, status bar)
+        auto* focus_widget = get_focus();
+        if (!focus_widget) return;
+        
+        // Walk up to find if focus is in a terminal pane or note editor
+        bool focus_in_editable = false;
+        for (auto* w = focus_widget; w; w = w->get_parent()) {
+            if (w == find_bar_) { focus_in_editable = true; break; }
+            if (dynamic_cast<TerminalTabView*>(w)) { focus_in_editable = true; break; }
+            if (dynamic_cast<NoteTabView*>(w)) { focus_in_editable = true; break; }
+        }
+        if (!focus_in_editable) return;
+        
+        // Check if click is outside the focused editable widget
+        auto allocation = focus_widget->get_allocation();
+        if (x < allocation.get_x() || x > allocation.get_x() + allocation.get_width() ||
+            y < allocation.get_y() || y > allocation.get_y() + allocation.get_height()) {
+            // Click outside - clear focus by focusing the window itself
+            grab_focus();
+        }
+    });
+    add_controller(focus_click_ctrl);
+
+    // Restore workspace state (windows/tabs/panes) from core, if any.
+    restore_workspace();
+
+    // If no tabs were restored, open a default terminal tab
+    if (tabs_.empty()) {
+        new_terminal_tab();
+    }
 
     // Connect tab switching signal via notify on visible-child-name property
     content_stack_->property_visible_child_name().signal_changed().connect(
@@ -143,6 +171,17 @@ void MainWindow::setup_header() {
     header_box_->append(*header_label_);
 
     header_->set_title_widget(*header_box_);
+
+    // Sidebar toggle button (top-right), label reflects current state.
+    // Frame-less so only the icon shows (no button chrome/background/border).
+    sidebar_toggle_btn_ = Gtk::make_managed<Gtk::Button>();
+    sidebar_toggle_btn_->set_has_frame(false);
+    sidebar_toggle_btn_->add_css_class("remin-toolbar-btn");
+    sidebar_toggle_btn_->set_icon_name("sidebar-show-symbolic");
+    sidebar_toggle_btn_->set_tooltip_text("Toggle Sidebar (Ctrl+P)");
+    sidebar_toggle_btn_->signal_clicked().connect(
+        sigc::mem_fun(*this, &MainWindow::toggle_history_sidebar));
+    header_->pack_end(*sidebar_toggle_btn_);
 }
 
 void MainWindow::setup_menu_bar() {
@@ -158,8 +197,8 @@ void MainWindow::setup_menu_bar() {
 
     // Terminal menu
     auto terminal_menu = Gio::Menu::create();
-    terminal_menu->append("Split Horizontally", "win.split_h");
-    terminal_menu->append("Split Vertically", "win.split_v");
+    terminal_menu->append("Split Horizontally (Alt+H)", "win.split_h");
+    terminal_menu->append("Split Vertically (Alt+V)", "win.split_v");
     terminal_menu->append("Custom Split…", "win.custom_split");
     terminal_menu->append_section(Gio::Menu::create()); // separator
     terminal_menu->append("Close Pane", "win.close_pane");
@@ -266,7 +305,8 @@ Gtk::Button* make_tool_btn(const char* icon, const char* label, const char* tip,
 
     // Create a box with icon and label
     auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
-    auto* img = Gtk::make_managed<Gtk::Image>(icon);
+    auto* img = Gtk::make_managed<Gtk::Image>();
+    img->set_from_icon_name(icon);
     img->set_pixel_size(16);
     auto* lbl = Gtk::make_managed<Gtk::Label>(label);
     lbl->add_css_class("remin-tool-label");
@@ -287,12 +327,18 @@ void MainWindow::update_toolbar() {
     if (active_tab_ < 0 || active_tab_ >= (int)tabs_.size()) return;
 
     if (tabs_[active_tab_]->kind() == TabKind::Terminal) {
-        toolbar_->append(*make_tool_btn(
-            "pan-start-symbolic", "Split H", "Split Horizontal (Shift+H)",
-            sigc::mem_fun(*this, &MainWindow::on_split_terminal_horizontal)));
-        toolbar_->append(*make_tool_btn(
-            "pan-end-symbolic", "Split V", "Split Vertical (Shift+V)",
-            sigc::mem_fun(*this, &MainWindow::on_split_terminal_vertical)));
+        // Use Unicode box-drawing characters for split icons
+        auto* split_h = Gtk::make_managed<Gtk::Button>("⬒");
+        split_h->add_css_class("remin-tool-btn");
+        split_h->set_tooltip_text("Split Horizontal (Alt+H)");
+        split_h->signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::on_split_terminal_horizontal));
+        toolbar_->append(*split_h);
+
+        auto* split_v = Gtk::make_managed<Gtk::Button>("◧");
+        split_v->add_css_class("remin-tool-btn");
+        split_v->set_tooltip_text("Split Vertical (Alt+V)");
+        split_v->signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::on_split_terminal_vertical));
+        toolbar_->append(*split_v);
         toolbar_->append(*make_tool_btn(
             "window-close-symbolic", "Close", "Close Pane",
             sigc::mem_fun(*this, &MainWindow::on_close_terminal_pane)));
@@ -310,6 +356,26 @@ void MainWindow::update_toolbar() {
             "document-save-as-symbolic", "Save As", "Save As…",
             [this]() { on_note_save_as(); }));
         toolbar_->append(*make_tool_btn(
+            "document-open-symbolic", "Open", "Open File… (Ctrl+O)",
+            [this]() {
+                // Open file dialog for note editor
+                auto* win = dynamic_cast<Gtk::Window*>(get_root());
+                if (!win) return;
+                auto dialog = Gtk::make_managed<Gtk::FileChooserDialog>(
+                    *win, "Open File", Gtk::FileChooser::Action::OPEN);
+                dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+                dialog->add_button("Open", Gtk::ResponseType::OK);
+                dialog->set_modal(true);
+                dialog->signal_response().connect([this, dialog](int response) {
+                    if (response == Gtk::ResponseType::OK) {
+                        const auto path = dialog->get_file()->get_path();
+                        if (!path.empty()) open_note_from_path(path);
+                    }
+                    dialog->close();
+                });
+                dialog->present();
+            }));
+        toolbar_->append(*make_tool_btn(
             "view-paged-symbolic", "Preview", "Toggle Preview",
             sigc::mem_fun(*this, &MainWindow::on_toggle_note_preview)));
         toolbar_->append(*make_tool_btn(
@@ -319,26 +385,87 @@ void MainWindow::update_toolbar() {
 }
 
 void MainWindow::setup_tab_bar() {
+    // Horizontally scrollable tab row: with many tabs the row scrolls sideways
+    // (VS Code style) instead of stretching tabs across the window.
+    //
+    // The horizontal scrollbar lives in its OWN row below the labels (a
+    // dedicated Gtk::Scrollbar), so overflow never overlaps or eats the tab
+    // label strip. It is shown only when the tab row actually overflows.
+    // The + buttons are FIXED at the right, NOT part of the scrolling tab list.
+    tab_box_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    tab_box_->add_css_class("remin-tab-box");
+
+    // Horizontal container: tabs scroller (flex) + fixed + buttons (right)
+    auto* tab_row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
+    tab_row->add_css_class("remin-tab-row");
+
+    tab_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
+    // EXTERNAL horizontal policy: the window NEVER grows to fit the tabs —
+    // overflow is reported through the hadjustment and rendered by the
+    // dedicated scrollbar row below the labels. No internal scrollbar is drawn.
+    tab_scroller_->set_policy(Gtk::PolicyType::EXTERNAL, Gtk::PolicyType::NEVER);
+    tab_scroller_->set_vexpand(false);
+    tab_scroller_->set_hexpand(true);
+    tab_scroller_->set_halign(Gtk::Align::FILL);
+
     tab_bar_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 4);
     tab_bar_->add_css_class("remin-tab-bar");
     tab_bar_->set_margin_top(4);
     tab_bar_->set_margin_bottom(4);
     tab_bar_->set_margin_start(8);
     tab_bar_->set_margin_end(8);
+    tab_bar_->set_hexpand(false); // Don't let tab bar expand beyond scroller
+    tab_scroller_->set_child(*tab_bar_);
+
+    // Dedicated horizontal scrollbar, linked to the scroller's adjustment.
+    auto hadj = tab_scroller_->get_hadjustment();
+    tab_scrollbar_ = Gtk::make_managed<Gtk::Scrollbar>(hadj);
+    tab_scrollbar_->set_orientation(Gtk::Orientation::HORIZONTAL);
+    tab_scrollbar_->add_css_class("remin-tab-scrollbar");
+    tab_scrollbar_->set_visible(false);
+
+    // Fixed + buttons at the right (outside scroller)
+    auto* tab_actions = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 4);
+    tab_actions->add_css_class("remin-tab-actions");
+    tab_actions->set_margin_end(8);
+    tab_actions->set_valign(Gtk::Align::CENTER);
 
     new_terminal_btn_ = Gtk::make_managed<Gtk::Button>();
     new_terminal_btn_->add_css_class("remin-tab-btn");
     new_terminal_btn_->set_icon_name("list-add-symbolic");
     new_terminal_btn_->set_tooltip_text("New Terminal Tab (Ctrl+T)");
+    new_terminal_btn_->set_valign(Gtk::Align::CENTER);
+    new_terminal_btn_->set_halign(Gtk::Align::CENTER);
     new_terminal_btn_->signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::new_terminal_tab));
-    tab_bar_->append(*new_terminal_btn_);
+    tab_actions->append(*new_terminal_btn_);
 
     new_note_btn_ = Gtk::make_managed<Gtk::Button>();
     new_note_btn_->add_css_class("remin-tab-btn");
     new_note_btn_->set_icon_name("document-new-symbolic");
     new_note_btn_->set_tooltip_text("New Note Tab (Ctrl+Shift+N)");
+    new_note_btn_->set_valign(Gtk::Align::CENTER);
+    new_note_btn_->set_halign(Gtk::Align::CENTER);
     new_note_btn_->signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::new_note_tab));
-    tab_bar_->append(*new_note_btn_);
+    tab_actions->append(*new_note_btn_);
+
+    tab_row->append(*tab_scroller_);
+    tab_row->append(*tab_actions);
+
+    tab_box_->append(*tab_row);
+    tab_box_->append(*tab_scrollbar_);
+
+    // Show the scrollbar only when the tab row overflows. Fires on range
+    // changes (event-driven, no polling).
+    auto update_overflow = [this]() {
+        auto hadj = tab_scroller_->get_hadjustment();
+        bool overflow = hadj && hadj->get_upper() > hadj->get_page_size() + 0.5;
+        if (tab_scrollbar_ && tab_scrollbar_->get_visible() != overflow) {
+            tab_scrollbar_->set_visible(overflow);
+        }
+    };
+    tab_scroller_->get_hadjustment()->signal_changed().connect(update_overflow);
+    tab_scroller_->get_vadjustment()->signal_changed().connect(update_overflow);
+    update_tab_overflow_fn = std::move(update_overflow);
 }
 
 void MainWindow::setup_content_stack() {
@@ -352,39 +479,78 @@ void MainWindow::setup_content_stack() {
     main_paned_->set_orientation(Gtk::Orientation::HORIZONTAL);
     main_paned_->set_hexpand(true);
     main_paned_->set_vexpand(true);
-    main_paned_->set_wide_handle(true);
-    main_paned_->set_start_child(*sidebar_stack_);
+    main_paned_->set_wide_handle(false);
+    main_paned_->set_start_child(*sidebar_root_);
     main_paned_->set_end_child(*content_stack_);
+    main_paned_->set_position(200);
 }
 
-namespace {
-std::string format_file_size(uintmax_t bytes) {
-    if (bytes < 1024) return std::to_string(bytes) + " B";
-    if (bytes < 1024 * 1024) return std::to_string(bytes / 1024) + " KB";
-    if (bytes < 1024 * 1024 * 1024) {
-        double mb = static_cast<double>(bytes) / (1024.0 * 1024.0);
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%.1f MB", mb);
-        return buf;
+void MainWindow::restore_workspace() {
+    if (!core_ || !core_->current_workspace()) return;
+    const auto* ws = core_->current_workspace();
+    if (ws->windows.empty()) return;
+
+    // For V1, we only handle the first window (this MainWindow).
+    const auto& win = ws->windows.front();
+    if (win.tabs.empty()) return;
+
+    // Restore each tab from the core's workspace state
+    for (const auto& tab : win.tabs) {
+        // Check if this is a terminal tab (has a Pane pane_tree with a valid pane)
+        bool is_terminal = false;
+        remin::core::PaneId root_pane;
+        if (tab.pane_tree.kind() == remin::core::PaneTree::Kind::Pane &&
+            tab.pane_tree.pane().has_value()) {
+            is_terminal = true;
+            root_pane = tab.pane_tree.pane()->id;
+        }
+
+        if (is_terminal) {
+            // Create TerminalTabView directly with the existing core IDs
+            // bypassing controller_->new_terminal_tab() which would create new core objects
+            auto* view = new TerminalTabView(controller_, this, win.id, tab.id, root_pane);
+            view->set_close_tab_request_callback([this, view]() {
+                // Find the current index of this view
+                for (size_t i = 0; i < tabs_.size(); ++i) {
+                    if (tabs_[i].get() == view) {
+                        close_tab(static_cast<int>(i));
+                        break;
+                    }
+                }
+            });
+            tabs_.push_back(std::unique_ptr<TabView>(view));
+            term_tabs_.push_back(view);
+
+            content_stack_->add(*view, std::to_string(tabs_.size() - 1));
+            // Don't activate yet - we'll activate the focused one after all tabs are created
+        }
+        // TODO: Handle note tabs - they need a different approach
     }
-    double gb = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.1f GB", gb);
-    return buf;
-}
 
-std::string format_file_time(const std::filesystem::file_time_type& ftime) {
-    auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-        ftime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
-    std::time_t tt = std::chrono::system_clock::to_time_t(sctp);
-    char buf[64];
-    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&tt));
-    return buf;
+    // Activate the focused tab (or first tab if none focused)
+    if (!tabs_.empty()) {
+        auto focus_idx = 0;
+        if (win.focus_tab_id.has_value()) {
+            for (size_t i = 0; i < tabs_.size(); ++i) {
+                if (i < win.tabs.size() && win.tabs[i].id == win.focus_tab_id) {
+                    focus_idx = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+        active_tab_ = focus_idx;
+        content_stack_->set_visible_child(*tabs_[focus_idx]);
+        tabs_[focus_idx]->activate();
+    }
+
+    update_tab_bar();
+    update_toolbar();
+    update_status_bar();
 }
-} // anonymous namespace
 
 void MainWindow::setup_sidebar() {
-    // Tab switcher: History | Directory
+    // Shared sidebar mode switcher — History | Files, always both visible so
+    // switching modes never "hides" the other tab.
     auto* tab_bar = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
     tab_bar->add_css_class("remin-sidebar-tabs");
 
@@ -400,51 +566,36 @@ void MainWindow::setup_sidebar() {
 
     tab_bar->append(*history_tab);
     tab_bar->append(*directory_tab);
+    sidebar_mode_tabs_[0] = history_tab;
+    sidebar_mode_tabs_[1] = directory_tab;
 
-    // Sidebar stack containing [tab_bar + history | directory]
+    // Sidebar stack containing the two pages.
     sidebar_stack_ = Gtk::make_managed<Gtk::Stack>();
     sidebar_stack_->set_hexpand(false);
     sidebar_stack_->set_vexpand(true);
 
-    auto* history_container = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
-    history_container->append(*tab_bar);
+    // History page.
     history_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
     history_scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
     history_scroller_->set_vexpand(true);
     history_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
     history_scroller_->set_child(*history_list_);
-    history_container->append(*history_scroller_);
-    sidebar_stack_->add(*history_container, "history", "History");
+    sidebar_stack_->add(*history_scroller_, "history", "History");
 
-    auto* directory_container = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
-    auto* dir_tab_bar = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
-    dir_tab_bar->add_css_class("remin-sidebar-tabs");
-    auto* dir_tab_label = Gtk::make_managed<Gtk::Label>("Files");
-    dir_tab_label->add_css_class("remin-sidebar-tab");
-    dir_tab_label->set_hexpand(true);
-    dir_tab_bar->append(*dir_tab_label);
-    directory_container->append(*dir_tab_bar);
+    // Directory page — delegated to a focused DirectoryTreePanel.
+    directory_panel_ = Gtk::make_managed<DirectoryTreePanel>(
+        [this](const std::filesystem::path& path) { open_note_from_path(path); });
+    sidebar_stack_->add(*directory_panel_, "directory", "Files");
 
-    directory_search_ = Gtk::make_managed<Gtk::SearchEntry>();
-    directory_search_->add_css_class("remin-dir-search");
-    directory_search_->set_placeholder_text("Search files...");
-    directory_search_->set_hexpand(true);
-    directory_search_->signal_changed().connect([this]() {
-        directory_filter_ = directory_search_->get_text();
-        refresh_directory();
-    });
-    directory_container->append(*directory_search_);
-
-    directory_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
-    directory_scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
-    directory_scroller_->set_vexpand(true);
-    directory_tree_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
-    directory_scroller_->set_child(*directory_tree_);
-    directory_container->append(*directory_scroller_);
-    sidebar_stack_->add(*directory_container, "directory", "Files");
+    // Top-level sidebar vertical box: switcher always on top, stack below.
+    auto* sidebar_root = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    sidebar_root->add_css_class("remin-sidebar");
+    sidebar_root->append(*tab_bar);
+    sidebar_root->append(*sidebar_stack_);
+    sidebar_root_ = sidebar_root;
 
     const char* home = std::getenv("HOME");
-    current_dir_ = home ? home : "/";
+    if (directory_panel_) directory_panel_->set_root(home ? home : "/");
 
     // Load persisted command history
     if (controller_) {
@@ -461,9 +612,15 @@ void MainWindow::set_sidebar_mode(const std::string& mode) {
     if (!sidebar_stack_) return;
     if (mode == "history") {
         sidebar_stack_->set_visible_child("history");
+        if (sidebar_mode_tabs_[0]) sidebar_mode_tabs_[0]->add_css_class("active");
+        if (sidebar_mode_tabs_[1]) sidebar_mode_tabs_[1]->remove_css_class("active");
+        // Refresh history list when switching to history mode
+        update_history_sidebar();
     } else if (mode == "directory") {
         sidebar_stack_->set_visible_child("directory");
-        refresh_directory();
+        if (sidebar_mode_tabs_[1]) sidebar_mode_tabs_[1]->add_css_class("active");
+        if (sidebar_mode_tabs_[0]) sidebar_mode_tabs_[0]->remove_css_class("active");
+        if (directory_panel_) directory_panel_->refresh();
     }
 }
 
@@ -502,304 +659,11 @@ void MainWindow::clear_history() {
     update_history_sidebar();
 }
 
-bool MainWindow::directory_matches_filter(const std::string& name) {
-    if (directory_filter_.empty()) return true;
-    std::string lower_name = name;
-    std::string lower_filter = directory_filter_;
-    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
-    std::transform(lower_filter.begin(), lower_filter.end(), lower_filter.begin(), ::tolower);
-    return lower_name.find(lower_filter) != std::string::npos;
-}
-
-void MainWindow::refresh_directory() {
-    if (!directory_tree_) return;
-    while (auto* child = directory_tree_->get_first_child()) directory_tree_->remove(*child);
-
-    if (current_dir_.has_parent_path()) {
-        if (directory_matches_filter("..")) {
-            auto* parent_row = create_directory_row("..", true, current_dir_.parent_path());
-            directory_tree_->append(*parent_row);
-        }
-    }
-
-    try {
-        std::vector<std::filesystem::directory_entry> entries;
-        for (const auto& entry : std::filesystem::directory_iterator(current_dir_)) {
-            entries.push_back(entry);
-        }
-        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-            bool a_dir = a.is_directory();
-            bool b_dir = b.is_directory();
-            if (a_dir != b_dir) return a_dir > b_dir;
-            return a.path().filename().string() < b.path().filename().string();
-        });
-
-        for (const auto& entry : entries) {
-            std::string name = entry.path().filename().string();
-            if (!name.empty() && name[0] == '.') continue;
-            if (!directory_matches_filter(name)) continue;
-            if (entry.is_directory()) {
-                directory_tree_->append(*create_directory_row(name, true, entry.path()));
-            } else if (entry.is_regular_file()) {
-                directory_tree_->append(*create_directory_row(name, false, entry.path()));
-            }
-        }
-    } catch (const std::exception&) {}
-}
-
-Gtk::Widget* MainWindow::create_directory_row(const std::string& name, bool is_dir, const std::filesystem::path& full_path) {
-    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 4);
-    box->add_css_class("remin-directory-row");
-    box->set_margin_start(8);
-    box->set_margin_end(4);
-
-    auto* icon = Gtk::make_managed<Gtk::Image>();
-    icon->set_from_icon_name(is_dir ? "folder-symbolic" : "text-x-generic-symbolic");
-    icon->set_pixel_size(14);
-    icon->set_valign(Gtk::Align::CENTER);
-    box->append(*icon);
-
-    auto* label = Gtk::make_managed<Gtk::Label>(name);
-    label->set_halign(Gtk::Align::START);
-    label->set_hexpand(true);
-    label->set_ellipsize(Pango::EllipsizeMode::END);
-    label->add_css_class("remin-directory-name");
-    box->append(*label);
-
-    if (!is_dir) {
-        try {
-            auto ftime = std::filesystem::last_write_time(full_path);
-            auto fsize = std::filesystem::file_size(full_path);
-            auto* size_label = Gtk::make_managed<Gtk::Label>(format_file_size(fsize));
-            size_label->add_css_class("remin-directory-size");
-            size_label->set_valign(Gtk::Align::CENTER);
-            box->append(*size_label);
-            std::string tooltip = name + "\nModified: " + format_file_time(ftime);
-            box->set_tooltip_text(tooltip);
-        } catch (...) {}
-    } else {
-        box->set_tooltip_text(full_path.string());
-    }
-
-    if (is_dir) {
-        bool has_children = false;
-        try {
-            for (const auto& entry : std::filesystem::directory_iterator(full_path)) {
-                has_children = true;
-                break;
-            }
-        } catch (...) {}
-
-        if (has_children) {
-            auto* expander = Gtk::make_managed<Gtk::Expander>();
-            expander->set_child(*box);
-            expander->set_expanded(false);
-            expander->property_expanded().signal_changed().connect([this, expander, full_path]() {
-                if (expander->get_expanded()) {
-                    populate_directory_expander(expander, full_path);
-                }
-            });
-            auto click = Gtk::GestureClick::create();
-            click->set_button(3);
-            click->signal_pressed().connect([this, expander, full_path, name](int, double, double) {
-                show_directory_context_menu(*expander, full_path, name, true);
-            });
-            expander->add_controller(click);
-            return expander;
-        } else {
-            auto right_click = Gtk::GestureClick::create();
-            right_click->set_button(3);
-            right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
-                show_directory_context_menu(*box, full_path, name, true);
-            });
-            box->add_controller(right_click);
-            return box;
-        }
-    } else {
-        auto click = Gtk::GestureClick::create();
-        click->signal_pressed().connect([this, full_path, name](int n_press, double, double) {
-            if (n_press == 2) {
-                open_note_from_path(full_path);
-            }
-        });
-        box->add_controller(click);
-        auto right_click = Gtk::GestureClick::create();
-        right_click->set_button(3);
-        right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
-            show_directory_context_menu(*box, full_path, name, false);
-        });
-        box->add_controller(right_click);
-        return box;
-    }
-}
-
-void MainWindow::populate_directory_expander(Gtk::Expander* expander, const std::filesystem::path& dir_path) {
-    Gtk::Widget* child = expander->get_child();
-    Gtk::Box* box = dynamic_cast<Gtk::Box*>(child);
-    if (!box) return;
-
-    Gtk::Box* children_box = nullptr;
-    for (auto* w = box->get_first_child(); w; w = w->get_next_sibling()) {
-        if (auto* b = dynamic_cast<Gtk::Box*>(w)) {
-            if (b->get_orientation() == Gtk::Orientation::VERTICAL) {
-                children_box = b;
-                break;
-            }
-        }
-    }
-    if (!children_box) {
-        children_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
-        children_box->set_margin_start(16);
-        box->append(*children_box);
-    } else {
-        while (auto* c = children_box->get_first_child()) children_box->remove(*c);
-    }
-
-    try {
-        std::vector<std::filesystem::directory_entry> entries;
-        for (const auto& entry : std::filesystem::directory_iterator(dir_path)) {
-            entries.push_back(entry);
-        }
-        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-            bool a_dir = a.is_directory();
-            bool b_dir = b.is_directory();
-            if (a_dir != b_dir) return a_dir > b_dir;
-            return a.path().filename().string() < b.path().filename().string();
-        });
-        for (const auto& entry : entries) {
-            std::string name = entry.path().filename().string();
-            if (!name.empty() && name[0] == '.') continue;
-            if (entry.is_directory()) {
-                children_box->append(*create_directory_row(name, true, entry.path()));
-            } else if (entry.is_regular_file()) {
-                children_box->append(*create_directory_row(name, false, entry.path()));
-            }
-        }
-    } catch (const std::exception&) {}
-}
-
-void MainWindow::show_directory_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir) {
-    auto* menu = Gtk::make_managed<Gtk::Popover>();
-    menu->add_css_class("remin-context-menu");
-
-    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
-    box->set_margin(6);
-
-    auto add_item = [menu, box](const char* label, std::function<void()> cb) {
-        auto* b = Gtk::make_managed<Gtk::Button>(label);
-        b->add_css_class("remin-menu-item");
-        b->set_halign(Gtk::Align::FILL);
-        b->signal_clicked().connect([menu, cb]() {
-            menu->popdown();
-            if (cb) cb();
-        });
-        box->append(*b);
-        return b;
-    };
-
-    if (is_dir) {
-        add_item("New File", [this, path]() { create_new_file(path); });
-        add_item("New Folder", [this, path]() { create_new_folder(path); });
-        add_item("Rename", [this, path]() { rename_item(path); });
-        add_item("Delete", [this, path]() { delete_item(path); });
-    } else {
-        add_item("Open", [this, path]() { open_note_from_path(path); });
-        add_item("Rename", [this, path]() { rename_item(path); });
-        add_item("Delete", [this, path]() { delete_item(path); });
-    }
-    add_item("Copy Path", [this, path]() {
-        auto display = get_display();
-        if (display) display->get_clipboard()->set_text(path.string());
-    });
-
-    menu->set_child(*box);
-    menu->set_parent(widget);
-    menu->popup();
-}
-
-void MainWindow::create_new_file(const std::filesystem::path& dir) {
-    auto dialog = Gtk::make_managed<Gtk::Dialog>("New File", *this, true);
-    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
-    dialog->add_button("Create", Gtk::ResponseType::OK);
-    auto* entry = Gtk::make_managed<Gtk::Entry>();
-    entry->set_placeholder_text("filename.txt");
-    dialog->get_content_area()->append(*entry);
-    entry->grab_focus();
-    dialog->signal_response().connect([this, dialog, entry, dir](int response) {
-        if (response == Gtk::ResponseType::OK) {
-            std::filesystem::path new_path = dir / entry->get_text().raw();
-            std::ofstream file(new_path);
-            file.close();
-            refresh_directory();
-        }
-        dialog->close();
-    });
-    dialog->present();
-}
-
-void MainWindow::create_new_folder(const std::filesystem::path& dir) {
-    auto dialog = Gtk::make_managed<Gtk::Dialog>("New Folder", *this, true);
-    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
-    dialog->add_button("Create", Gtk::ResponseType::OK);
-    auto* entry = Gtk::make_managed<Gtk::Entry>();
-    entry->set_placeholder_text("folder_name");
-    dialog->get_content_area()->append(*entry);
-    entry->grab_focus();
-    dialog->signal_response().connect([this, dialog, entry, dir](int response) {
-        if (response == Gtk::ResponseType::OK) {
-            std::filesystem::create_directory(dir / entry->get_text().raw());
-            refresh_directory();
-        }
-        dialog->close();
-    });
-    dialog->present();
-}
-
-void MainWindow::rename_item(const std::filesystem::path& path) {
-    auto dialog = Gtk::make_managed<Gtk::Dialog>("Rename", *this, true);
-    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
-    dialog->add_button("Rename", Gtk::ResponseType::OK);
-    auto* entry = Gtk::make_managed<Gtk::Entry>();
-    entry->set_text(path.filename().string());
-    entry->select_region(0, -1);
-    dialog->get_content_area()->append(*entry);
-    entry->grab_focus();
-    dialog->signal_response().connect([this, dialog, entry, path](int response) {
-        if (response == Gtk::ResponseType::OK) {
-            std::filesystem::rename(path, path.parent_path() / entry->get_text().raw());
-            refresh_directory();
-        }
-        dialog->close();
-    });
-    dialog->present();
-}
-
-void MainWindow::delete_item(const std::filesystem::path& path) {
-    auto dialog = Gtk::make_managed<Gtk::Dialog>("Delete", *this, true);
-    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
-    dialog->add_button("Delete", Gtk::ResponseType::OK);
-    dialog->set_default_response(Gtk::ResponseType::CANCEL);
-    auto* label = Gtk::make_managed<Gtk::Label>("Delete " + path.filename().string() + "?");
-    dialog->get_content_area()->append(*label);
-    dialog->signal_response().connect([this, dialog, path](int response) {
-        if (response == Gtk::ResponseType::OK) {
-            if (std::filesystem::is_directory(path)) {
-                std::filesystem::remove_all(path);
-            } else {
-                std::filesystem::remove(path);
-            }
-            refresh_directory();
-        }
-        dialog->close();
-    });
-    dialog->present();
-}
-
 void MainWindow::setup_status_bar() {
     status_bar_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
     status_bar_->add_css_class("remin-status-bar");
-    status_bar_->set_margin_start(12);
-    status_bar_->set_margin_end(12);
+    status_bar_->set_margin_start(8);
+    status_bar_->set_margin_end(8);
     status_bar_->set_margin_top(4);
     status_bar_->set_margin_bottom(4);
 
@@ -818,41 +682,56 @@ void MainWindow::setup_find_bar() {
     find_bar_->set_margin_end(8);
     find_bar_->set_visible(false);
 
-    auto* find_icon = Gtk::make_managed<Gtk::Image>("edit-find-symbolic");
+    auto* find_icon = Gtk::make_managed<Gtk::Image>();
+    find_icon->set_from_icon_name("edit-find-symbolic");
     find_icon->set_pixel_size(16);
     find_entry_ = Gtk::make_managed<Gtk::Entry>();
+    find_entry_->add_css_class("remin-find-entry");
     find_entry_->set_hexpand(true);
     find_entry_->set_placeholder_text("Search…");
     find_entry_->signal_activate().connect([this]() { on_find_next(); });
 
-    auto* replace_icon = Gtk::make_managed<Gtk::Image>("edit-find-replace-symbolic");
+    auto* replace_icon = Gtk::make_managed<Gtk::Image>();
+    replace_icon->set_from_icon_name("edit-find-replace-symbolic");
     replace_icon->set_pixel_size(16);
     replace_entry_ = Gtk::make_managed<Gtk::Entry>();
+    replace_entry_->add_css_class("remin-find-entry");
     replace_entry_->set_hexpand(true);
     replace_entry_->set_placeholder_text("Replace with…");
     replace_entry_->set_visible(false);
     replace_icon->set_visible(false);
 
     find_prev_ = Gtk::make_managed<Gtk::Button>();
-    find_prev_->set_child(*Gtk::make_managed<Gtk::Image>("go-up-symbolic"));
+    find_prev_->add_css_class("remin-find-btn");
+    auto* prev_img = Gtk::make_managed<Gtk::Image>();
+    prev_img->set_from_icon_name("go-previous-symbolic");
+    find_prev_->set_child(*prev_img);
     find_prev_->set_tooltip_text("Previous (Shift+Enter)");
     find_prev_->signal_clicked().connect([this]() { on_find_prev(); });
 
     find_next_ = Gtk::make_managed<Gtk::Button>();
-    find_next_->set_child(*Gtk::make_managed<Gtk::Image>("go-down-symbolic"));
+    find_next_->add_css_class("remin-find-btn");
+    auto* next_img = Gtk::make_managed<Gtk::Image>();
+    next_img->set_from_icon_name("go-next-symbolic");
+    find_next_->set_child(*next_img);
     find_next_->set_tooltip_text("Next (Enter)");
     find_next_->signal_clicked().connect([this]() { on_find_next(); });
 
     replace_btn_ = Gtk::make_managed<Gtk::Button>("Replace");
+    replace_btn_->add_css_class("remin-find-btn");
     replace_btn_->set_visible(false);
     replace_btn_->signal_clicked().connect([this]() { on_replace(); });
 
     replace_all_btn_ = Gtk::make_managed<Gtk::Button>("Replace All");
+    replace_all_btn_->add_css_class("remin-find-btn");
     replace_all_btn_->set_visible(false);
     replace_all_btn_->signal_clicked().connect([this]() { on_replace_all(); });
 
     find_close_ = Gtk::make_managed<Gtk::Button>();
-    find_close_->set_child(*Gtk::make_managed<Gtk::Image>("window-close-symbolic"));
+    find_close_->add_css_class("remin-find-btn");
+    auto* close_img = Gtk::make_managed<Gtk::Image>();
+    close_img->set_from_icon_name("window-close-symbolic");
+    find_close_->set_child(*close_img);
     find_close_->set_tooltip_text("Close (Esc)");
     find_close_->signal_clicked().connect([this]() { hide_find_bar(); });
 
@@ -877,7 +756,7 @@ void MainWindow::new_terminal_tab() {
     auto tab_info = controller_->new_terminal_tab("terminal");
     if (tab_info.tab.empty()) return;
 
-    auto* view = new TerminalTabView(controller_, tab_info.window, tab_info.tab, tab_info.root_pane);
+    auto* view = new TerminalTabView(controller_, this, tab_info.window, tab_info.tab, tab_info.root_pane);
     view->set_color_request_callback([this]() { on_terminal_color_profile(); });
     view->set_open_file_callback([this](const std::filesystem::path& path) {
         open_note_from_path(path);
@@ -887,6 +766,14 @@ void MainWindow::new_terminal_tab() {
         // Avoid unbounded growth
         if (history_.size() > 2000) history_.erase(history_.begin(), history_.begin() + (history_.size() - 1000));
         update_history_sidebar();
+    });
+    view->set_close_tab_request_callback([this, view]() {
+        for (size_t i = 0; i < tabs_.size(); ++i) {
+            if (tabs_[i].get() == view) {
+                close_tab(static_cast<int>(i));
+                break;
+            }
+        }
     });
     auto idx = static_cast<int>(tabs_.size());
     tabs_.push_back(std::unique_ptr<TabView>(view));
@@ -906,6 +793,12 @@ void MainWindow::new_note_tab() {
     if (noteId.empty()) return;
 
     auto* view = new NoteTabView(controller_, noteId);
+    view->set_save_state_callback([this]() {
+        update_tab_bar();
+    });
+    view->set_file_saved_callback([this]() {
+        if (directory_panel_) directory_panel_->refresh();
+    });
     auto idx = static_cast<int>(tabs_.size());
     tabs_.push_back(std::unique_ptr<TabView>(view));
     note_tabs_.push_back(view);
@@ -923,6 +816,10 @@ void MainWindow::close_tab(int index) {
     if (index < 0 || index >= (int)tabs_.size()) return;
 
     auto kind = tabs_[index]->kind();
+    // Detach the widget from the stack BEFORE destroying it (tabs_ holds ownership).
+    Gtk::Widget* child = content_stack_->get_child_by_name(std::to_string(index));
+    if (child) content_stack_->remove(*child);
+
     if (kind == TabKind::Terminal) {
         // Remove from term_tabs_
         auto it = std::find(term_tabs_.begin(), term_tabs_.end(),
@@ -935,10 +832,14 @@ void MainWindow::close_tab(int index) {
     }
 
     tabs_.erase(tabs_.begin() + index);
-    content_stack_->remove(*content_stack_->get_child_by_name(std::to_string(index)));
-    // Re-index remaining
+    // Rebuild the stack children with fresh index names so they stay in sync
+    // with tabs_ indices. Removing each child just detaches it (tabs_ owns the
+    // TabView), then we re-add at their new positions.
+    while (auto* child = content_stack_->get_first_child()) {
+        content_stack_->remove(*child);
+    }
     for (size_t i = 0; i < tabs_.size(); ++i) {
-        tabs_[i]->set_property("name", std::to_string(i));
+        content_stack_->add(*tabs_[i].get(), std::to_string(i));
     }
     if (active_tab_ >= (int)tabs_.size()) active_tab_ = (int)tabs_.size() - 1;
     if (active_tab_ >= 0) {
@@ -961,6 +862,7 @@ void MainWindow::on_tab_switched(int) {
         }
     }
     update_tab_bar();
+    if (update_tab_overflow_fn) update_tab_overflow_fn();
     update_toolbar();
     update_status_bar();
 }
@@ -1138,53 +1040,128 @@ void MainWindow::on_toggle_note_preview() {
 }
 
 void MainWindow::update_tab_bar() {
-    // Remove all current tab buttons, keeping the two "+" buttons.
-    std::vector<Gtk::Widget*> stale;
-    for (auto* c = tab_bar_->get_first_child(); c; c = c->get_next_sibling()) {
-        if (c != new_terminal_btn_ && c != new_note_btn_) stale.push_back(c);
+    if (!tab_bar_) return;
+
+    // Any shrink (a tab was closed/reordered) invalidates captured widget →
+    // tab-identity bindings, so rebuild the row cleanly. Pure appends keep the
+    // existing widgets and just add the new ones (fast path).
+    if (tabs_.size() < tab_widgets_.size()) {
+        for (auto* w : tab_widgets_) tab_bar_->remove(*w);
+        tab_widgets_.clear();
     }
-    for (auto* w : stale) tab_bar_->remove(*w);
+    while (tab_widgets_.size() > tabs_.size()) {
+        auto* w = tab_widgets_.back();
+        tab_bar_->remove(*w);
+        tab_widgets_.pop_back();
+    }
 
     for (size_t i = 0; i < tabs_.size(); ++i) {
-        // A tab is a horizontal pair of two sibling buttons [switch][close].
-        // They are NOT nested inside one another so both stay clickable.
-        auto* tab = Gtk::make_managed<Gtk::Button>();
-        tab->add_css_class("remin-tab");
+        if (i >= tab_widgets_.size()) {
+            auto* tab = build_tab_widget(i);
+            tab_widgets_.push_back(tab);
+            tab_bar_->append(*tab);
+        }
+        refresh_tab_widget(tab_widgets_[i], i);
+    }
+}
 
-        auto* inner = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
-        auto* img = Gtk::make_managed<Gtk::Image>();
-        img->set_from_icon_name(tab_kind_icon(tabs_[i]->kind()));
-        img->set_pixel_size(16);
-        inner->append(*img);
-        auto* lbl = Gtk::make_managed<Gtk::Label>(tabs_[i]->title());
-        lbl->set_ellipsize(Pango::EllipsizeMode::END);
-        inner->append(*lbl);
-        tab->set_child(*inner);
+Gtk::Box* MainWindow::build_tab_widget(size_t index) {
+    auto* view = tabs_[index].get(); // stable identity for the lifetime of the tab
 
-        tab->signal_clicked().connect([this, i]() {
-            content_stack_->set_visible_child(*tabs_[i]);
-        });
-        if (static_cast<int>(i) == active_tab_) tab->add_css_class("active");
+    // A tab is ONE container: [icon + label ........ × ], so the close button
+    // sits INSIDE the tab label area (merged), not detached beside it. The
+    // label area fills the tab and pushes × to the far right.
+    auto* tab = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
+    tab->add_css_class("remin-tab");
+    tab->set_size_request(96, -1);
 
-        // Right-click on the label area renames the tab.
-        auto g = Gtk::GestureClick::create();
-        g->set_button(3);
-        g->signal_pressed().connect([this, i](int, double, double) {
-            content_stack_->set_visible_child(*tabs_[i]);
-            on_rename_tab(static_cast<int>(i));
-        });
-        tab->add_controller(g);
+    // Clickable label region (icon + text) — clicking it switches the tab.
+    auto* click_area = Gtk::make_managed<Gtk::Button>();
+    click_area->add_css_class("remin-tab-label");
+    click_area->set_hexpand(true);
 
-        auto* close = Gtk::make_managed<Gtk::Button>("✕");
-        close->add_css_class("remin-tab-close");
-        close->set_tooltip_text("Close tab");
-        close->signal_clicked().connect([this, i]() { close_tab(static_cast<int>(i)); });
+    auto* inner = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 4);
+    auto* img = Gtk::make_managed<Gtk::Image>();
+    img->set_from_icon_name(tab_kind_icon(view->kind()));
+    img->set_pixel_size(14);
+    inner->append(*img);
 
-        auto* group = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
-        group->add_css_class("remin-tab-group");
-        group->append(*tab);
-        group->append(*close);
-        tab_bar_->append(*group);
+    auto* lbl = Gtk::make_managed<Gtk::Label>();
+    // NO ellipsis — labels stay full width. Tab bar scrolls if needed.
+    lbl->set_hexpand(true);
+    lbl->set_halign(Gtk::Align::START);
+    inner->append(*lbl);
+    click_area->set_child(*inner);
+
+    // Resolve the tab's current index from its stable TTabView* at click time
+    // (indices shift as tabs open/close; the pointer never does).
+    auto find_tab_index = [this, view]() -> int {
+        for (size_t i = 0; i < tabs_.size(); ++i) {
+            if (tabs_[i].get() == view) return static_cast<int>(i);
+        }
+        return -1;
+    };
+
+    click_area->signal_clicked().connect([this, find_tab_index]() {
+        const int idx = find_tab_index();
+        if (idx >= 0) content_stack_->set_visible_child(*tabs_[idx]);
+    });
+
+    // Right-click on the label area renames the tab.
+    auto g = Gtk::GestureClick::create();
+    g->set_button(3);
+    g->signal_pressed().connect([this, find_tab_index](int, double, double) {
+        const int idx = find_tab_index();
+        if (idx >= 0) {
+            content_stack_->set_visible_child(*tabs_[idx]);
+            on_rename_tab(idx);
+        }
+    });
+    click_area->add_controller(g);
+
+    // Close button INSIDE the tab, at the far right (round / transparent).
+    auto* close = Gtk::make_managed<Gtk::Button>();
+    close->add_css_class("remin-tab-close");
+    close->set_has_frame(false);
+    close->set_icon_name("window-close-symbolic");
+    close->set_tooltip_text("Close tab");
+    close->set_valign(Gtk::Align::CENTER);
+    close->set_halign(Gtk::Align::CENTER);
+    close->signal_clicked().connect([this, find_tab_index]() {
+        const int idx = find_tab_index();
+        if (idx >= 0) close_tab(idx);
+    });
+
+    tab->append(*click_area);
+    tab->append(*close);
+
+    // Looks up are cheap and used on every refresh — stash the label and view
+    // pointer on the widget itself so refresh_tab_widget can update in place.
+    g_object_set_data(G_OBJECT(tab->gobj()), "remin-view", reinterpret_cast<gpointer>(view));
+    g_object_set_data(G_OBJECT(tab->gobj()), "remin-label", reinterpret_cast<gpointer>(lbl));
+
+    return tab;
+}
+
+void MainWindow::refresh_tab_widget(Gtk::Box* tab, size_t index) {
+    if (!tab) return;
+    TabView* view = tabs_[index].get();
+    auto* lbl = reinterpret_cast<Gtk::Label*>(g_object_get_data(G_OBJECT(tab->gobj()), "remin-label"));
+
+    if (static_cast<int>(index) == active_tab_) {
+        if (!tab->has_css_class("active")) tab->add_css_class("active");
+    } else {
+        tab->remove_css_class("active");
+    }
+
+    if (lbl) {
+        std::string label_text = view->title();
+        if (view->kind() == TabKind::Note) {
+            auto* note = static_cast<NoteTabView*>(view);
+            if (note->is_modified()) label_text = "\u25CF " + label_text;
+            if (!note->has_path()) label_text += "  (temp)";
+        }
+        if (lbl->get_text() != Glib::ustring(label_text)) lbl->set_text(label_text);
     }
 }
 
@@ -1248,11 +1225,26 @@ void MainWindow::hide_find_bar() {
 }
 
 bool MainWindow::on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods) {
-    // ESC closes find bar
+    // ESC closes find bar ONLY when find bar (or its children) is focused.
+    // If editor/terminal is focused, ESC should not close find bar.
     if (keyval == GDK_KEY_Escape) {
         if (find_bar_->get_visible()) {
-            hide_find_bar();
-            return true;
+            // Check if focus is inside the find bar
+            auto* focus_widget = get_focus();
+            bool focus_in_find_bar = false;
+            if (focus_widget) {
+                // Walk up the widget hierarchy to see if find_bar_ is an ancestor
+                for (auto* w = focus_widget; w; w = w->get_parent()) {
+                    if (w == find_bar_) {
+                        focus_in_find_bar = true;
+                        break;
+                    }
+                }
+            }
+            if (focus_in_find_bar) {
+                hide_find_bar();
+                return true;
+            }
         }
     }
 
@@ -1282,16 +1274,20 @@ bool MainWindow::on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods
         new_note_tab();
         return true;
     }
+    if (ctrl && (keyval == GDK_KEY_p || keyval == GDK_KEY_P)) {
+        toggle_history_sidebar();
+        return true;
+    }
     if (ctrl && (keyval == GDK_KEY_w || keyval == GDK_KEY_W)) {
         close_tab(active_tab_);
         return true;
     }
-    // Split shortcuts: Shift+H = horizontal, Shift+V = vertical
-    if (shift && !ctrl && (keyval == GDK_KEY_h || keyval == GDK_KEY_H)) {
+    // Split shortcuts: Alt+H = horizontal, Alt+V = vertical
+    if ((mods & Gdk::ModifierType::ALT_MASK) != Gdk::ModifierType(0) && (keyval == GDK_KEY_h || keyval == GDK_KEY_H)) {
         on_split_terminal_horizontal();
         return true;
     }
-    if (shift && !ctrl && (keyval == GDK_KEY_v || keyval == GDK_KEY_V)) {
+    if ((mods & Gdk::ModifierType::ALT_MASK) != Gdk::ModifierType(0) && (keyval == GDK_KEY_v || keyval == GDK_KEY_V)) {
         on_split_terminal_vertical();
         return true;
     }
@@ -1374,10 +1370,18 @@ void MainWindow::toggle_history_sidebar() {
         main_paned_->set_position(220);
         // Refresh if showing directory
         if (sidebar_stack_ && sidebar_stack_->get_visible_child_name() == "directory") {
-            refresh_directory();
+            if (directory_panel_) directory_panel_->refresh();
+        }
+        if (sidebar_toggle_btn_) {
+            sidebar_toggle_btn_->set_icon_name("sidebar-hide-symbolic");
+            sidebar_toggle_btn_->set_tooltip_text("Hide Sidebar (Ctrl+P)");
         }
     } else {
         main_paned_->set_position(0);
+        if (sidebar_toggle_btn_) {
+            sidebar_toggle_btn_->set_icon_name("sidebar-show-symbolic");
+            sidebar_toggle_btn_->set_tooltip_text("Show Sidebar (Ctrl+P)");
+        }
     }
 }
 
@@ -1388,25 +1392,59 @@ void MainWindow::on_settings() {
 }
 
 void MainWindow::open_note_from_path(const std::filesystem::path& path) {
-    // Create a new note tab and load the file
+    // Normalize so an equivalent path (e.g. with a trailing slash or relative
+    // component) still matches an already-open tab.
+    std::error_code ec;
+    const auto canon = std::filesystem::weakly_canonical(path, ec);
+    const std::string key = ec ? path.string() : canon.string();
+
+    // 1) If this exact file is already open in a note tab, don't open a second
+    //    tab — just focus it. If it has unsaved edits, ask the user what to do
+    //    (the single exception to auto-reload: never silently discard edits).
+    for (size_t i = 0; i < tabs_.size(); ++i) {
+        if (tabs_[i]->kind() != TabKind::Note) continue;
+        auto* note = static_cast<NoteTabView*>(tabs_[i].get());
+        if (note->path() == key) {
+            // Focus the existing tab.
+            content_stack_->set_visible_child(*tabs_[i]);
+            active_tab_ = static_cast<int>(i);
+            update_tab_bar();
+            update_toolbar();
+            tabs_[i]->activate();
+            update_status_bar();
+            // Only prompt if there are unsaved edits.
+            if (note->is_modified()) note->prompt_open_conflict();
+            return;
+        }
+    }
+
+    // 2) Not open — create a new tab and load the file from disk.
     auto noteId = controller_->new_note();
     if (noteId.empty()) return;
 
     auto* view = new NoteTabView(controller_, noteId);
+    view->set_save_state_callback([this]() {
+        update_tab_bar();
+    });
+    view->set_file_saved_callback([this]() {
+        if (directory_panel_) directory_panel_->refresh();
+    });
     auto idx = static_cast<int>(tabs_.size());
     tabs_.push_back(std::unique_ptr<TabView>(view));
     note_tabs_.push_back(view);
 
     content_stack_->add(*view, std::to_string(idx));
-    update_tab_bar();
-    update_toolbar();
     content_stack_->set_visible_child(*view);
     active_tab_ = idx;
+
+    // Load the file into the editor BEFORE refreshing the tab bar so the tab
+    // label shows the file basename (and the note is bound to its path).
+    view->load_file(path);
+
+    update_tab_bar();
+    update_toolbar();
     view->activate();
     update_status_bar();
-
-    // Load the file into the editor
-    view->load_file(path);
 }
 
 void MainWindow::refresh_theme() {

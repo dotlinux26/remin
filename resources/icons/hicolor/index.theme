@@ -1,7 +1,7 @@
 [Icon Theme]
 Name=Remin
-Comment=Remin icon theme
-Directories=scalable/apps
+Comment=Remin bundled icons
+Directories=scalable/apps,scalable/actions,scalable/ui,scalable/places,scalable/mimetypes,scalable/emblems
 
 [scalable/apps]
 Size=128
@@ -9,3 +9,38 @@ Type=Scalable
 MinSize=16
 MaxSize=512
 Context=Applications
+
+[scalable/actions]
+Size=16
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=Actions
+
+[scalable/ui]
+Size=16
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=UI
+
+[scalable/places]
+Size=16
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=Places
+
+[scalable/mimetypes]
+Size=16
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=Mimetypes
+
+[scalable/emblems]
+Size=16
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=Emblems

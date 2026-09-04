@@ -23,6 +23,7 @@ if(REMIN_BUILD_GUI)
   pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0)
   pkg_check_modules(VTE   REQUIRED IMPORTED_TARGET vte-2.91-gtk4)
   pkg_check_modules(ADWAITA REQUIRED IMPORTED_TARGET libadwaita-1)
+  pkg_check_modules(GTKSOURCE REQUIRED IMPORTED_TARGET gtksourceview-5)
   # Optional: CommonMark parser for the note-editor markdown preview.
   # Guards graphical dependency so core/storage always stay dependency-free.
   pkg_check_modules(MD4C  IMPORTED_TARGET md4c)

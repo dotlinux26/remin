@@ -48,10 +48,20 @@ public:
     void set_colors(const Gdk::RGBA& fg, const Gdk::RGBA& bg);
     void use_default_colors();
 
+    // -- Context menu helpers --
+    bool has_selection() const;
+    void copy_clipboard();
+    void paste_clipboard();
+    void select_all();
+    void clear_scrollback();
+
 private:
     // VTE C callback trampoline.
     static void on_commit_trampoline(GtkWidget* widget, const char* text,
                                      guint size, gpointer user_data);
+    // Key handler for Ctrl+Shift+C/V copy/paste.
+    static gboolean on_key_pressed(GtkEventControllerKey* controller, guint keyval,
+                                   guint keycode, GdkModifierType state, gpointer user_data);
 
     std::string shell_;
     std::string cwd_;

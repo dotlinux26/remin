@@ -7,6 +7,7 @@ set(REMIN_TEST_SOURCES
   unit/serialization_test.cpp
   unit/autosave_test.cpp
   unit/workspace_lock_test.cpp
+  unit/persistence_policy_test.cpp
 )
 
 foreach(test_src ${REMIN_TEST_SOURCES})

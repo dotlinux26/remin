@@ -127,6 +127,37 @@ int main() {
     CHECK(!snap_id.empty());
     CHECK(storage.snapshots.size() == 1);
 
+    // D-2: workspace mutations mark dirty but do NOT write until persist().
+    // The initial create_workspace wrote one row.
+    CHECK(storage.workspaces.size() == 1);
+    // A structural mutation dirties state without an inline save.
+    auto win2 = core.add_window("second window");
+    CHECK(!win2.empty());
+    CHECK(core.dirty() == true);
+    // No eager persist: fake storage still only has the single row, and it does
+    // NOT yet contain the second window.
+    CHECK(storage.workspaces.size() == 1);
+    {
+        auto saved = storage.workspaces.front();
+        bool has_win2 = false;
+        for (const auto& w : saved.windows) if (w.id == win2) { has_win2 = true; break; }
+        CHECK(has_win2 == false);
+    }
+    // persist() writes the current live workspace and clears the dirty flag.
+    CHECK(core.persist() == true);
+    CHECK(core.dirty() == false);
+    CHECK(storage.workspaces.size() == 1);  // upsert, not append
+    {
+        auto saved = storage.workspaces.front();
+        bool has_win2 = false;
+        for (const auto& w : saved.windows) if (w.id == win2) { has_win2 = true; break; }
+        CHECK(has_win2 == true);
+    }
+    // persist() with a clean state is a no-op that still reports success.
+    auto before = storage.workspaces.size();
+    CHECK(core.persist() == true);
+    CHECK(storage.workspaces.size() == before);
+
     // Workspace was persisted to the fake storage.
     CHECK(storage.workspaces.size() >= 1);
 

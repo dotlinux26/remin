@@ -11,6 +11,25 @@
 Remin is **not** a terminal emulator with tabs. It is a **workspace platform**
 for CLI/desktop-oriented tools, where each plugin is a new "work surface".
 
+### Design rule (the project's primary rule)
+
+> **Remin does not need to be "prettier"; it needs *less clutter* and everything
+> in the right place.**
+
+Concretely, every change must move toward:
+- **Simple, compact, calm, professional, consistent, native.**
+- **Light-first**, with dark mode as a first-class, genuinely-dark theme.
+- **No excessive decoration** — no decorative cards, heavy borders, gradients,
+  oversized rounded containers, shadows, icon soup, or emoji.
+- **A control visually exists only when its affordance requires it.** No button
+  chrome where a plain text/icon control suffices.
+- **No arbitrary pixel hacks** — no magic margins/offsets, no font-shrinking to
+  solve overflow, no ellipsis as a substitute for navigation, no scroll-polling.
+- **Structural honesty:** a control's look must come from *one shared
+  style/component*, never hand-patched widget-by-widget.
+
+If a subsystem is structurally wrong, **refactor it** — do not patch symptoms.
+
 ### Evolution roadmap
 
 ```text

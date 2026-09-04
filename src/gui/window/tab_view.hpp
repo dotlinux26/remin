@@ -44,8 +44,8 @@ public:
 // Map a semantic kind to its theme icon name (presentation only).
 inline const char* tab_kind_icon(TabKind kind) {
     switch (kind) {
-        case TabKind::Terminal: return "remin-terminal";
-        case TabKind::Note: return "remin-note";
+        case TabKind::Terminal: return "utilities-terminal-symbolic";
+        case TabKind::Note: return "text-x-generic-symbolic";
     }
     return "remin";
 }

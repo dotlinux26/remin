@@ -40,7 +40,8 @@ bool WorkspaceCore::open_workspace(const WorkspaceId& id) {
 
 bool WorkspaceCore::close_workspace() {
     if (!ws_current_) return false;
-    storage_->save_workspace(*ws_current_);
+    // Final checkpoint is handled by the autosaver policy (flush_now on close/
+    // shutdown) via persist(). We only emit the close event and clear state.
     emit(WorkspaceEvent::Type::WorkspaceClosed, ws_current_->id);
     ws_current_.reset();
     return true;
@@ -57,7 +58,7 @@ Workspace* WorkspaceCore::current_workspace() {
 bool WorkspaceCore::rename_workspace(const WorkspaceId& id, std::string name) {
     if (!ws_current_ || ws_current_->id != id) return false;
     ws_current_->name = std::move(name);
-    storage_->save_workspace(*ws_current_);
+    mark_dirty();
     return true;
 }
 
@@ -75,7 +76,7 @@ WindowId WorkspaceCore::add_window(std::string title) {
     const auto id = win.id;
     ws_current_->windows.push_back(std::move(win));
     ws_current_->focus_window_id = id;
-    storage_->save_workspace(*ws_current_);
+    mark_dirty();
     emit(WorkspaceEvent::Type::WindowAdded, ws_current_->id, id);
     return id;
 }
@@ -87,7 +88,7 @@ bool WorkspaceCore::remove_window(const WindowId& id) {
                               [&](const Window& w) { return w.id == id; }),
                wins.end());
     if (ws_current_->focus_window_id == id) ws_current_->focus_window_id.reset();
-    storage_->save_workspace(*ws_current_);
+    mark_dirty();
     emit(WorkspaceEvent::Type::WindowRemoved, ws_current_->id, id);
     return true;
 }
@@ -97,7 +98,7 @@ bool WorkspaceCore::rename_window(const WindowId& id, std::string title) {
     for (auto& w : ws_current_->windows) {
         if (w.id == id) {
             w.title = std::move(title);
-            storage_->save_workspace(*ws_current_);
+            mark_dirty();
             emit(WorkspaceEvent::Type::WindowRenamed, ws_current_->id, id);
             return true;
         }
@@ -110,6 +111,7 @@ bool WorkspaceCore::focus_window(const WindowId& id) {
     for (const auto& w : ws_current_->windows) {
         if (w.id == id) {
             ws_current_->focus_window_id = id;
+            mark_dirty();
             return true;
         }
     }
@@ -127,7 +129,7 @@ TabId WorkspaceCore::add_tab(const WindowId& window, std::string title, PaneTree
             tab.pane_tree = std::move(initial_pane);
             w.tabs.push_back(std::move(tab));
             w.focus_tab_id = id;
-            storage_->save_workspace(*ws_current_);
+            mark_dirty();
             emit(WorkspaceEvent::Type::TabAdded, ws_current_->id, window, id);
             return id;
         }
@@ -143,7 +145,7 @@ bool WorkspaceCore::remove_tab(const WindowId& window, const TabId& tab) {
                                         [&](const Tab& t) { return t.id == tab; }),
                          w.tabs.end());
             if (w.focus_tab_id == tab) w.focus_tab_id.reset();
-            storage_->save_workspace(*ws_current_);
+            mark_dirty();
             emit(WorkspaceEvent::Type::TabRemoved, ws_current_->id, window, tab);
             return true;
         }
@@ -156,6 +158,7 @@ bool WorkspaceCore::focus_tab(const WindowId& window, const TabId& tab) {
     for (auto& w : ws_current_->windows) {
         if (w.id == window) {
             w.focus_tab_id = tab;
+            mark_dirty();
             return true;
         }
     }
@@ -271,7 +274,7 @@ PaneId WorkspaceCore::split_pane(const TabId& tab, PaneTree::Kind kind, double r
                 }
             }
             w.focus_pane_id = new_id;
-            storage_->save_workspace(*ws_current_);
+            mark_dirty();
             emit(WorkspaceEvent::Type::PaneSplit, ws_current_->id, w.id, tab, new_id);
             return new_id;
         }
@@ -286,7 +289,7 @@ bool WorkspaceCore::remove_pane(const TabId& tab, const PaneId& pane) {
             if (t.id != tab) continue;
             if (!remove_pane_from_tree(t.pane_tree, pane)) return false;
             if (w.focus_pane_id == pane) w.focus_pane_id.reset();
-            storage_->save_workspace(*ws_current_);
+            mark_dirty();
             emit(WorkspaceEvent::Type::PaneRemoved, ws_current_->id, w.id, tab, pane);
             return true;
         }
@@ -301,6 +304,7 @@ bool WorkspaceCore::focus_pane(const TabId& tab, const PaneId& pane) {
         for (auto& t : w.tabs) {
             if (t.id == tab && find_pane(&t.pane_tree, pane)) {
                 w.focus_pane_id = pane;
+                mark_dirty();
                 return true;
             }
         }
@@ -315,7 +319,7 @@ bool WorkspaceCore::set_pane_ratio(const TabId& tab, const PaneId& pane, double 
             if (t.id != tab) continue;
             if (ratio < 0.0 || ratio > 1.0) return false;
             if (!set_split_ratio(t.pane_tree, pane, ratio)) return false;
-            storage_->save_workspace(*ws_current_);
+            mark_dirty();
             emit(WorkspaceEvent::Type::PaneResized, ws_current_->id, w.id, tab, pane);
             return true;
         }
@@ -339,7 +343,7 @@ SnapshotId WorkspaceCore::create_snapshot() {
     storage_->save_snapshot(ws_current_->id, snap, state);
 
     ws_current_->snapshot_ids.push_back(snap.id);
-    storage_->save_workspace(*ws_current_);
+    mark_dirty();
     emit(WorkspaceEvent::Type::SnapshotCreated, ws_current_->id, std::nullopt, std::nullopt, std::nullopt);
     return snap.id;
 }
@@ -355,9 +359,19 @@ bool WorkspaceCore::restore_snapshot(const SnapshotId& snap) {
 }
 
 void WorkspaceCore::mark_dirty() {
+    ws_dirty_ = true;
     if (ws_current_) {
         emit(WorkspaceEvent::Type::StateDirty, ws_current_->id);
     }
+}
+
+bool WorkspaceCore::persist() {
+    if (!ws_current_) return false;
+    if (ws_dirty_) {
+        storage_->save_workspace(*ws_current_);
+        ws_dirty_ = false;
+    }
+    return true;
 }
 
 } // namespace remin::core

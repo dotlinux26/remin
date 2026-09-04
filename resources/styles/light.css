@@ -17,25 +17,82 @@
 @define-color accent_2       #06b6d4;
 @define-color accent_soft    rgba(79, 70, 229, 0.10);
 
+/* Standard GTK controls: consistent light surfaces. */
+button,
+entry,
+spinbutton,
+combobox,
+notebook tab,
+treeview,
+textview,
+flowbox > child,
+list > row {
+  color: @text;
+}
+button {
+  background-color: @surface;
+  border: 1px solid @border;
+}
+button:hover {
+  background-color: @surface_hover;
+  border-color: @accent;
+}
+button:active,
+button:checked {
+  background-color: @accent_soft;
+  border-color: @accent;
+}
+entry {
+  background-color: @bg;
+  border: 1px solid @border;
+}
+entry:focus {
+  border-color: @accent;
+}
+
+/* Map the GTK standard semantic variables to our palette so ALL widgets
+ * (buttons, dialogs, entries, menus) follow the theme, not the system theme. */
+@define-color theme_bg_color @bg;
+@define-color theme_base_color @surface;
+@define-color theme_fg_color @text;
+@define-color theme_text_color @text;
+@define-color theme_selected_bg_color @accent;
+@define-color theme_selected_fg_color #ffffff;
+@define-color theme_unfocused_bg_color @surface;
+@define-color theme_unfocused_fg_color @text_muted;
+@define-color theme_unfocused_text_color @text_muted;
+@define-color theme_unfocused_base_color @bg;
+@define-color theme_unfocused_selected_bg_color @accent;
+@define-color theme_unfocused_selected_fg_color #ffffff;
+@define-color theme_border_color @border;
+@define-color borders @border;
+@define-color border @border;
+@define-color theme_tooltip_bg_color @surface;
+@define-color theme_tooltip_fg_color @text;
+@define-color theme_header_bar_bg_color @surface;
+@define-color theme_header_bar_fg_color @text;
+@define-color popover_bg_color @surface;
+@define-color popover_fg_color @text;
+
 /* Always-visible scrollbars (overlay scrolling off look) */
 scrollbar {
   background-color: transparent;
 }
 scrollbar.vertical {
-  min-width: 10px;
+  min-width: 8px;
 }
 scrollbar.horizontal {
-  min-height: 10px;
+  min-height: 8px;
 }
 scrollbar slider {
   background-color: rgba(107, 114, 128, 0.45);
   border-radius: 99px;
-  min-width: 8px;
-  min-height: 8px;
-  margin: 2px;
+  min-width: 6px;
+  min-height: 6px;
+  margin: 1px;
 }
 scrollbar slider:hover {
-  background-color: @accent;
+  background-color: rgba(107, 114, 128, 0.7);
 }
 scrollbar trough {
   background-color: transparent;
@@ -52,94 +109,266 @@ window.remin-window {
 .remin-tab image,
 .remin-tab-btn image,
 .remin-find-bar image,
-.remin-context-menu image {
+popover.menu image {
   color: @text;
-  -gtk-icon-style: symbolic;
 }
 
-/* Toolbar buttons: icon + label, compact */
-.remin-toolbar-btn {
-  min-height: 28px;
-  padding: 2px 8px;
-  border-radius: 4px;
+/* Tab bar: clean bar with a single divider below, breathing room above */
+.remin-tab-bar {
+  background-color: transparent;
+  border-bottom: 1px solid @border;
+  padding: 4px 8px 4px 8px;
+  min-height: 30px;
+}
+
+/* A tab = one container: [icon + label ......... × ]. The close button lives
+   INSIDE the tab, so the whole thing reads as a single merged unit, no boxy
+   borders around the label or a detached square close button. */
+.remin-tab {
+  border-radius: 3px;
+  padding: 0 4px;
+  min-height: 24px;
+  min-width: 96px;
+  margin: 0 2px;
+  background-color: transparent;
+  color: @text_muted;
+  font-size: 12px;
+}
+
+.remin-tab:hover {
+  background-color: @surface;
+  color: @text;
+}
+
+/* Active tab — accent underline, clean. Applied to the whole tab container. */
+.remin-tab.checked,
+.remin-tab.active {
+  color: @accent;
+  background-color: @surface;
+  border-bottom: 2px solid @accent;
+}
+
+/* The clickable label area: fills the tab, frame-less, just icon + text. */
+.remin-tab-label {
   border: none;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  padding: 0 2px;
+  min-height: 22px;
+}
+
+.remin-tab-label:hover {
+  background-color: transparent;
+}
+
+.remin-tab-label label {
+  font-size: 12px;
+  color: @text;
+  font-weight: 500;
+}
+
+/* Toolbar buttons: no border, no bg — just icon + text */
+.remin-toolbar-btn {
+  min-height: 24px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 0;
   background-color: transparent;
   color: @text;
 }
 
 .remin-toolbar-btn:hover {
-  background-color: @surface_hover;
+  background-color: transparent;
 }
 
-/* Text-only navigation: borders + selection state instead of icons */
-.remin-tab {
-  color: @text_muted;
-  border-bottom: 2px solid transparent;
-  padding: 2px 8px;
-  background: transparent;
-  min-width: 96px;
+/* HeaderBar icon buttons (e.g. the sidebar toggle next to the window controls):
+   force frame-less so GTK's headerbar button style can't re-add border/bg. */
+window.remin-window headerbar button.remin-toolbar-btn {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  padding: 2px 6px;
+  min-height: 24px;
+}
+
+window.remin-window headerbar button.remin-toolbar-btn:hover {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+/* Native window controls (min/max/close): NO background, NO border in ANY state
+   (both themes identical — completely transparent, let GTK native rendering handle it) */
+window.remin-window headerbar button.titlebutton,
+window.remin-window headerbar titlebutton {
+  background-color: transparent;
+  background-image: none;
+  border: none;
   border-radius: 0;
+  box-shadow: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  min-width: 28px;
+  min-height: 28px;
 }
 
-.remin-tab:checked {
+window.remin-window headerbar button.titlebutton:hover,
+window.remin-window headerbar titlebutton:hover,
+window.remin-window headerbar button.titlebutton:active,
+window.remin-window headerbar titlebutton:active,
+window.remin-window headerbar button.titlebutton:focus,
+window.remin-window headerbar titlebutton:focus,
+window.remin-window headerbar button.titlebutton:checked,
+window.remin-window headerbar titlebutton:checked {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+/* Also target the window controls container */
+window.remin-window headerbar .window-controls,
+window.remin-window headerbar .window-control {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+/* Preview header — slim row above the markdown preview */
+.remin-preview-header {
+  background-color: @surface;
+  border-bottom: 1px solid @border;
+  padding: 2px 8px;
+}
+
+.remin-preview-toggle {
+  font-size: 11px;
+  color: @text_muted;
+  background-color: transparent;
+  border: none;
+  min-height: 22px;
+  padding: 0 6px;
+}
+
+.remin-preview-toggle:checked {
   color: @accent;
-  border-bottom-color: @accent;
-  background: transparent;
 }
 
 /* Square, fixed-size buttons in the tab bar (+ new tab buttons) */
 .remin-tab-btn {
-  min-width: 30px;
-  min-height: 30px;
+  min-width: 28px;
+  min-height: 28px;
   padding: 0;
   margin: 0;
   border: none;
-  border-radius: 6px;
-  background-color: @surface;
+  border-radius: 4px;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+  color: @text_muted;
 }
 
 .remin-tab-btn:hover {
-  background-color: @surface_hover;
+  background-color: @surface;
+  color: @text;
+}
+
+.remin-tab-btn:active,
+.remin-tab-btn:focus {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  outline: none;
 }
 
 .remin-tab-btn image {
   -gtk-icon-size: 16px;
 }
 
-/* Small, rounded close buttons on tabs */
+/* Tab row: horizontal container holding the tab scroller + fixed action buttons */
+.remin-tab-row {
+  min-height: 32px;
+}
+
+/* Fixed action buttons at the right of the tab row (New Terminal, New Note) */
+.remin-tab-actions {
+  margin-left: 8px;
+}
+
+/* Small, round close buttons on tabs — a compact native-looking control. */
 .remin-tab-close {
-  min-width: 20px;
-  min-height: 20px;
+  min-width: 18px;
+  min-height: 18px;
   padding: 0;
-  margin: 0;
+  margin: 2px 4px 2px 0;
   border: none;
   border-radius: 9999px;
   font-size: 10px;
+  line-height: 18px;
   background-color: transparent;
   color: @text_muted;
+  -gtk-icon-size: 12px;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
 }
 
 .remin-tab-close:hover {
-  background-color: rgba(239, 68, 68, 0.18);
+  background-color: rgba(239, 68, 68, 0.1);
   color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.25);
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+  border-radius: 9999px;
 }
 
-/* A tab = [switch button][close button] side by side */
-.remin-tab-group {
-  border-radius: 6px;
-}
-.remin-tab-group .remin-tab {
-  border-radius: 6px 0 0 6px;
-}
-.remin-tab-group .remin-tab-close {
-  border-radius: 0 6px 6px 0;
+.remin-tab-close:focus,
+.remin-tab-close:active {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  outline: none;
 }
 
-/* Active tab highlight. */
-.remin-tab.active {
-  color: @accent;
-  border-bottom-color: @accent;
-  background-color: @accent_soft;
+/* Separator/divider between tab bar and content area */
+.remin-tab-divider {
+  min-height: 1px;
+  background-color: @border;
+  margin: 0;
+  border: none;
+}
+
+/* Tab box: vertical container holding the tab scroller + dedicated horizontal scrollbar.
+   The scrollbar lives in its own row BELOW the tab labels, never overlapping them. */
+.remin-tab-box {
+  min-height: 28px; /* tab row + scrollbar row */
+}
+
+.remin-tab-scrollbar {
+  min-height: 6px;
+  margin: 0 8px;
+  border-radius: 3px;
+  background-color: transparent;
+}
+
+.remin-tab-scrollbar slider {
+  min-width: 30px;
+  border-radius: 3px;
+  background-color: @border;
+}
+
+.remin-tab-scrollbar slider:hover {
+  background-color: @text_muted;
 }
 
 /* Active tab highlight via notebook checked state */
@@ -176,48 +405,72 @@ notebook > header > tabs > tab:checked {
   color: #dc2626;
 }
 
-/* Toolbar below header */
+/* Toolbar below header — clean, no border, breathing room */
 .remin-toolbar {
-  background-color: @surface;
-  border-bottom: 1px solid @border;
+  background-color: transparent;
+  border: none;
+  padding: 4px 8px;
 }
 
+/* Tool buttons: no border, no bg — just icon + text */
 .remin-tool-btn {
-  min-width: 30px;
-  min-height: 30px;
-  padding: 0;
-  margin: 0;
+  min-height: 24px;
+  padding: 2px 6px;
   border: none;
-  border-radius: 6px;
-  background-color: @surface;
+  border-radius: 0;
+  background-color: transparent;
+  color: @text_muted;
 }
 
 .remin-tool-btn:hover {
-  background-color: @surface_hover;
-}
-
-.remin-tool-btn image {
-  -gtk-icon-size: 16px;
-}
-
-/* Right-click context menu (terminal panes) */
-.remin-context-menu {
-  border: 1px solid @border;
-  border-radius: 8px;
-  background-color: @surface;
-}
-
-.remin-menu-item {
-  min-height: 26px;
-  padding: 4px 10px;
-  border-radius: 5px;
   background-color: transparent;
   color: @text;
 }
 
-.remin-menu-item:hover {
-  background-color: @surface_hover;
+.remin-tool-btn image {
+  -gtk-icon-size: 14px;
+}
+
+/* Right-click context menus — Gtk::Popover with buttons, styled to match editor exactly */
+.remin-context-menu {
+  background-color: transparent;
+  border: none;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 200px;
+}
+
+.remin-context-menu-box {
+  padding: 0;
+}
+
+.remin-context-menu-item {
+  min-height: 28px;
+  padding: 4px 16px;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @text;
+  font-size: 13px;
+}
+
+.remin-context-menu-item:hover {
+  background-color: @accent_soft;
   color: @accent;
+}
+
+.remin-context-menu-item:disabled {
+  color: @text_muted;
+}
+
+.remin-context-menu-separator {
+  background-color: @border;
+  min-height: 1px;
+  margin: 4px 8px;
+  border: none;
 }
 
 /* Line-number gutter in the note editor */
@@ -229,7 +482,7 @@ notebook > header > tabs > tab:checked {
 /* Resizable left sidebar */
 .remin-sidebar {
   background-color: @surface;
-  border-right: 1px solid @border;
+  border-right: none;  /* Remove right border line */
 }
 
 .remin-sidebar-title {
@@ -251,24 +504,24 @@ notebook > header > tabs > tab:checked {
   background-color: @surface_hover;
 }
 
-/* Active terminal pane highlight */
+/* Active terminal pane highlight — subtle, not a visible button */
 .remin-pane-active {
-  border: 2px solid @accent;
-  border-radius: 4px;
+  outline: 1px solid @accent;
+  outline-offset: -1px;
 }
 
 /* Toolbar button label */
 .remin-tool-label {
-  color: @text;
+  color: @text_muted;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 /* Unified find bar (same height as toolbar) */
 .remin-find-bar {
   background-color: @surface;
   border-bottom: 1px solid @border;
-  min-height: 36px;
+  min-height: 30px;
 }
 
 .remin-find-bar > * {
@@ -288,7 +541,6 @@ notebook > header > tabs > tab:checked {
 
 .remin-directory-row image {
   color: @text;
-  -gtk-icon-style: symbolic;
 }
 
 .remin-directory-name {
@@ -311,7 +563,7 @@ notebook > header > tabs > tab:checked {
 .remin-dir-search {
   min-height: 26px;
   border-radius: 4px;
-  border: 1px solid @border;
+  border: none;
   background-color: @bg;
   color: @text;
   padding: 2px 6px;
@@ -319,7 +571,123 @@ notebook > header > tabs > tab:checked {
 }
 
 .remin-dir-search:focus {
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+/* Find/Replace buttons — small 2px radius, transparent bg, icon+text */
+button.remin-find-btn {
+  min-height: 24px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 2px;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @text_muted;
+}
+
+button.remin-find-btn:hover {
+  background-color: @surface_hover;
+  color: @text;
+}
+
+button.remin-find-btn:focus,
+button.remin-find-btn:active {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+}
+
+button.remin-find-btn image {
+  -gtk-icon-size: 14px;
+}
+
+/* Find bar search entry — no border in any state */
+.remin-find-entry {
+  min-height: 26px;
+  border-radius: 4px;
+  border: none;
+  background-color: @bg;
+  color: @text;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.remin-find-entry:focus {
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+/* Dialog buttons: 2px radius, gap, no black borders */
+dialog button {
+  background-color: @surface;
+  border: none;
+  border-radius: 2px;
+  padding: 6px 16px;
+  margin: 0 4px;
+}
+dialog button:hover {
+  background-color: @surface_hover;
+}
+dialog button:active,
+dialog button:checked {
+  background-color: @accent_soft;
+}
+dialog button:focus {
+  outline: none;
+  box-shadow: none;
+}
+dialog entry {
+  background-color: @surface;
+  border: 1px solid @border;
+}
+dialog entry:focus {
   border-color: @accent;
+}
+
+/* Notebook tabs (settings dialog) — single focus ring (accent blue) */
+notebook tab:focus,
+notebook tab:focus-visible {
+  outline-color: @accent;
+  outline-width: 2px;
+  outline-style: solid;
+  outline-offset: -2px;
+  box-shadow: none;
+}
+
+/* Reload button: transparent, icon-only, small */
+.remin-dir-reload {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @text_muted;
+}
+
+.remin-dir-reload:hover {
+  background-color: @surface;
+  color: @text;
+}
+
+.remin-dir-reload image {
+  -gtk-icon-size: 14px;
+}
+
+/* Directory path label (shows current directory path) */
+.remin-dir-path {
+  font-size: 11px;
+  color: @text_muted;
+  padding: 2px 6px;
+  font-family: monospace;
 }
 
 /* Directory tree expander */
@@ -337,7 +705,7 @@ notebook > header > tabs > tab:checked {
 
 /* Sidebar tabs (History | Directory) */
 .remin-sidebar-tabs {
-  border-bottom: 1px solid @border;
+  border-bottom: none;  /* Remove bottom line under tabs */
 }
 
 .remin-sidebar-tab {
@@ -354,4 +722,10 @@ notebook > header > tabs > tab:checked {
 .remin-sidebar-tab:hover {
   background-color: @surface_hover;
   color: @text;
+}
+
+/* Active sidebar mode tab — highlighted so switching never looks broken */
+.remin-sidebar-tab.active {
+  color: @accent;
+  border-bottom: 2px solid @accent;
 }

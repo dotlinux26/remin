@@ -1,10 +1,12 @@
 add_library(remin_gui STATIC
   application.cpp
+  ui/context_menu.cpp
   session/workspace_session.cpp
   session/session_controller.cpp
   window/main_window.cpp
   window/terminal_tab_view.cpp
   window/note_tab_view.cpp
+  window/directory_tree_panel.cpp
   window/settings_dialog.cpp
   terminal/terminal_pane.cpp
   note/note_editor.cpp
@@ -24,6 +26,7 @@ target_link_libraries(remin_gui PUBLIC
   PkgConfig::GTKMM
   PkgConfig::VTE
   PkgConfig::ADWAITA
+  PkgConfig::GTKSOURCE
 )
 
 if(MD4C_FOUND)

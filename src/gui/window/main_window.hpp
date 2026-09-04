@@ -4,6 +4,7 @@
 #include "core/workspace_core.hpp"
 #include "gui/session/session_controller.hpp"
 #include "gui/theme/theme_manager.hpp"
+#include "gui/window/directory_tree_panel.hpp"
 #include "gui/window/note_tab_view.hpp"
 #include "gui/window/tab_view.hpp"
 #include "gui/window/terminal_tab_view.hpp"
@@ -59,6 +60,13 @@ private:
     void refresh_theme();
 
     void update_tab_bar();
+    // Persistent tab widgets: `build_tab_widget` creates a fresh tab container
+    // when a new tab is appended; `refresh_tab_widget` only updates the label /
+    // active class of an existing widget in place (so the unsaved-dot updates
+    // live while typing instead of rebuilding the whole bar).
+    Gtk::Box* build_tab_widget(size_t index);
+    void refresh_tab_widget(Gtk::Box* tab, size_t index);
+    void update_tab_overflow();
     void update_status_bar();
     void update_header();
 
@@ -74,16 +82,9 @@ private:
     // Global sidebar (History / Directory)
     void setup_sidebar();
     void set_sidebar_mode(const std::string& mode);
-    void refresh_directory();
-    bool directory_matches_filter(const std::string& name);
-    Gtk::Widget* create_directory_row(const std::string& name, bool is_dir, const std::filesystem::path& full_path);
-    void populate_directory_expander(Gtk::Expander* expander, const std::filesystem::path& dir_path);
-    void show_directory_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir);
-    void create_new_file(const std::filesystem::path& dir);
-    void create_new_folder(const std::filesystem::path& dir);
-    void rename_item(const std::filesystem::path& path);
-    void delete_item(const std::filesystem::path& path);
     void update_history_sidebar();
+
+    void restore_workspace();
 
     SessionController* controller_;
     remin::core::Autosaver* autosaver_;
@@ -94,6 +95,7 @@ private:
     Gtk::Box* header_box_{nullptr};
     Gtk::Image* logo_image_{nullptr};
     Gtk::Label* header_label_{nullptr};
+    Gtk::Button* sidebar_toggle_btn_{nullptr};
 
     // Menu bar (using PopoverMenuBar)
     Gtk::PopoverMenuBar* menu_bar_{nullptr};
@@ -104,10 +106,16 @@ private:
     // Theme
     ThemeManager* theme_{nullptr};
 
-    // Tab bar
+    // Tab bar — scroller wraps the tab row; a dedicated horizontal scrollbar
+    // lives in its own row BELOW the labels so it never overlaps them.
+    Gtk::Box* tab_box_{nullptr};
+    Gtk::ScrolledWindow* tab_scroller_{nullptr};
+    Gtk::Scrollbar* tab_scrollbar_{nullptr};
     Gtk::Box* tab_bar_{nullptr};
     Gtk::Button* new_terminal_btn_{nullptr};
     Gtk::Button* new_note_btn_{nullptr};
+    // Tab widgets in the same order as tabs_ (persistent across label updates).
+    std::vector<Gtk::Box*> tab_widgets_;
 
     // Content stack
     Gtk::Stack* content_stack_{nullptr};
@@ -136,18 +144,17 @@ private:
     Gtk::Overlay* overlay_{nullptr};
     Gtk::Label* autosave_badge_{nullptr};
     sigc::connection autosave_badge_hide_;
+    std::function<void()> update_tab_overflow_fn;
 
     // Global sidebar (History / Directory) — always visible, like VS Code
     Gtk::Paned* main_paned_{nullptr};
     bool sidebar_visible_{true};
+    Gtk::Box* sidebar_root_{nullptr};
     Gtk::Stack* sidebar_stack_{nullptr};
     Gtk::ScrolledWindow* history_scroller_{nullptr};
     Gtk::Box* history_list_{nullptr};
-    Gtk::ScrolledWindow* directory_scroller_{nullptr};
-    Gtk::Box* directory_tree_{nullptr};
-    Gtk::SearchEntry* directory_search_{nullptr};
-    std::string directory_filter_;
-    std::filesystem::path current_dir_;
+    DirectoryTreePanel* directory_panel_{nullptr};
+    Gtk::Button* sidebar_mode_tabs_[2]{nullptr, nullptr};
     std::vector<std::string> history_;
 
     // Key controller for accelerators

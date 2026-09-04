@@ -1,0 +1,38 @@
+<svg xmlns="http://w3.org" viewBox="0 0 128 128" width="512" height="512" fill="none">
+  <defs>
+    <!-- Dải màu Gradient thời thượng chuyển từ Tím đậm sang Xanh Cyan -->
+    <linearGradient id="reminTerminalGrad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+  </defs>
+
+  <!-- 1. KHUNG CỬA SỔ TERMINAL -->
+  <!-- Khung viền ngoài được bo góc hiện đại, độ dày nét 6px cực kỳ chắc chắn, nền trong suốt -->
+  <rect x="16" y="20" width="96" height="88" rx="12" stroke="url(#reminTerminalGrad)" stroke-width="6" stroke-linejoin="round" fill="none" />
+  
+  <!-- Thanh ngang phân tách phần Header của Terminal -->
+  <path d="M16 44H112" stroke="url(#reminTerminalGrad)" stroke-width="4" stroke-opacity="0.4" />
+
+  <!-- 2. BA NÚT ĐIỀU HƯỚNG WINDOWS -->
+  <g fill="url(#reminTerminalGrad)" fill-opacity="0.6">
+    <circle cx="28" cy="32" r="3" />
+    <circle cx="40" cy="32" r="3" />
+    <circle cx="52" cy="32" r="3" />
+  </g>
+
+  <!-- 3. CHỮ remin VIẾT THƯỜNG CẠNH 3 NÚT ĐIỀU HƯỚNG -->
+  <!-- Font chữ hiện đại, cỡ chữ 11px vừa vặn với thanh tiêu đề, sử dụng chung dải màu gradient -->
+  <text x="62" y="36" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="url(#reminTerminalGrad)" font-style="normal" letter-spacing="0.5">~remin</text>
+
+  <!-- 4. BIỂU TƯỢNG DẤU NHẮC LỆNH KINH ĐIỂN (>_) -->
+  <!-- Nét vẽ dày 7px giúp biểu tượng nổi bật ngay cả khi thu nhỏ làm icon 16x16 -->
+  <g stroke="url(#reminTerminalGrad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Dấu nhắc lệnh ">" -->
+    <path d="M34 58 L50 68 L34 78" />
+    
+    <!-- Con trỏ nhấp nháy "_" được đặt cách quãng đối xứng hoàn hảo -->
+    <path d="M58 78H78" stroke-width="8" />
+  </g>
+</svg>

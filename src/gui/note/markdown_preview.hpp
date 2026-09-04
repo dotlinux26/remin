@@ -18,6 +18,15 @@ public:
     MarkdownPreview();
     void render(const std::string& markdown);
 
+    // Set the vertical scroll position as a fraction (0.0..1.0) of the content
+    // height — used for editor ↔ preview scroll synchronisation.
+    void set_scroll_fraction(double fraction);
+
+    // Vertical scroll adjustment of the preview pane.
+    [[nodiscard]] Glib::RefPtr<Gtk::Adjustment> vadjustment() {
+        return get_vadjustment();
+    }
+
     // Pure, testable converter: markdown -> Pango markup string.
     static std::string to_pango(const std::string& markdown);
 

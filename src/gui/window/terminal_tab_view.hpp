@@ -10,12 +10,14 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
 namespace remin::gui {
 
 class SessionController;
+class MainWindow;
 
 // A terminal tab: mirrors the core PaneTree into a tree of Gtk::Paned widgets,
 // each leaf holding a TerminalPane (VTE). Split/resize/remove go through the
@@ -23,6 +25,7 @@ class SessionController;
 class TerminalTabView : public TabView {
 public:
     TerminalTabView(SessionController* controller,
+                    MainWindow* main_window,
                     remin::core::WindowId window,
                     remin::core::TabId tab,
                     remin::core::PaneId root_pane);
@@ -70,14 +73,20 @@ public:
         on_history_ = std::move(cb);
     }
 
+    // Callback to request closing the entire tab (when last pane is closed)
+    void set_close_tab_request_callback(std::function<void()> cb) {
+        on_close_tab_request_ = std::move(cb);
+    }
+
 private:
     void rebuild();
     void sync_ratio(Gtk::Paned& paned, const std::string& first_child_pane);
     Gtk::Widget& build_node(const remin::core::PaneTree& node);
     void activate_pane(const remin::core::PaneId& pane);
-    void show_pane_menu(Gtk::Widget& pane_widget);
+    void show_pane_menu(Gtk::Widget& pane_widget, double x, double y);
 
     SessionController* controller_;
+    MainWindow* main_window_;
     remin::core::WindowId window_;
     remin::core::TabId tab_;
     remin::core::PaneId root_pane_;
@@ -85,10 +94,14 @@ private:
     std::string shell_;
 
     std::map<std::string, std::unique_ptr<TerminalPane>> panes_;
+    std::set<std::string> pane_controllers_added_;  // Track which panes have gesture controllers
     remin::core::PaneId active_pane_;
     std::function<void()> on_color_request_;
     std::function<void(const std::filesystem::path&)> on_open_file_;
     std::function<void(const std::string&)> on_history_;
+
+    // Callback to request closing the entire tab (when last pane is closed)
+    std::function<void()> on_close_tab_request_;
 
     Gtk::Box* tree_host_{nullptr};
     Gtk::Popover* pane_menu_{nullptr};

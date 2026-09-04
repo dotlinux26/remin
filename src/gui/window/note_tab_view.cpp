@@ -14,6 +14,9 @@ NoteTabView::NoteTabView(SessionController* controller, const std::string& noteI
             if (controller_ && controller_->autosaver())
                 controller_->autosaver()->note_note_activity(note_id_);
         });
+    // Hold an extra ref on the editor so it survives being reparented between
+    // content_host_ and content_split_ during preview toggles.
+    g_object_ref(editor_->gobj());
     set_hexpand(true);
     set_vexpand(true);
 
@@ -24,7 +27,10 @@ NoteTabView::NoteTabView(SessionController* controller, const std::string& noteI
 
     if (controller_) {
         const auto saved = controller_->load_note(noteId);
-        if (!saved.empty()) editor_->set_text(saved);
+        if (!saved.empty()) {
+            editor_->set_text(saved);
+            editor_->set_modified(false);
+        }
     }
 
     connect_editor();
@@ -32,7 +38,14 @@ NoteTabView::NoteTabView(SessionController* controller, const std::string& noteI
     start_watcher();
 }
 
-NoteTabView::~NoteTabView() = default;
+NoteTabView::~NoteTabView() {
+    // Release the extra ref we took on the editor in the constructor.
+    if (editor_) {
+        auto* g = editor_->gobj();
+        editor_ = nullptr;
+        g_object_unref(g);
+    }
+}
 
 void NoteTabView::connect_editor() {
     if (!controller_) return;
@@ -43,6 +56,39 @@ void NoteTabView::connect_editor() {
     editor_->set_on_preview([this](const std::string& md) {
         if (preview_) preview_->render(md);
     });
+
+    // Track modified state changes in real-time to update the dirty dot (●) immediately.
+    // Connect to the TextBuffer's signal_modified_changed which fires specifically
+    // when the modified state changes (clean <-> dirty), not on every keystroke.
+    if (editor_) {
+        auto buf = editor_->buffer();
+        if (buf) {
+            buf->signal_modified_changed().connect([this]() {
+                bool now = editor_ && editor_->is_modified();
+                if (now != last_modified_) {
+                    last_modified_ = now;
+                    notify_save_state();
+                }
+            });
+            // Belt & suspenders: also watch plain content changes with a short
+            // debounce so the unsaved dot appears live WHILE typing (some
+            // buffers only flip the modified flag together with a user action).
+            buf->signal_changed().connect([this]() {
+                if (dirty_debounce_.connected()) dirty_debounce_.disconnect();
+                dirty_debounce_ = Glib::signal_timeout().connect(
+                    [this]() {
+                        dirty_debounce_.disconnect();
+                        bool now = editor_ && editor_->is_modified();
+                        if (now != last_modified_) {
+                            last_modified_ = now;
+                            notify_save_state();
+                        }
+                        return false;
+                    },
+                    120);
+            });
+        }
+    }
 }
 
 void NoteTabView::activate() {
@@ -70,20 +116,26 @@ void NoteTabView::set_content(Gtk::Widget& content) {
 }
 
 void NoteTabView::save_now() {
+    // A temp note has no assigned file path. Pressing Save (Ctrl+S) must assign
+    // one via Save As rather than silently writing to an opaque temp store.
+    const auto path = controller_ ? controller_->note_path(note_id_) : std::string();
+    if (path.empty()) {
+        save_as();
+        return;
+    }
+
     // 1) Persist the body into the app's own storage (blob store).
     if (controller_ && controller_->autosaver()) controller_->autosaver()->flush_now();
 
-    // 2) Mirror to an on-disk file: the assigned path if any, otherwise the
-    //    auto temp file (only when the autosave-to-temp setting is enabled).
+    // 2) Mirror to the assigned on-disk file.
     if (!controller_) return;
     const auto body = text();
-    const auto path = controller_->note_path(note_id_);
-    if (!path.empty()) {
-        controller_->write_note_file(path, body);
-    } else if (controller_->autosave_temp_enabled()) {
-        controller_->write_note_file(controller_->note_temp_path(note_id_), body);
+    if (!controller_->write_note_file(path, body)) {
+        g_warning("remin: could not save note file: %s", path.c_str());
     }
-
+    if (editor_) editor_->set_modified(false);
+    notify_save_state();
+    if (on_file_saved_) on_file_saved_();
 }
 
 void NoteTabView::save_as() {
@@ -109,7 +161,11 @@ void NoteTabView::save_as() {
                 }
                 // Refresh the tab title to the chosen basename.
                 set_title(Glib::path_get_basename(filename));
+                if (editor_) editor_->set_modified(false);
                 start_watcher();
+                // Tab label now shows the real filename (no more "(temp)").
+                notify_save_state();
+                if (on_file_saved_) on_file_saved_();
             }
         }
     
@@ -121,6 +177,12 @@ void NoteTabView::save_as() {
 void NoteTabView::toggle_preview() {
     if (preview_) {
         // Shut down the split, restore editor only.
+        // IMPORTANT: detach children from the paned BEFORE destroying it,
+        // otherwise the paned's destructor unparents and frees managed children.
+        if (content_split_) {
+            gtk_paned_set_start_child(GTK_PANED(content_split_->gobj()), nullptr);
+            gtk_paned_set_end_child(GTK_PANED(content_split_->gobj()), nullptr);
+        }
         content_split_ = nullptr;
         preview_ = nullptr;
         set_content(*editor_);
@@ -129,12 +191,85 @@ void NoteTabView::toggle_preview() {
     // Split horizontally: editor | preview inside the content host.
     content_split_ = Gtk::make_managed<Gtk::Paned>();
     content_split_->set_orientation(Gtk::Orientation::HORIZONTAL);
+    content_split_->set_hexpand(true);
+    content_split_->set_vexpand(true);
     preview_ = Gtk::make_managed<MarkdownPreview>();
+
+    // A slim header above the preview: [Sync Scroll □] stays compact.
+    auto* preview_host = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    auto* preview_header = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
+    preview_header->add_css_class("remin-preview-header");
+    auto* sync = Gtk::make_managed<Gtk::ToggleButton>("Sync Scroll");
+    sync->add_css_class("remin-preview-toggle");
+    sync->set_active(sync_scroll_);
+    sync->signal_toggled().connect([this, sync]() {
+        sync_scroll_ = sync->get_active();
+        if (sync_scroll_) {
+            // Immediately sync from editor to preview.
+            if (preview_) on_editor_scroll();
+        }
+    });
+    preview_header->append(*sync);
+    preview_host->append(*preview_header);
+    preview_host->append(*preview_);
+
     // Initial render.
     preview_->render(editor_->text());
-    content_split_->set_start_child(*editor_);
-    content_split_->set_end_child(*preview_);
+    // Remove editor from content_host before reparenting it into the paned.
     set_content(*content_split_);
+    content_split_->set_start_child(*editor_);
+    content_split_->set_end_child(*preview_host);
+
+    // Wire scroll sync (guarded against feedback loops).
+    if (auto adj = editor_->vadjustment()) {
+        adj->signal_value_changed().connect(
+            [this]() { on_editor_scroll(); });
+    }
+    if (auto adj = preview_->vadjustment()) {
+        adj->signal_value_changed().connect(
+            [this]() { on_preview_scroll(); });
+    }
+
+    // Auto-split 50/50 (deterministic default). Set the position once the paned
+    // has been allocated so the half-point tracks the actual width.
+    Glib::signal_idle().connect_once([this]() {
+        if (!content_split_) return;
+        int total = content_split_->get_width();
+        if (total > 0) {
+            content_split_->set_position(total / 2);
+        }
+    });
+}
+
+void NoteTabView::on_editor_scroll() {
+    if (!sync_scroll_ || !preview_ || syncing_) return;
+    auto sadj = editor_->vadjustment();
+    auto padv = preview_->vadjustment();
+    if (!sadj || !padv) return;
+    double upper = sadj->get_upper() - sadj->get_page_size();
+    if (upper <= 0.0) return;
+    double frac = sadj->get_value() / upper;
+    if (frac < 0.0) frac = 0.0;
+    if (frac > 1.0) frac = 1.0;
+    syncing_ = true;
+    preview_->set_scroll_fraction(frac);
+    syncing_ = false;
+}
+
+void NoteTabView::on_preview_scroll() {
+    if (!sync_scroll_ || !preview_ || syncing_) return;
+    auto sadj = editor_->vadjustment();
+    auto padv = preview_->vadjustment();
+    if (!sadj || !padv) return;
+    double upper = padv->get_upper() - padv->get_page_size();
+    if (upper <= 0.0) return;
+    double frac = padv->get_value() / upper;
+    if (frac < 0.0) frac = 0.0;
+    if (frac > 1.0) frac = 1.0;
+    syncing_ = true;
+    double target = frac * (sadj->get_upper() - sadj->get_page_size());
+    sadj->set_value(target);
+    syncing_ = false;
 }
 
 void NoteTabView::start_watcher() {
@@ -248,7 +383,13 @@ void NoteTabView::load_file(const std::filesystem::path& path) {
     if (file) {
         std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         editor_->set_text(content);
+        editor_->set_modified(false);
+        // Bind the note to this file so explicit save (Ctrl+S) writes back to
+        // the same path (fix: previously the note had no path -> save went to a
+        // temp store and reopening showed stale content).
+        if (controller_) controller_->set_note_path(note_id_, path.string());
         set_title(path.filename().string());
+        notify_save_state();
         // Set the watched path so it can detect changes
         watched_path_ = path;
         last_mtime_ = std::filesystem::last_write_time(path);
@@ -256,6 +397,62 @@ void NoteTabView::load_file(const std::filesystem::path& path) {
         start_watcher();
     }
 
+}
+
+bool NoteTabView::is_modified() const {
+    return editor_ && editor_->is_modified();
+}
+
+bool NoteTabView::has_path() const {
+    return controller_ && !controller_->note_path(note_id_).empty();
+}
+
+std::string NoteTabView::path() const {
+    const auto p = controller_ ? controller_->note_path(note_id_) : std::string();
+    if (p.empty()) return p;
+    // Canonicalize so two spellings of the same file compare equal (used for
+    // the "already open, don't open a second tab" check). Fall back to the raw
+    // path if it doesn't resolve (the note may be saved to disk shortly).
+    std::error_code ec;
+    const auto canon = std::filesystem::weakly_canonical(p, ec);
+    return (ec || canon.empty()) ? p : canon.string();
+}
+
+void NoteTabView::prompt_open_conflict() {
+    auto* root = get_root();
+    auto* win = dynamic_cast<Gtk::Window*>(root);
+    if (!win) return;
+
+    // Called when the user explicitly re-opens THIS file from the directory
+    // tree while the note has unsaved edits. This is the single exception to
+    // auto-reload: we never silently discard the user's work here.
+    auto dialog = Gtk::make_managed<Gtk::MessageDialog>(
+        *win, "Save changes?",
+        false, Gtk::MessageType::QUESTION, Gtk::ButtonsType::NONE, false);
+    dialog->set_secondary_text(
+        "This file has unsaved changes. Save them before reloading the file "
+        "from disk, or discard your edits and reload (a reload would otherwise "
+        "overwrite your current editor content).");
+    auto save_btn = dialog->add_button("_Save", Gtk::ResponseType::YES);
+    auto discard_btn = dialog->add_button("_Discard & Reload", Gtk::ResponseType::NO);
+    auto cancel_btn = dialog->add_button("_Cancel", Gtk::ResponseType::CANCEL);
+    (void)save_btn; (void)discard_btn; (void)cancel_btn;
+    dialog->set_modal(true);
+    dialog->signal_response().connect([this, dialog](int response) {
+        if (response == Gtk::ResponseType::YES) {
+            save_now();          // writes buffer to the bound path
+            reload_from_disk();  // sync to what is actually on disk
+        } else if (response == Gtk::ResponseType::NO) {
+            reload_from_disk();  // discard edits, read disk
+        }
+        triggered_ = false;
+        dialog->close();
+    });
+    dialog->present();
+}
+
+void NoteTabView::notify_save_state() {
+    if (on_save_state_) on_save_state_();
 }
 
 } // namespace remin::gui
