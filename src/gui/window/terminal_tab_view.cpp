@@ -3,7 +3,43 @@
 #include "terminal/shell/shell.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <ctime>
 #include <fstream>
+
+namespace {
+
+std::string format_file_size(uintmax_t bytes) {
+    if (bytes < 1024) return std::to_string(bytes) + " B";
+    if (bytes < 1024 * 1024) return std::to_string(bytes / 1024) + " KB";
+    if (bytes < 1024 * 1024 * 1024) {
+        double mb = static_cast<double>(bytes) / (1024.0 * 1024.0);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.1f MB", mb);
+        return buf;
+    }
+    double gb = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.1f GB", gb);
+    return buf;
+}
+
+std::string format_file_time(const std::filesystem::file_time_type& ftime) {
+    auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+        ftime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+    std::time_t tt = std::chrono::system_clock::to_time_t(sctp);
+    char buf[64];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&tt));
+    return buf;
+}
+
+std::string get_file_extension(const std::string& name) {
+    auto pos = name.rfind('.');
+    if (pos == std::string::npos || pos == 0) return "";
+    return name.substr(pos);
+}
+
+} // anonymous namespace
 
 namespace remin::gui {
 
@@ -103,8 +139,24 @@ void TerminalTabView::build_sidebar() {
     directory_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
     directory_scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
     directory_scroller_->set_vexpand(true);
-    directory_tree_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
-    directory_scroller_->set_child(*directory_tree_);
+
+    auto* dir_container = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+
+    // Search/filter box for directory
+    directory_search_ = Gtk::make_managed<Gtk::SearchEntry>();
+    directory_search_->add_css_class("remin-dir-search");
+    directory_search_->set_placeholder_text("Search files...");
+    directory_search_->set_hexpand(true);
+    directory_search_->signal_changed().connect([this]() {
+        directory_filter_ = directory_search_->get_text();
+        refresh_directory();
+    });
+    dir_container->append(*directory_search_);
+
+    directory_tree_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    directory_tree_->set_vexpand(true);
+    dir_container->append(*directory_tree_);
+    directory_scroller_->set_child(*dir_container);
     sidebar_stack_->add(*directory_scroller_, "directory", "Directory");
 
     // Set initial directory to home directory
@@ -383,14 +435,26 @@ void TerminalTabView::set_sidebar_mode(const std::string& mode) {
     }
 }
 
+bool TerminalTabView::directory_matches_filter(const std::string& name) {
+    if (directory_filter_.empty()) return true;
+    // Case-insensitive substring match
+    std::string lower_name = name;
+    std::string lower_filter = directory_filter_;
+    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+    std::transform(lower_filter.begin(), lower_filter.end(), lower_filter.begin(), ::tolower);
+    return lower_name.find(lower_filter) != std::string::npos;
+}
+
 void TerminalTabView::refresh_directory() {
     if (!directory_tree_) return;
     while (auto* child = directory_tree_->get_first_child()) directory_tree_->remove(*child);
 
     // Add parent directory entry (..) if not at root
     if (current_dir_.has_parent_path()) {
-        auto* parent_row = create_directory_row("..", true, current_dir_.parent_path());
-        directory_tree_->append(*parent_row);
+        if (directory_matches_filter("..")) {
+            auto* parent_row = create_directory_row("..", true, current_dir_.parent_path());
+            directory_tree_->append(*parent_row);
+        }
     }
 
     try {
@@ -408,6 +472,9 @@ void TerminalTabView::refresh_directory() {
 
         for (const auto& entry : entries) {
             std::string name = entry.path().filename().string();
+            // Skip hidden files (starting with .)
+            if (!name.empty() && name[0] == '.') continue;
+            if (!directory_matches_filter(name)) continue;
             if (entry.is_directory()) {
                 auto* row = create_directory_row(name, true, entry.path());
                 directory_tree_->append(*row);
@@ -426,8 +493,8 @@ Gtk::Widget* TerminalTabView::create_directory_row(const std::string& name, bool
     box->add_css_class("remin-directory-row");
     box->set_margin_start(8);
     box->set_margin_end(4);
-    box->set_margin_top(2);
-    box->set_margin_bottom(2);
+    box->set_margin_top(0);
+    box->set_margin_bottom(0);
 
     // Icon
     auto* icon = Gtk::make_managed<Gtk::Image>();
@@ -436,7 +503,7 @@ Gtk::Widget* TerminalTabView::create_directory_row(const std::string& name, bool
     } else {
         icon->set_from_icon_name("text-x-generic-symbolic");
     }
-    icon->set_pixel_size(16);
+    icon->set_pixel_size(14);
     icon->set_valign(Gtk::Align::CENTER);
     box->append(*icon);
 
@@ -448,25 +515,65 @@ Gtk::Widget* TerminalTabView::create_directory_row(const std::string& name, bool
     label->add_css_class("remin-directory-name");
     box->append(*label);
 
+    // For files: show extension suffix and size on row, date on hover
+    if (!is_dir) {
+        try {
+            auto ftime = std::filesystem::last_write_time(full_path);
+            auto fsize = std::filesystem::file_size(full_path);
+
+            // Show size on row
+            auto* size_label = Gtk::make_managed<Gtk::Label>(format_file_size(fsize));
+            size_label->add_css_class("remin-directory-size");
+            size_label->set_valign(Gtk::Align::CENTER);
+            box->append(*size_label);
+
+            // Tooltip with date only (hover)
+            std::string tooltip = name + "\nModified: " + format_file_time(ftime);
+            box->set_tooltip_text(tooltip);
+        } catch (...) {}
+    } else {
+        // Directory: show tooltip with path
+        box->set_tooltip_text(full_path.string());
+    }
+
     if (is_dir) {
-        // Directory: use Expander for tree view
-        auto* expander = Gtk::make_managed<Gtk::Expander>();
-        expander->set_child(*box);
-        expander->set_expanded(false);
-        expander->property_expanded().signal_changed().connect([this, expander, full_path]() {
-            if (expander->get_expanded()) {
-                // Populate children when expanded
-                populate_directory_expander(expander, full_path);
+        // Check if directory has children before creating expander
+        bool has_children = false;
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(full_path)) {
+                has_children = true;
+                break;
             }
-        });
-        // Right-click context menu for directory
-        auto click = Gtk::GestureClick::create();
-        click->set_button(3); // Right click
-        click->signal_pressed().connect([this, expander, full_path, name](int, double, double) {
-            show_directory_context_menu(*expander, full_path, name, true);
-        });
-        expander->add_controller(click);
-        return expander;
+        } catch (...) {}
+
+        if (has_children) {
+            // Directory with children: use Expander for tree view
+            auto* expander = Gtk::make_managed<Gtk::Expander>();
+            expander->set_child(*box);
+            expander->set_expanded(false);
+            expander->property_expanded().signal_changed().connect([this, expander, full_path]() {
+                if (expander->get_expanded()) {
+                    populate_directory_expander(expander, full_path);
+                }
+            });
+            // Right-click context menu for directory
+            auto click = Gtk::GestureClick::create();
+            click->set_button(3); // Right click
+            click->signal_pressed().connect([this, expander, full_path, name](int, double, double) {
+                show_directory_context_menu(*expander, full_path, name, true);
+            });
+            expander->add_controller(click);
+            return expander;
+        } else {
+            // Empty directory: just show as a row with right-click menu
+            auto right_click = Gtk::GestureClick::create();
+            right_click->set_button(3);
+            right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
+                show_directory_context_menu(*box, full_path, name, true);
+            });
+            box->add_controller(right_click);
+            return box;
+        }
     } else {
         // File: simple row with double-click to open
         auto click = Gtk::GestureClick::create();

@@ -46,6 +46,29 @@ window.remin-window {
   background-color: @bg;
 }
 
+/* Fix symbolic icon colors — inherit foreground color */
+image {
+  color: @text;
+}
+
+/* Toolbar buttons: icon + label, compact */
+.remin-toolbar-btn {
+  min-height: 28px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: none;
+  background-color: transparent;
+  color: @text;
+}
+
+.remin-toolbar-btn:hover {
+  background-color: @surface_hover;
+}
+
+.remin-toolbar-btn image {
+  color: @text;
+}
+
 /* Text-only navigation: borders + selection state instead of icons */
 .remin-tab {
   color: @text_muted;
@@ -115,6 +138,13 @@ window.remin-window {
   color: @accent;
   border-bottom-color: @accent;
   background-color: @accent_soft;
+}
+
+/* Active tab highlight via notebook checked state */
+notebook > header > tabs > tab:checked {
+  color: @accent;
+  background-color: @accent_soft;
+  border-bottom: 2px solid @accent;
 }
 
 .remin-header-label {
@@ -241,4 +271,67 @@ window.remin-window {
 
 .remin-find-bar > * {
   margin: 2px 4px;
+}
+
+/* Directory tree (VS Code-style compact) */
+.remin-directory-row {
+  min-height: 20px;
+  padding: 1px 4px;
+}
+
+.remin-directory-row:hover {
+  background-color: @surface_hover;
+  border-radius: 3px;
+}
+
+.remin-directory-name {
+  font-size: 12px;
+  color: @text;
+}
+
+.remin-directory-ext {
+  font-size: 11px;
+  color: @text_muted;
+  margin-left: 2px;
+}
+
+.remin-directory-size {
+  font-size: 11px;
+  color: @text_muted;
+}
+
+/* Directory search box */
+.remin-dir-search {
+  min-height: 26px;
+  border-radius: 4px;
+  border: 1px solid @border;
+  background-color: @bg;
+  color: @text;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.remin-dir-search:focus {
+  border-color: @accent;
+}
+
+/* Sidebar tabs (History | Directory) */
+.remin-sidebar-tabs {
+  border-bottom: 1px solid @border;
+}
+
+.remin-sidebar-tab {
+  min-height: 26px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+  color: @text_muted;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.remin-sidebar-tab:hover {
+  background-color: @surface_hover;
+  color: @text;
 }

@@ -94,6 +94,23 @@ MainWindow::MainWindow(SessionController* controller,
     // Open initial terminal tab
     new_terminal_tab();
 
+    // Connect tab switching signal via notify on visible-child-name property
+    content_stack_->property_visible_child_name().signal_changed().connect(
+        [this]() {
+            auto* child = content_stack_->get_visible_child();
+            if (!child) return;
+            for (size_t i = 0; i < tabs_.size(); ++i) {
+                if (tabs_[i].get() == child) {
+                    active_tab_ = static_cast<int>(i);
+                    tabs_[i]->activate();
+                    break;
+                }
+            }
+            update_tab_bar();
+            update_toolbar();
+            update_status_bar();
+        });
+
     update_header();
     update_tab_bar();
     update_status_bar();
@@ -420,15 +437,16 @@ void MainWindow::new_terminal_tab() {
     term_tabs_.push_back(view);
 
     content_stack_->add(*view, std::to_string(idx));
+    active_tab_ = idx;
+    content_stack_->set_visible_child(*view);
     update_tab_bar();
     update_toolbar();
-    content_stack_->set_visible_child(*view);
-    active_tab_ = idx;
     view->activate();
     update_status_bar();
 }
 
-void MainWindow::new_note_tab() {    auto noteId = controller_->new_note();
+void MainWindow::new_note_tab() {
+    auto noteId = controller_->new_note();
     if (noteId.empty()) return;
 
     auto* view = new NoteTabView(controller_, noteId);
@@ -437,10 +455,10 @@ void MainWindow::new_note_tab() {    auto noteId = controller_->new_note();
     note_tabs_.push_back(view);
 
     content_stack_->add(*view, std::to_string(idx));
+    active_tab_ = idx;
+    content_stack_->set_visible_child(*view);
     update_tab_bar();
     update_toolbar();
-    content_stack_->set_visible_child(*view);
-    active_tab_ = idx;
     view->activate();
     update_status_bar();
 }
