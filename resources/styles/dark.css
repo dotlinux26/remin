@@ -47,8 +47,14 @@ window.remin-window {
 }
 
 /* Fix symbolic icon colors — inherit foreground color */
-image {
+.remin-toolbar-btn image,
+.remin-tool-btn image,
+.remin-tab image,
+.remin-tab-btn image,
+.remin-find-bar image,
+.remin-context-menu image {
   color: @text;
+  -gtk-icon-style: symbolic;
 }
 
 /* Toolbar buttons: icon + label, compact */
@@ -63,10 +69,6 @@ image {
 
 .remin-toolbar-btn:hover {
   background-color: @surface_hover;
-}
-
-.remin-toolbar-btn image {
-  color: @text;
 }
 
 /* Text-only navigation: borders + selection state instead of icons */
@@ -285,6 +287,11 @@ notebook > header > tabs > tab:checked {
   border-radius: 3px;
 }
 
+.remin-directory-row image {
+  color: @text;
+  -gtk-icon-style: symbolic;
+}
+
 .remin-directory-name {
   font-size: 12px;
   color: @text;
@@ -314,6 +321,19 @@ notebook > header > tabs > tab:checked {
 
 .remin-dir-search:focus {
   border-color: @accent;
+}
+
+/* Directory tree expander */
+.remin-directory-row > expander,
+.remin-directory-row GtkExpander {
+  padding: 0;
+  margin: 0;
+}
+
+.remin-directory-row > expander > label,
+.remin-directory-row GtkExpander > label {
+  font-size: 12px;
+  color: @text;
 }
 
 /* Sidebar tabs (History | Directory) */

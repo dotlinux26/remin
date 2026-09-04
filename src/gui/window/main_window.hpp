@@ -71,6 +71,20 @@ private:
     void on_replace_all();
     bool on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods);
 
+    // Global sidebar (History / Directory)
+    void setup_sidebar();
+    void set_sidebar_mode(const std::string& mode);
+    void refresh_directory();
+    bool directory_matches_filter(const std::string& name);
+    Gtk::Widget* create_directory_row(const std::string& name, bool is_dir, const std::filesystem::path& full_path);
+    void populate_directory_expander(Gtk::Expander* expander, const std::filesystem::path& dir_path);
+    void show_directory_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir);
+    void create_new_file(const std::filesystem::path& dir);
+    void create_new_folder(const std::filesystem::path& dir);
+    void rename_item(const std::filesystem::path& path);
+    void delete_item(const std::filesystem::path& path);
+    void update_history_sidebar();
+
     SessionController* controller_;
     remin::core::Autosaver* autosaver_;
     remin::core::WorkspaceCore* core_;
@@ -122,6 +136,19 @@ private:
     Gtk::Overlay* overlay_{nullptr};
     Gtk::Label* autosave_badge_{nullptr};
     sigc::connection autosave_badge_hide_;
+
+    // Global sidebar (History / Directory) — always visible, like VS Code
+    Gtk::Paned* main_paned_{nullptr};
+    bool sidebar_visible_{true};
+    Gtk::Stack* sidebar_stack_{nullptr};
+    Gtk::ScrolledWindow* history_scroller_{nullptr};
+    Gtk::Box* history_list_{nullptr};
+    Gtk::ScrolledWindow* directory_scroller_{nullptr};
+    Gtk::Box* directory_tree_{nullptr};
+    Gtk::SearchEntry* directory_search_{nullptr};
+    std::string directory_filter_;
+    std::filesystem::path current_dir_;
+    std::vector<std::string> history_;
 
     // Key controller for accelerators
     Glib::RefPtr<Gtk::EventControllerKey> key_ctrl_;

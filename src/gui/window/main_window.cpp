@@ -7,6 +7,8 @@
 #include <gtkmm.h>
 #include <giomm/menu.h>
 #include <algorithm>
+#include <chrono>
+#include <ctime>
 
 namespace remin::gui {
 
@@ -45,6 +47,7 @@ MainWindow::MainWindow(SessionController* controller,
     setup_menu_bar();
     setup_toolbar();
     setup_tab_bar();
+    setup_sidebar();
     setup_content_stack();
     setup_status_bar();
     setup_find_bar();
@@ -52,7 +55,7 @@ MainWindow::MainWindow(SessionController* controller,
     root->append(*toolbar_);
     root->append(*find_bar_);
     root->append(*tab_bar_);
-    root->append(*content_stack_);
+    root->append(*main_paned_);
     root->append(*status_bar_);
 
     // Global key controller for accelerators
@@ -307,7 +310,7 @@ void MainWindow::update_toolbar() {
             "document-save-as-symbolic", "Save As", "Save As…",
             [this]() { on_note_save_as(); }));
         toolbar_->append(*make_tool_btn(
-            "eye-symbolic", "Preview", "Toggle Preview",
+            "view-paged-symbolic", "Preview", "Toggle Preview",
             sigc::mem_fun(*this, &MainWindow::on_toggle_note_preview)));
         toolbar_->append(*make_tool_btn(
             "edit-find-replace-symbolic", "Replace", "Find / Replace (Ctrl+H)",
@@ -325,14 +328,14 @@ void MainWindow::setup_tab_bar() {
 
     new_terminal_btn_ = Gtk::make_managed<Gtk::Button>();
     new_terminal_btn_->add_css_class("remin-tab-btn");
-    new_terminal_btn_->set_icon_name("list-add");
+    new_terminal_btn_->set_icon_name("list-add-symbolic");
     new_terminal_btn_->set_tooltip_text("New Terminal Tab (Ctrl+T)");
     new_terminal_btn_->signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::new_terminal_tab));
     tab_bar_->append(*new_terminal_btn_);
 
     new_note_btn_ = Gtk::make_managed<Gtk::Button>();
     new_note_btn_->add_css_class("remin-tab-btn");
-    new_note_btn_->set_icon_name("document-new");
+    new_note_btn_->set_icon_name("document-new-symbolic");
     new_note_btn_->set_tooltip_text("New Note Tab (Ctrl+Shift+N)");
     new_note_btn_->signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::new_note_tab));
     tab_bar_->append(*new_note_btn_);
@@ -343,6 +346,453 @@ void MainWindow::setup_content_stack() {
     content_stack_->set_hexpand(true);
     content_stack_->set_vexpand(true);
     content_stack_->set_transition_type(Gtk::StackTransitionType::SLIDE_LEFT_RIGHT);
+
+    // Main paned: [sidebar | content_stack]
+    main_paned_ = Gtk::make_managed<Gtk::Paned>();
+    main_paned_->set_orientation(Gtk::Orientation::HORIZONTAL);
+    main_paned_->set_hexpand(true);
+    main_paned_->set_vexpand(true);
+    main_paned_->set_wide_handle(true);
+    main_paned_->set_start_child(*sidebar_stack_);
+    main_paned_->set_end_child(*content_stack_);
+}
+
+namespace {
+std::string format_file_size(uintmax_t bytes) {
+    if (bytes < 1024) return std::to_string(bytes) + " B";
+    if (bytes < 1024 * 1024) return std::to_string(bytes / 1024) + " KB";
+    if (bytes < 1024 * 1024 * 1024) {
+        double mb = static_cast<double>(bytes) / (1024.0 * 1024.0);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.1f MB", mb);
+        return buf;
+    }
+    double gb = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.1f GB", gb);
+    return buf;
+}
+
+std::string format_file_time(const std::filesystem::file_time_type& ftime) {
+    auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+        ftime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+    std::time_t tt = std::chrono::system_clock::to_time_t(sctp);
+    char buf[64];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&tt));
+    return buf;
+}
+} // anonymous namespace
+
+void MainWindow::setup_sidebar() {
+    // Tab switcher: History | Directory
+    auto* tab_bar = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
+    tab_bar->add_css_class("remin-sidebar-tabs");
+
+    auto* history_tab = Gtk::make_managed<Gtk::Button>("History");
+    history_tab->add_css_class("remin-sidebar-tab");
+    history_tab->set_hexpand(true);
+    history_tab->signal_clicked().connect([this]() { set_sidebar_mode("history"); });
+
+    auto* directory_tab = Gtk::make_managed<Gtk::Button>("Files");
+    directory_tab->add_css_class("remin-sidebar-tab");
+    directory_tab->set_hexpand(true);
+    directory_tab->signal_clicked().connect([this]() { set_sidebar_mode("directory"); });
+
+    tab_bar->append(*history_tab);
+    tab_bar->append(*directory_tab);
+
+    // Sidebar stack containing [tab_bar + history | directory]
+    sidebar_stack_ = Gtk::make_managed<Gtk::Stack>();
+    sidebar_stack_->set_hexpand(false);
+    sidebar_stack_->set_vexpand(true);
+
+    auto* history_container = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    history_container->append(*tab_bar);
+    history_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
+    history_scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
+    history_scroller_->set_vexpand(true);
+    history_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    history_scroller_->set_child(*history_list_);
+    history_container->append(*history_scroller_);
+    sidebar_stack_->add(*history_container, "history", "History");
+
+    auto* directory_container = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    auto* dir_tab_bar = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
+    dir_tab_bar->add_css_class("remin-sidebar-tabs");
+    auto* dir_tab_label = Gtk::make_managed<Gtk::Label>("Files");
+    dir_tab_label->add_css_class("remin-sidebar-tab");
+    dir_tab_label->set_hexpand(true);
+    dir_tab_bar->append(*dir_tab_label);
+    directory_container->append(*dir_tab_bar);
+
+    directory_search_ = Gtk::make_managed<Gtk::SearchEntry>();
+    directory_search_->add_css_class("remin-dir-search");
+    directory_search_->set_placeholder_text("Search files...");
+    directory_search_->set_hexpand(true);
+    directory_search_->signal_changed().connect([this]() {
+        directory_filter_ = directory_search_->get_text();
+        refresh_directory();
+    });
+    directory_container->append(*directory_search_);
+
+    directory_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
+    directory_scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
+    directory_scroller_->set_vexpand(true);
+    directory_tree_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    directory_scroller_->set_child(*directory_tree_);
+    directory_container->append(*directory_scroller_);
+    sidebar_stack_->add(*directory_container, "directory", "Files");
+
+    const char* home = std::getenv("HOME");
+    current_dir_ = home ? home : "/";
+
+    // Load persisted command history
+    if (controller_) {
+        auto persisted = controller_->get_command_history();
+        for (auto& cmd : persisted) {
+            history_.push_back(std::move(cmd));
+        }
+    }
+    update_history_sidebar();
+    set_sidebar_mode("history");
+}
+
+void MainWindow::set_sidebar_mode(const std::string& mode) {
+    if (!sidebar_stack_) return;
+    if (mode == "history") {
+        sidebar_stack_->set_visible_child("history");
+    } else if (mode == "directory") {
+        sidebar_stack_->set_visible_child("directory");
+        refresh_directory();
+    }
+}
+
+void MainWindow::update_history_sidebar() {
+    if (!history_list_) return;
+    while (auto* child = history_list_->get_first_child()) history_list_->remove(*child);
+
+    auto const add = [this](const std::string& cmd, guint index) {
+        auto* btn = Gtk::make_managed<Gtk::Button>(cmd);
+        btn->add_css_class("remin-history-item");
+        btn->set_halign(Gtk::Align::FILL);
+        btn->signal_clicked().connect([this, index]() {
+            std::string c = history_[index];
+            if (active_tab_ >= 0 && active_tab_ < (int)tabs_.size() &&
+                tabs_[active_tab_]->kind() == TabKind::Terminal) {
+                auto* t = static_cast<TerminalTabView*>(tabs_[active_tab_].get());
+                if (auto* p = t->focused_pane()) p->feed(c);
+            }
+        });
+        history_list_->append(*btn);
+    };
+
+    const auto back = std::min<std::size_t>(history_.size(), 500);
+    const auto start = history_.size() - back;
+    for (std::size_t i = 0; i < back; ++i) {
+        add(history_[start + i], static_cast<guint>(start + i));
+    }
+    if (history_scroller_) {
+        auto v = history_scroller_->get_vadjustment();
+        if (v) v->set_value(v->get_upper());
+    }
+}
+
+void MainWindow::clear_history() {
+    history_.clear();
+    update_history_sidebar();
+}
+
+bool MainWindow::directory_matches_filter(const std::string& name) {
+    if (directory_filter_.empty()) return true;
+    std::string lower_name = name;
+    std::string lower_filter = directory_filter_;
+    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+    std::transform(lower_filter.begin(), lower_filter.end(), lower_filter.begin(), ::tolower);
+    return lower_name.find(lower_filter) != std::string::npos;
+}
+
+void MainWindow::refresh_directory() {
+    if (!directory_tree_) return;
+    while (auto* child = directory_tree_->get_first_child()) directory_tree_->remove(*child);
+
+    if (current_dir_.has_parent_path()) {
+        if (directory_matches_filter("..")) {
+            auto* parent_row = create_directory_row("..", true, current_dir_.parent_path());
+            directory_tree_->append(*parent_row);
+        }
+    }
+
+    try {
+        std::vector<std::filesystem::directory_entry> entries;
+        for (const auto& entry : std::filesystem::directory_iterator(current_dir_)) {
+            entries.push_back(entry);
+        }
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            bool a_dir = a.is_directory();
+            bool b_dir = b.is_directory();
+            if (a_dir != b_dir) return a_dir > b_dir;
+            return a.path().filename().string() < b.path().filename().string();
+        });
+
+        for (const auto& entry : entries) {
+            std::string name = entry.path().filename().string();
+            if (!name.empty() && name[0] == '.') continue;
+            if (!directory_matches_filter(name)) continue;
+            if (entry.is_directory()) {
+                directory_tree_->append(*create_directory_row(name, true, entry.path()));
+            } else if (entry.is_regular_file()) {
+                directory_tree_->append(*create_directory_row(name, false, entry.path()));
+            }
+        }
+    } catch (const std::exception&) {}
+}
+
+Gtk::Widget* MainWindow::create_directory_row(const std::string& name, bool is_dir, const std::filesystem::path& full_path) {
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 4);
+    box->add_css_class("remin-directory-row");
+    box->set_margin_start(8);
+    box->set_margin_end(4);
+
+    auto* icon = Gtk::make_managed<Gtk::Image>();
+    icon->set_from_icon_name(is_dir ? "folder-symbolic" : "text-x-generic-symbolic");
+    icon->set_pixel_size(14);
+    icon->set_valign(Gtk::Align::CENTER);
+    box->append(*icon);
+
+    auto* label = Gtk::make_managed<Gtk::Label>(name);
+    label->set_halign(Gtk::Align::START);
+    label->set_hexpand(true);
+    label->set_ellipsize(Pango::EllipsizeMode::END);
+    label->add_css_class("remin-directory-name");
+    box->append(*label);
+
+    if (!is_dir) {
+        try {
+            auto ftime = std::filesystem::last_write_time(full_path);
+            auto fsize = std::filesystem::file_size(full_path);
+            auto* size_label = Gtk::make_managed<Gtk::Label>(format_file_size(fsize));
+            size_label->add_css_class("remin-directory-size");
+            size_label->set_valign(Gtk::Align::CENTER);
+            box->append(*size_label);
+            std::string tooltip = name + "\nModified: " + format_file_time(ftime);
+            box->set_tooltip_text(tooltip);
+        } catch (...) {}
+    } else {
+        box->set_tooltip_text(full_path.string());
+    }
+
+    if (is_dir) {
+        bool has_children = false;
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(full_path)) {
+                has_children = true;
+                break;
+            }
+        } catch (...) {}
+
+        if (has_children) {
+            auto* expander = Gtk::make_managed<Gtk::Expander>();
+            expander->set_child(*box);
+            expander->set_expanded(false);
+            expander->property_expanded().signal_changed().connect([this, expander, full_path]() {
+                if (expander->get_expanded()) {
+                    populate_directory_expander(expander, full_path);
+                }
+            });
+            auto click = Gtk::GestureClick::create();
+            click->set_button(3);
+            click->signal_pressed().connect([this, expander, full_path, name](int, double, double) {
+                show_directory_context_menu(*expander, full_path, name, true);
+            });
+            expander->add_controller(click);
+            return expander;
+        } else {
+            auto right_click = Gtk::GestureClick::create();
+            right_click->set_button(3);
+            right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
+                show_directory_context_menu(*box, full_path, name, true);
+            });
+            box->add_controller(right_click);
+            return box;
+        }
+    } else {
+        auto click = Gtk::GestureClick::create();
+        click->signal_pressed().connect([this, full_path, name](int n_press, double, double) {
+            if (n_press == 2) {
+                open_note_from_path(full_path);
+            }
+        });
+        box->add_controller(click);
+        auto right_click = Gtk::GestureClick::create();
+        right_click->set_button(3);
+        right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
+            show_directory_context_menu(*box, full_path, name, false);
+        });
+        box->add_controller(right_click);
+        return box;
+    }
+}
+
+void MainWindow::populate_directory_expander(Gtk::Expander* expander, const std::filesystem::path& dir_path) {
+    Gtk::Widget* child = expander->get_child();
+    Gtk::Box* box = dynamic_cast<Gtk::Box*>(child);
+    if (!box) return;
+
+    Gtk::Box* children_box = nullptr;
+    for (auto* w = box->get_first_child(); w; w = w->get_next_sibling()) {
+        if (auto* b = dynamic_cast<Gtk::Box*>(w)) {
+            if (b->get_orientation() == Gtk::Orientation::VERTICAL) {
+                children_box = b;
+                break;
+            }
+        }
+    }
+    if (!children_box) {
+        children_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+        children_box->set_margin_start(16);
+        box->append(*children_box);
+    } else {
+        while (auto* c = children_box->get_first_child()) children_box->remove(*c);
+    }
+
+    try {
+        std::vector<std::filesystem::directory_entry> entries;
+        for (const auto& entry : std::filesystem::directory_iterator(dir_path)) {
+            entries.push_back(entry);
+        }
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            bool a_dir = a.is_directory();
+            bool b_dir = b.is_directory();
+            if (a_dir != b_dir) return a_dir > b_dir;
+            return a.path().filename().string() < b.path().filename().string();
+        });
+        for (const auto& entry : entries) {
+            std::string name = entry.path().filename().string();
+            if (!name.empty() && name[0] == '.') continue;
+            if (entry.is_directory()) {
+                children_box->append(*create_directory_row(name, true, entry.path()));
+            } else if (entry.is_regular_file()) {
+                children_box->append(*create_directory_row(name, false, entry.path()));
+            }
+        }
+    } catch (const std::exception&) {}
+}
+
+void MainWindow::show_directory_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir) {
+    auto* menu = Gtk::make_managed<Gtk::Popover>();
+    menu->add_css_class("remin-context-menu");
+
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    box->set_margin(6);
+
+    auto add_item = [menu, box](const char* label, std::function<void()> cb) {
+        auto* b = Gtk::make_managed<Gtk::Button>(label);
+        b->add_css_class("remin-menu-item");
+        b->set_halign(Gtk::Align::FILL);
+        b->signal_clicked().connect([menu, cb]() {
+            menu->popdown();
+            if (cb) cb();
+        });
+        box->append(*b);
+        return b;
+    };
+
+    if (is_dir) {
+        add_item("New File", [this, path]() { create_new_file(path); });
+        add_item("New Folder", [this, path]() { create_new_folder(path); });
+        add_item("Rename", [this, path]() { rename_item(path); });
+        add_item("Delete", [this, path]() { delete_item(path); });
+    } else {
+        add_item("Open", [this, path]() { open_note_from_path(path); });
+        add_item("Rename", [this, path]() { rename_item(path); });
+        add_item("Delete", [this, path]() { delete_item(path); });
+    }
+    add_item("Copy Path", [this, path]() {
+        auto display = get_display();
+        if (display) display->get_clipboard()->set_text(path.string());
+    });
+
+    menu->set_child(*box);
+    menu->set_parent(widget);
+    menu->popup();
+}
+
+void MainWindow::create_new_file(const std::filesystem::path& dir) {
+    auto dialog = Gtk::make_managed<Gtk::Dialog>("New File", *this, true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Create", Gtk::ResponseType::OK);
+    auto* entry = Gtk::make_managed<Gtk::Entry>();
+    entry->set_placeholder_text("filename.txt");
+    dialog->get_content_area()->append(*entry);
+    entry->grab_focus();
+    dialog->signal_response().connect([this, dialog, entry, dir](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            std::filesystem::path new_path = dir / entry->get_text().raw();
+            std::ofstream file(new_path);
+            file.close();
+            refresh_directory();
+        }
+        dialog->close();
+    });
+    dialog->present();
+}
+
+void MainWindow::create_new_folder(const std::filesystem::path& dir) {
+    auto dialog = Gtk::make_managed<Gtk::Dialog>("New Folder", *this, true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Create", Gtk::ResponseType::OK);
+    auto* entry = Gtk::make_managed<Gtk::Entry>();
+    entry->set_placeholder_text("folder_name");
+    dialog->get_content_area()->append(*entry);
+    entry->grab_focus();
+    dialog->signal_response().connect([this, dialog, entry, dir](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            std::filesystem::create_directory(dir / entry->get_text().raw());
+            refresh_directory();
+        }
+        dialog->close();
+    });
+    dialog->present();
+}
+
+void MainWindow::rename_item(const std::filesystem::path& path) {
+    auto dialog = Gtk::make_managed<Gtk::Dialog>("Rename", *this, true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Rename", Gtk::ResponseType::OK);
+    auto* entry = Gtk::make_managed<Gtk::Entry>();
+    entry->set_text(path.filename().string());
+    entry->select_region(0, -1);
+    dialog->get_content_area()->append(*entry);
+    entry->grab_focus();
+    dialog->signal_response().connect([this, dialog, entry, path](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            std::filesystem::rename(path, path.parent_path() / entry->get_text().raw());
+            refresh_directory();
+        }
+        dialog->close();
+    });
+    dialog->present();
+}
+
+void MainWindow::delete_item(const std::filesystem::path& path) {
+    auto dialog = Gtk::make_managed<Gtk::Dialog>("Delete", *this, true);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Delete", Gtk::ResponseType::OK);
+    dialog->set_default_response(Gtk::ResponseType::CANCEL);
+    auto* label = Gtk::make_managed<Gtk::Label>("Delete " + path.filename().string() + "?");
+    dialog->get_content_area()->append(*label);
+    dialog->signal_response().connect([this, dialog, path](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            if (std::filesystem::is_directory(path)) {
+                std::filesystem::remove_all(path);
+            } else {
+                std::filesystem::remove(path);
+            }
+            refresh_directory();
+        }
+        dialog->close();
+    });
+    dialog->present();
 }
 
 void MainWindow::setup_status_bar() {
@@ -431,6 +881,12 @@ void MainWindow::new_terminal_tab() {
     view->set_color_request_callback([this]() { on_terminal_color_profile(); });
     view->set_open_file_callback([this](const std::filesystem::path& path) {
         open_note_from_path(path);
+    });
+    view->set_history_callback([this](const std::string& cmd) {
+        history_.push_back(cmd);
+        // Avoid unbounded growth
+        if (history_.size() > 2000) history_.erase(history_.begin(), history_.begin() + (history_.size() - 1000));
+        update_history_sidebar();
     });
     auto idx = static_cast<int>(tabs_.size());
     tabs_.push_back(std::unique_ptr<TabView>(view));
@@ -912,14 +1368,16 @@ void MainWindow::on_note_save_as() {
 }
 
 void MainWindow::toggle_history_sidebar() {
-    if (active_tab_ >= 0 && active_tab_ < (int)tabs_.size()) {
-        tabs_[active_tab_]->toggle_sidebar();
-    }
-}
-
-void MainWindow::clear_history() {
-    if (active_tab_ >= 0 && active_tab_ < (int)tabs_.size()) {
-        tabs_[active_tab_]->clear_sidebar();
+    if (!main_paned_) return;
+    sidebar_visible_ = !sidebar_visible_;
+    if (sidebar_visible_) {
+        main_paned_->set_position(220);
+        // Refresh if showing directory
+        if (sidebar_stack_ && sidebar_stack_->get_visible_child_name() == "directory") {
+            refresh_directory();
+        }
+    } else {
+        main_paned_->set_position(0);
     }
 }
 

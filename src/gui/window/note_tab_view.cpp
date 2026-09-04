@@ -9,7 +9,6 @@ namespace remin::gui {
 
 NoteTabView::NoteTabView(SessionController* controller, const std::string& noteId)
     : controller_(controller), note_id_(noteId), title_("note") {
-    // on_change fires on every edit -> unified autosaver (idle 10s policy)
     editor_ = Gtk::make_managed<NoteEditor>(
         [this]() {
             if (controller_ && controller_->autosaver())
@@ -18,28 +17,18 @@ NoteTabView::NoteTabView(SessionController* controller, const std::string& noteI
     set_hexpand(true);
     set_vexpand(true);
 
-    // Outer layout: [ resizable left sidebar | note content ]
-    root_paned_ = Gtk::make_managed<Gtk::Paned>();
-    root_paned_->set_orientation(Gtk::Orientation::HORIZONTAL);
-    root_paned_->set_start_child(*Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0));
     content_host_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
     content_host_->set_hexpand(true);
     content_host_->set_vexpand(true);
-    root_paned_->set_end_child(*content_host_);
-    root_paned_->set_position(0);
-    root_paned_->set_wide_handle(true);
-    append(*root_paned_);
+    append(*content_host_);
 
-    // Load any previously-saved body so the note opens where it left off.
     if (controller_) {
         const auto saved = controller_->load_note(noteId);
         if (!saved.empty()) editor_->set_text(saved);
     }
 
     connect_editor();
-    build_sidebar();
     set_content(*editor_);
-    update_sidebar();
     start_watcher();
 }
 
@@ -74,46 +63,6 @@ void NoteTabView::show_find_replace(bool show_replace) {
     }
 }
 
-void NoteTabView::build_sidebar() {
-    auto* sidebar = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 4);
-    sidebar->add_css_class("remin-sidebar");
-    sidebar->set_size_request(180, -1);
-
-    auto* title = Gtk::make_managed<Gtk::Label>("Note");
-    title->set_halign(Gtk::Align::START);
-    title->set_margin_start(8);
-    title->set_margin_top(6);
-    title->add_css_class("remin-sidebar-title");
-    sidebar->append(*title);
-
-    sidebar_status_ = Gtk::make_managed<Gtk::Label>();
-    sidebar_status_->set_halign(Gtk::Align::START);
-    sidebar_status_->set_wrap(true);
-    sidebar_status_->set_margin(8);
-    sidebar_status_->add_css_class("remin-history-item");
-    sidebar->append(*sidebar_status_);
-
-    auto* spacer = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
-    spacer->set_vexpand(true);
-    sidebar->append(*spacer);
-
-    root_paned_->set_start_child(*sidebar);
-}
-
-void NoteTabView::update_sidebar() {
-    if (!sidebar_status_) return;
-    std::string text;
-    if (controller_) {
-        const auto path = controller_->note_path(note_id_);
-        text = path.empty() ? "Unsaved note" : path;
-        if (!path.empty()) {
-            // Keep only the basename for display.
-            text = Glib::path_get_basename(path);
-        }
-    }
-    sidebar_status_->set_text("File: " + text);
-}
-
 void NoteTabView::set_content(Gtk::Widget& content) {
     if (!content_host_) return;
     while (content_host_->get_first_child()) content_host_->remove(*content_host_->get_first_child());
@@ -134,7 +83,7 @@ void NoteTabView::save_now() {
     } else if (controller_->autosave_temp_enabled()) {
         controller_->write_note_file(controller_->note_temp_path(note_id_), body);
     }
-    update_sidebar();
+
 }
 
 void NoteTabView::save_as() {
@@ -163,22 +112,11 @@ void NoteTabView::save_as() {
                 start_watcher();
             }
         }
-        update_sidebar();
+    
         dialog->close();
     });
     dialog->present();
 }
-
-void NoteTabView::toggle_sidebar() {
-    if (!root_paned_) return;
-    if (root_paned_->get_position() <= 1) {
-        root_paned_->set_position(200);
-    } else {
-        root_paned_->set_position(0);
-    }
-}
-
-void NoteTabView::clear_sidebar() {}
 
 void NoteTabView::toggle_preview() {
     if (preview_) {
@@ -276,7 +214,7 @@ void NoteTabView::reload_from_disk() {
     if (content == editor_->text()) return;
     editor_->set_text(content);
     triggered_ = false;
-    update_sidebar();
+
 }
 
 void NoteTabView::prompt_reload() {
@@ -317,7 +255,7 @@ void NoteTabView::load_file(const std::filesystem::path& path) {
         last_size_ = std::filesystem::file_size(path);
         start_watcher();
     }
-    update_sidebar();
+
 }
 
 } // namespace remin::gui

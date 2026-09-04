@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 
 namespace remin::gui {
 
@@ -204,6 +205,51 @@ void SessionController::set_color_profile(const ColorProfile& profile) {
     if (!storage_) return;
     storage_->store_scrollback(meta_id(kColorProfileFgKey), profile.foreground);
     storage_->store_scrollback(meta_id(kColorProfileBgKey), profile.background);
+}
+
+void SessionController::add_command_history(const std::string& command) {
+    if (!storage_ || command.empty()) return;
+    // Load existing history, append, save back (max 2000 entries)
+    constexpr const char* kHistoryKey = "settings:command-history";
+    std::string existing = storage_->load_scrollback(meta_id(kHistoryKey));
+    std::vector<std::string> history;
+    if (!existing.empty()) {
+        // Parse newline-separated history
+        std::istringstream iss(existing);
+        std::string line;
+        while (std::getline(iss, line)) {
+            if (!line.empty()) history.push_back(line);
+        }
+    }
+    // Avoid exact duplicates of the last entry
+    if (history.empty() || history.back() != command) {
+        history.push_back(command);
+    }
+    // Trim to 2000
+    if (history.size() > 2000) {
+        history.erase(history.begin(), history.begin() + (history.size() - 1000));
+    }
+    // Serialize back
+    std::string serialized;
+    for (const auto& h : history) {
+        serialized += h;
+        serialized += '\n';
+    }
+    storage_->store_scrollback(meta_id(kHistoryKey), serialized);
+}
+
+std::vector<std::string> SessionController::get_command_history() const {
+    std::vector<std::string> result;
+    if (!storage_) return result;
+    constexpr const char* kHistoryKey = "settings:command-history";
+    std::string existing = storage_->load_scrollback(meta_id(kHistoryKey));
+    if (existing.empty()) return result;
+    std::istringstream iss(existing);
+    std::string line;
+    while (std::getline(iss, line)) {
+        if (!line.empty()) result.push_back(line);
+    }
+    return result;
 }
 
 } // namespace remin::gui

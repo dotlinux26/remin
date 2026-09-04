@@ -93,6 +93,10 @@ public:
     [[nodiscard]] std::optional<ColorProfile> color_profile() const;
     void set_color_profile(const ColorProfile& profile);
 
+    // -- Command history persistence --
+    void add_command_history(const std::string& command);
+    [[nodiscard]] std::vector<std::string> get_command_history() const;
+
     // -- Snapshots --
     remin::core::SnapshotId create_snapshot();
     bool restore_snapshot(const remin::core::SnapshotId& snap);

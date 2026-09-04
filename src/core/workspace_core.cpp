@@ -211,10 +211,13 @@ bool remove_pane_from_tree(PaneTree& node, const PaneId& id) {
     if (first_alive && second_alive) return true;  // still a valid split
 
     // Exactly one child (or node) survives → promote it.
+    // Use a temporary to avoid self-referential move (child is part of node).
     if (first_alive && node.first()) {
-        node = std::move(*node.first());
+        PaneTree temp = std::move(*node.first());
+        node = std::move(temp);
     } else if (second_alive && node.second()) {
-        node = std::move(*node.second());
+        PaneTree temp = std::move(*node.second());
+        node = std::move(temp);
     } else {
         node = PaneTree{};
     }

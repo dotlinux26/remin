@@ -55,15 +55,9 @@ public:
     // Load a file into this note tab
     void load_file(const std::filesystem::path& path);
 
-    // Left resizable sidebar (outline / note meta).
-    void toggle_sidebar() override;
-    void clear_sidebar() override;
-
 private:
     void connect_editor();
-    void build_sidebar();
     void set_content(Gtk::Widget& content);
-    void update_sidebar();
     void start_watcher();
     bool poll_file();
     bool file_matches_snapshot();
@@ -76,9 +70,7 @@ private:
     NoteEditor* editor_{nullptr};
     MarkdownPreview* preview_{nullptr};
     Gtk::Paned* content_split_{nullptr};
-    Gtk::Paned* root_paned_{nullptr};
     Gtk::Box* content_host_{nullptr};
-    Gtk::Label* sidebar_status_{nullptr};
 
     std::string watched_path_;
     std::filesystem::file_time_type last_mtime_;

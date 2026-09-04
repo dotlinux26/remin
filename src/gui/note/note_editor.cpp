@@ -37,6 +37,18 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     view_->set_gutter(Gtk::TextWindowType::LEFT, *gutter_);
     gutter_->set_visible(true); // Ensure gutter is visible
 
+    // Explicit scroll sync: connect view's vadjustment to gutter's vadjustment
+    // so line numbers scroll with content even when word-wrap is active.
+    auto vadj = view_->get_vadjustment();
+    auto gutter_vadj = gutter_->get_vadjustment();
+    vadj->signal_value_changed().connect([this, gutter_vadj]() {
+        auto vadj = view_->get_vadjustment();
+        auto gvadj = gutter_->get_vadjustment();
+        if (vadj && gvadj && std::abs(vadj->get_value() - gvadj->get_value()) > 0.5) {
+            gvadj->set_value(vadj->get_value());
+        }
+    });
+
     scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
     scroller_->set_hexpand(true);
     scroller_->set_vexpand(true);
