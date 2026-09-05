@@ -18,9 +18,11 @@ protected:
 
 private:
     bool on_autosave_tick();
+    void apply_theme_css(bool dark);
 
     std::unique_ptr<WorkspaceSession> session_;
     AdwStyleManager* style_manager_{nullptr};
+    Glib::RefPtr<Gtk::CssProvider> css_provider_;
     MainWindow* window_{nullptr};
     bool autosave_ok_{true};
 };

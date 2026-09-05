@@ -41,9 +41,15 @@ public:
 
     void request_save() { if (on_save_) on_save_(); }
 
-    // Public find/replace actions
+    // Public find/replace actions — operate on the active search context.
+    // The search text is taken from the MainWindow find bar via set_search_text().
+    void set_search_text(const Glib::ustring& text);
+    void set_replace_text(const Glib::ustring& text);
+    void search_next();
+    void search_previous();
     void do_replace();
     void do_replace_all();
+    [[nodiscard]] int match_count() const;
 
     // Dirty tracking — mirrors GtkSourceBuffer::modified.
     [[nodiscard]] bool is_modified() const;
@@ -62,14 +68,19 @@ public:
 private:
     void on_buffer_changed();
     bool on_preview_tick();
+    void do_search(bool forward);
 
     std::function<void()> on_change_;
     std::function<void()> on_save_;
     std::function<void(const std::string&)> on_preview_;
 
+    // Replacement string for do_replace()/do_replace_all().
+    Glib::ustring replace_text_;
+
     Gtk::ScrolledWindow* scroller_{nullptr};
     GtkSourceView* source_view_{nullptr};
     GtkSourceBuffer* source_buffer_{nullptr};
+    GtkSourceSearchContext* search_context_{nullptr};
 
     sigc::connection preview_timer_;
     bool preview_pending_{false};

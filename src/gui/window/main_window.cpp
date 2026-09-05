@@ -431,7 +431,7 @@ void MainWindow::setup_tab_bar() {
     tab_bar_->add_css_class("remin-tab-bar");
     tab_bar_->set_margin_top(4);
     tab_bar_->set_margin_bottom(4);
-    tab_bar_->set_margin_start(0);  // No gap on first tab
+    tab_bar_->set_margin_start(8);  // 8px gap left aligned with sidebar
     tab_bar_->set_margin_end(8);
     tab_bar_->set_hexpand(false); // Don't let tab bar expand beyond scroller
     tab_scroller_->set_child(*tab_bar_);
@@ -1333,7 +1333,10 @@ void MainWindow::on_find_next() {
             p->search_next();
         }
     } else {
-        static_cast<NoteTabView*>(tab)->focus_search();
+        if (auto* editor = static_cast<NoteTabView*>(tab)->editor()) {
+            editor->set_search_text(find_entry_->get_text());
+            editor->search_next();
+        }
     }
 }
 
@@ -1347,7 +1350,10 @@ void MainWindow::on_find_prev() {
             p->search_previous();
         }
     } else {
-        static_cast<NoteTabView*>(tab)->focus_search();
+        if (auto* editor = static_cast<NoteTabView*>(tab)->editor()) {
+            editor->set_search_text(find_entry_->get_text());
+            editor->search_previous();
+        }
     }
 }
 
@@ -1356,8 +1362,9 @@ void MainWindow::on_replace() {
     auto* tab = tabs_[active_tab_].get();
     if (tab->kind() == TabKind::Note) {
         auto* n = static_cast<NoteTabView*>(tab);
-        if (n->editor()) {
-            n->editor()->do_replace();
+        if (auto* editor = n->editor()) {
+            editor->set_replace_text(replace_entry_->get_text());
+            editor->do_replace();
         }
     }
 }
@@ -1367,8 +1374,9 @@ void MainWindow::on_replace_all() {
     auto* tab = tabs_[active_tab_].get();
     if (tab->kind() == TabKind::Note) {
         auto* n = static_cast<NoteTabView*>(tab);
-        if (n->editor()) {
-            n->editor()->do_replace_all();
+        if (auto* editor = n->editor()) {
+            editor->set_replace_text(replace_entry_->get_text());
+            editor->do_replace_all();
         }
     }
 }
