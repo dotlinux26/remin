@@ -38,6 +38,7 @@ private:
 
     // Behavior page
     Gtk::Switch* autoreload_switch_{nullptr};
+    Gtk::DropDown* unsaved_close_drop_{nullptr};
 };
 
 } // namespace remin::gui

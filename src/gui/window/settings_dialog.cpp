@@ -159,6 +159,40 @@ void SettingsDialog::setup_behavior_page() {
     page->append(*panel_box);
     page->append(*panel_hint);
 
+    auto* unsaved_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+    unsaved_box->set_halign(Gtk::Align::START);
+    auto* unsaved_label = Gtk::make_managed<Gtk::Label>("When closing an unsaved note");
+    unsaved_label->set_valign(Gtk::Align::CENTER);
+    unsaved_box->append(*unsaved_label);
+    auto unsaved_strings = Gtk::StringList::create(
+        {"Ask each time", "Always Keep (save & close)", "Always Skip (close w/o saving)"});
+    unsaved_close_drop_ = Gtk::make_managed<Gtk::DropDown>(unsaved_strings);
+    using UnsavedClose = SessionController::UnsavedClose;
+    auto behavior = controller_ ? controller_->unsaved_close_behavior() : UnsavedClose::Ask;
+    unsaved_close_drop_->set_selected(behavior == UnsavedClose::Keep   ? 1
+                                      : behavior == UnsavedClose::Skip  ? 2
+                                                                        : 0);
+    unsaved_close_drop_->set_valign(Gtk::Align::CENTER);
+    unsaved_close_drop_->property_selected().signal_changed().connect(
+        [this]() {
+            if (!unsaved_close_drop_ || !controller_) return;
+            const guint sel = unsaved_close_drop_->get_selected();
+            controller_->set_unsaved_close_behavior(
+                sel == 1 ? UnsavedClose::Keep
+                : sel == 2 ? UnsavedClose::Skip
+                           : UnsavedClose::Ask);
+        });
+    unsaved_box->append(*unsaved_close_drop_);
+    auto* unsaved_hint = Gtk::make_managed<Gtk::Label>(
+        "\"Keep\" saves the note first (opening a Save dialog if it has no file "
+        "path yet); cancelling that also cancels closing the tab. \"Skip\" "
+        "closes the tab without saving.");
+    unsaved_hint->set_wrap(true);
+    unsaved_hint->set_halign(Gtk::Align::START);
+    unsaved_hint->add_css_class("dim-label");
+    page->append(*unsaved_box);
+    page->append(*unsaved_hint);
+
     notebook_->append_page(*page, "Behavior");
 }
 

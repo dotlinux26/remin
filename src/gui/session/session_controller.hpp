@@ -90,6 +90,16 @@ public:
     [[nodiscard]] bool auto_show_panel_enabled() const;
     void set_auto_show_panel_enabled(bool enabled);
 
+    // Setting: what MainWindow should do when the user closes a note tab that
+    // still has unsaved edits.
+    //   Ask  - prompt every time (Keep = save & close, Skip = close w/o saving)
+    //   Keep - always save (Save As dialog if the note has no file path yet);
+    //          the close is aborted if the user cancels saving
+    //   Skip - always close without saving
+    enum class UnsavedClose { Ask, Keep, Skip };
+    [[nodiscard]] UnsavedClose unsaved_close_behavior() const;
+    void set_unsaved_close_behavior(UnsavedClose behavior);
+
     // -- User preferences (theme, color profile) --
     // Dark/light theme preference
     [[nodiscard]] bool theme_dark() const;

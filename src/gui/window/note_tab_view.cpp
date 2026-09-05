@@ -39,6 +39,13 @@ NoteTabView::NoteTabView(SessionController* controller, const std::string& noteI
 }
 
 NoteTabView::~NoteTabView() {
+    // glibmm timeouts are NOT auto-cancelled when the sigc::connection object
+    // is destroyed: the GSource stays attached to the main context and keeps
+    // dispatching into lambdas that captured `this`. After the destructor the
+    // NoteTabView is freed, so a pending watcher/debounce firing 1.5s later is
+    // a use-after-free. Disconnect both explicitly before touching any state.
+    watcher_timer_.disconnect();
+    dirty_debounce_.disconnect();
     // Release the extra ref we took on the editor in the constructor.
     if (editor_) {
         auto* g = editor_->gobj();
@@ -135,10 +142,10 @@ void NoteTabView::save_now() {
     }
     if (editor_) editor_->set_modified(false);
     notify_save_state();
-    if (on_file_saved_) on_file_saved_();
+    if (on_file_saved_) on_file_saved_(path);
 }
 
-void NoteTabView::save_as() {
+void NoteTabView::save_as(std::function<void()> on_done) {
     if (!controller_) return;
 
     auto* root = get_root();
@@ -152,7 +159,7 @@ void NoteTabView::save_as() {
     dialog->set_modal(true);
     dialog->set_current_folder(Gio::File::create_for_path(Glib::get_home_dir()));
     dialog->set_current_name((title_ == "note" ? "note" : title_) + ".md");
-    dialog->signal_response().connect([this, dialog](int response) {
+    dialog->signal_response().connect([this, dialog, on_done = std::move(on_done)](int response) {
         if (response == Gtk::ResponseType::OK) {
             const auto filename = dialog->get_file()->get_path();
             if (!filename.empty()) {
@@ -166,7 +173,8 @@ void NoteTabView::save_as() {
                 start_watcher();
                 // Tab label now shows the real filename (no more "(temp)").
                 notify_save_state();
-                if (on_file_saved_) on_file_saved_();
+                if (on_file_saved_) on_file_saved_(filename);
+                if (on_done) on_done();
             }
         }
     

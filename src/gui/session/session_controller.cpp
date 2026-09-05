@@ -14,6 +14,7 @@ constexpr const char* kPathPrefix = "note-path:";
 constexpr const char* kAutosaveTempKey = "settings:autosave-temp";
 constexpr const char* kAutoReloadKey = "settings:autoreload";
 constexpr const char* kAutoShowPanelKey = "settings:autoshow-panel";
+constexpr const char* kUnsavedCloseKey = "settings:unsaved-close";
 constexpr const char* kThemeDarkKey = "settings:theme-dark";
 constexpr const char* kColorProfileFgKey = "settings:color-profile-fg";
 constexpr const char* kColorProfileBgKey = "settings:color-profile-bg";
@@ -204,6 +205,22 @@ bool SessionController::auto_show_panel_enabled() const {
 void SessionController::set_auto_show_panel_enabled(bool enabled) {
     if (!storage_) return;
     storage_->store_scrollback(meta_id(kAutoShowPanelKey), enabled ? "1" : "0");
+}
+
+SessionController::UnsavedClose SessionController::unsaved_close_behavior() const {
+    if (!storage_) return UnsavedClose::Ask;
+    const std::string val = storage_->load_scrollback(meta_id(kUnsavedCloseKey));
+    if (val == "keep") return UnsavedClose::Keep;
+    if (val == "skip") return UnsavedClose::Skip;
+    return UnsavedClose::Ask;
+}
+
+void SessionController::set_unsaved_close_behavior(UnsavedClose behavior) {
+    if (!storage_) return;
+    const char* val = behavior == UnsavedClose::Keep  ? "keep"
+                      : behavior == UnsavedClose::Skip ? "skip"
+                                                       : "ask";
+    storage_->store_scrollback(meta_id(kUnsavedCloseKey), val);
 }
 
 bool SessionController::theme_dark() const {

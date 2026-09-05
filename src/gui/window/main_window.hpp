@@ -41,6 +41,13 @@ private:
     void new_terminal_tab();
     void new_note_tab();
     void close_tab(int index);
+    // Actual tab removal once the unsaved-note guard has been resolved
+    // (the guard may open dialogs, so close_tab defers here).
+    void finish_close_tab(int index);
+    // Keep-flow: save the note (Save As dialog when it has no file path yet).
+    // The close is aborted when the user cancels saving.
+    void close_keep_note(NoteTabView* note, int index);
+    void prompt_close_note(NoteTabView* note, int index);
     void on_tab_switched(int page);
     void on_rename_window();
     void on_rename_tab(int index);
@@ -151,6 +158,7 @@ private:
     Gtk::ScrolledWindow* history_scroller_{nullptr};
     Gtk::Box* history_list_{nullptr};
     DirectoryTreePanel* directory_panel_{nullptr};
+    bool first_directory_show_{true};  // first Files tab open → scroll to top
     Gtk::Button* sidebar_mode_tabs_[2]{nullptr, nullptr};
     std::vector<std::string> history_;
 

@@ -31,9 +31,20 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
         static_cast<NoteEditor*>(self)->on_buffer_changed();
     }), this);
 
-    // Search context used by the shared MainWindow find bar.
+    // Search context used by the shared MainWindow find bar. Enable
+    // occurrence highlighting and tint every match orange so results are easy
+    // to spot in both light and dark themes (the stock gray match is too faint).
     search_context_ = gtk_source_search_context_new(source_buffer_, nullptr);
-    gtk_source_search_context_set_highlight(search_context_, FALSE);
+    gtk_source_search_context_set_highlight(search_context_, TRUE);
+    auto* match_style = reinterpret_cast<GtkSourceStyle*>(
+        g_object_new(GTK_SOURCE_TYPE_STYLE,
+                     "foreground", "#1f1f1f",
+                     "foreground-set", true,
+                     "background", "#ffb300",
+                     "background-set", true,
+                     nullptr));
+    gtk_source_search_context_set_match_style(search_context_, match_style);
+    g_object_unref(match_style);
 
     // Theme-aware color scheme (GtkSourceView does not follow the GTK theme
     // by default, so the editor would stay light in dark mode).

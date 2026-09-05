@@ -654,7 +654,14 @@ void MainWindow::set_sidebar_mode(const std::string& mode) {
         sidebar_stack_->set_visible_child("directory");
         if (sidebar_mode_tabs_[1]) sidebar_mode_tabs_[1]->add_css_class("active");
         if (sidebar_mode_tabs_[0]) sidebar_mode_tabs_[0]->remove_css_class("active");
-        if (directory_panel_) directory_panel_->refresh();
+        if (directory_panel_) {
+            if (first_directory_show_) {
+                directory_panel_->refresh_to_top();
+                first_directory_show_ = false;
+            } else {
+                directory_panel_->refresh();
+            }
+        }
     }
 }
 
@@ -838,8 +845,8 @@ void MainWindow::new_note_tab() {
     view->set_save_state_callback([this]() {
         update_tab_bar();
     });
-    view->set_file_saved_callback([this]() {
-        if (directory_panel_) directory_panel_->refresh();
+    view->set_file_saved_callback([this](const std::filesystem::path& saved) {
+        if (directory_panel_) directory_panel_->on_note_saved(saved);
     });
     auto idx = static_cast<int>(tabs_.size());
     tabs_.push_back(std::unique_ptr<TabView>(view));
@@ -857,6 +864,83 @@ void MainWindow::new_note_tab() {
 void MainWindow::close_tab(int index) {
     if (index < 0 || index >= (int)tabs_.size()) return;
 
+    // Unsaved-note guard: before destroying a note tab with unsaved edits,
+    // honour the user's close preference (Keep = save & close / Skip = close
+    // without saving / Ask = prompt each time). The prompt is non-blocking, so
+    // the actual removal happens in finish_close_tab afterwards.
+    if (tabs_[index]->kind() == TabKind::Note) {
+        auto* note = static_cast<NoteTabView*>(tabs_[index].get());
+        if (note->is_modified()) {
+            auto behavior = controller_
+                                ? controller_->unsaved_close_behavior()
+                                : SessionController::UnsavedClose::Ask;
+            if (behavior == SessionController::UnsavedClose::Keep) {
+                close_keep_note(note, index);
+                return;  // aborted if the user cancels saving
+            }
+            if (behavior == SessionController::UnsavedClose::Ask) {
+                prompt_close_note(note, index);
+                return;
+            }
+            // Skip: fall through and close without saving.
+        }
+    }
+
+    finish_close_tab(index);
+}
+
+void MainWindow::close_keep_note(NoteTabView* note, int index) {
+    if (note->has_path()) {
+        // Bound to a file: save synchronously, then close.
+        note->save_now();
+        finish_close_tab(index);
+        return;
+    }
+    // Temp note without a file path: always show the Save dialog. The tab is
+    // closed only after a successful save; cancelling aborts the close, keeping
+    // the user's work available in the editor.
+    //
+    // The index is NOT baked in here: the Save dialog is async and tabs may
+    // have shifted by the time the user confirms, so the real index is resolved
+    // from the note pointer at completion time.
+    note->save_as([this, note]() {
+        for (size_t i = 0; i < tabs_.size(); ++i) {
+            if (tabs_[i].get() == note) {
+                finish_close_tab(static_cast<int>(i));
+                return;
+            }
+        }
+    });
+}
+
+void MainWindow::prompt_close_note(NoteTabView* note, int index) {
+    auto dialog = Gtk::make_managed<Gtk::MessageDialog>(
+        *this, "Unsaved changes",
+        false, Gtk::MessageType::QUESTION, Gtk::ButtonsType::NONE, false);
+    dialog->set_secondary_text(
+        "The note \"" + note->title() + "\" has unsaved changes.\n"
+        "Keep saves the note and then closes the tab; Skip closes the tab "
+        "without saving. If the note has no file path yet, Keep opens the Save "
+        "dialog first (cancelling that also cancels closing the tab).");
+    auto keep_btn = dialog->add_button("_Keep", Gtk::ResponseType::OK);
+    auto skip_btn = dialog->add_button("_Skip", Gtk::ResponseType::CANCEL);
+    (void)keep_btn; (void)skip_btn;
+    dialog->set_default_response(Gtk::ResponseType::CANCEL);
+    dialog->set_modal(true);
+    dialog->signal_response().connect([this, note, index, dialog](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            close_keep_note(note, index);
+        } else {
+            finish_close_tab(index);  // Skip (ESC/cancel) = close w/o saving
+        }
+        dialog->close();
+    });
+    dialog->present();
+}
+
+void MainWindow::finish_close_tab(int index) {
+    if (index < 0 || index >= (int)tabs_.size()) return;  // stale-index guard
+
     auto kind = tabs_[index]->kind();
     // Detach the widget from the stack BEFORE destroying it (tabs_ holds ownership).
     Gtk::Widget* child = content_stack_->get_child_by_name(std::to_string(index));
@@ -873,6 +957,15 @@ void MainWindow::close_tab(int index) {
         if (it != note_tabs_.end()) note_tabs_.erase(it);
     }
 
+    // Fix the active index BEFORE removal so all later numbering is consistent:
+    // tabs after the closed one shift down. If we closed the active tab itself,
+    // -1 means "recompute below" (fall back to the last remaining tab).
+    if (index < active_tab_) {
+        --active_tab_;
+    } else if (index == active_tab_) {
+        active_tab_ = -1;
+    }
+
     tabs_.erase(tabs_.begin() + index);
     // Rebuild the stack children with fresh index names so they stay in sync
     // with tabs_ indices. Removing each child just detaches it (tabs_ owns the
@@ -883,7 +976,9 @@ void MainWindow::close_tab(int index) {
     for (size_t i = 0; i < tabs_.size(); ++i) {
         content_stack_->add(*tabs_[i].get(), std::to_string(i));
     }
-    if (active_tab_ >= (int)tabs_.size()) active_tab_ = (int)tabs_.size() - 1;
+    if (active_tab_ < 0 || active_tab_ >= (int)tabs_.size()) {
+        active_tab_ = (int)tabs_.size() - 1;
+    }
     if (active_tab_ >= 0) {
         content_stack_->set_visible_child(*tabs_[active_tab_]);
         tabs_[active_tab_]->activate();
@@ -1499,8 +1594,8 @@ void MainWindow::open_note_from_path(const std::filesystem::path& path) {
     view->set_save_state_callback([this]() {
         update_tab_bar();
     });
-    view->set_file_saved_callback([this]() {
-        if (directory_panel_) directory_panel_->refresh();
+    view->set_file_saved_callback([this](const std::filesystem::path& saved) {
+        if (directory_panel_) directory_panel_->on_note_saved(saved);
     });
     auto idx = static_cast<int>(tabs_.size());
     tabs_.push_back(std::unique_ptr<TabView>(view));
