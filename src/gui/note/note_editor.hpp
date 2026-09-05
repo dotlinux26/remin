@@ -26,6 +26,9 @@ public:
 
     void focus_editor();
 
+    // Switch the GtkSourceView color scheme to match the app theme.
+    void set_theme(bool dark);
+
     // Show the find/replace bar and focus its entry (Ctrl+F / Ctrl+H).
     void show_find(bool show_replace = false);
 

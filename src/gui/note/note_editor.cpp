@@ -1,5 +1,6 @@
 #include "gui/note/note_editor.hpp"
 
+#include <adwaita.h>
 #include <algorithm>
 #include <cmath>
 
@@ -32,6 +33,18 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
 
     // Search context used by the shared MainWindow find bar.
     search_context_ = gtk_source_search_context_new(source_buffer_, nullptr);
+    gtk_source_search_context_set_highlight(search_context_, FALSE);
+
+    // Theme-aware color scheme (GtkSourceView does not follow the GTK theme
+    // by default, so the editor would stay light in dark mode).
+    set_theme(adw_style_manager_get_dark(adw_style_manager_get_default()));
+    g_signal_connect(adw_style_manager_get_default(), "notify::color-scheme",
+                     G_CALLBACK(+[](GObject*, GParamSpec*, gpointer self) {
+                         static_cast<NoteEditor*>(self)->set_theme(
+                             adw_style_manager_get_dark(
+                                 adw_style_manager_get_default()));
+                     }),
+                     this);
 
     scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
     scroller_->set_hexpand(true);
@@ -78,11 +91,21 @@ void NoteEditor::show_find(bool) {}
 
 void NoteEditor::clear_find_replace_entries() {}
 
+void NoteEditor::set_theme(bool dark) {
+    auto* mgr = gtk_source_style_scheme_manager_get_default();
+    const char* id = dark ? "Adwaita-dark" : "Adwaita";
+    GtkSourceStyleScheme* scheme = gtk_source_style_scheme_manager_get_scheme(mgr, id);
+    if (!scheme) {
+        id = dark ? "oblivion" : "classic";
+        scheme = gtk_source_style_scheme_manager_get_scheme(mgr, id);
+    }
+    if (scheme) gtk_source_buffer_set_style_scheme(source_buffer_, scheme);
+}
+
 void NoteEditor::set_search_text(const Glib::ustring& text) {
     if (!search_context_) return;
     auto* settings = gtk_source_search_context_get_settings(search_context_);
     gtk_source_search_settings_set_search_text(settings, text.c_str());
-    gtk_source_search_context_set_highlight(search_context_, !text.empty());
 }
 
 void NoteEditor::set_replace_text(const Glib::ustring& text) {
@@ -135,6 +158,18 @@ void NoteEditor::do_replace() {
     GtkTextIter start, end;
     if (!gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) return;
     gtk_text_iter_order(&start, &end);
+
+    // Only replace when the selection is exactly one match of the current
+    // search term. Anything else (arbitrary selection) is left untouched so
+    // Replace never clobbers text the user did not ask to replace.
+    GtkTextIter m_start, m_end;
+    GtkTextIter probe = start;
+    gboolean has_wrapped = FALSE;
+    if (!gtk_source_search_context_forward(search_context_, &probe, &m_start, &m_end,
+                                           &has_wrapped))
+        return;
+    if (!gtk_text_iter_equal(&m_start, &start) || !gtk_text_iter_equal(&m_end, &end))
+        return;
 
     GError* error = nullptr;
     if (gtk_source_search_context_replace(search_context_, &start, &end,

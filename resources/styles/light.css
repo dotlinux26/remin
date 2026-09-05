@@ -242,7 +242,7 @@ windowcontrols.end button.close {
   margin: 0;
   min-width: 28px;
   min-height: 28px;
-  color: #1f2437;
+  color: @text;
 }
 window.remin-window headerbar button.titlebutton:hover,
 window.remin-window headerbar titlebutton:hover,
@@ -260,7 +260,7 @@ windowcontrols.end button.close:active {
   border-radius: 0;
   box-shadow: none;
   outline-style: none;
-  color: #1f2437;
+  color: @text;
 }
 
 .remin-header-label { color: @text; }
@@ -306,7 +306,7 @@ button.remin-find-btn image { -gtk-icon-size: 14px; }
  * ============================================================================ */
 .remin-sidebar { background-color: @surface; border-right: none; margin-left: 8px; }
 .remin-sidebar-title { color: @text_muted; font-weight: 600; font-size: 11px; letter-spacing: 0.5px; }
-.remin-sidebar-tabs { padding-bottom: 4px; margin-left: 8px; }
+.remin-sidebar-tabs { padding-bottom: 4px; }
 button.remin-sidebar-tab {
   min-height: 26px;
   padding: 2px 8px;
@@ -392,7 +392,7 @@ button.remin-preview-toggle:checked { color: @accent; }
  * CONTEXT MENU — always-light sheet, transparent flat items
  * ============================================================================ */
 .remin-context-menu {
-  background-color: #ffffff;
+  background-color: transparent;
   border: none;
   border-radius: 0;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -408,12 +408,12 @@ button.remin-preview-toggle:checked { color: @accent; }
   background-color: transparent;
   background-image: none;
   box-shadow: none;
-  color: #1f2437;
+  color: @text;
   font-size: 13px;
 }
-.remin-context-menu-item:hover { background-color: transparent; color: #4f46e5; }
-.remin-context-menu-item:disabled { color: #9ca3b8; }
-.remin-context-menu-separator { background-color: #e2e6f2; min-height: 1px; margin: 4px 8px; border: none; }
+.remin-context-menu-item:hover { background-color: transparent; color: @accent; }
+.remin-context-menu-item:disabled { color: @text_muted; }
+.remin-context-menu-separator { background-color: @border; min-height: 1px; margin: 4px 8px; border: none; }
 
 /* ============================================================================
  * MISC
