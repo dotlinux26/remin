@@ -21,3 +21,13 @@ foreach(test_src ${REMIN_TEST_SOURCES})
   remin_enable_sanitizers(${test_name})
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
+
+if(REMIN_BUILD_GUI)
+  # Fidelity gate test: VTE live -> ANSI/control -> capture -> feed -> compare
+  add_executable(fidelity_gate_test unit/fidelity_gate_test.cpp)
+  target_include_directories(fidelity_gate_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(fidelity_gate_test PRIVATE PkgConfig::GTKMM PkgConfig::VTE)
+  remin_enable_warnings(fidelity_gate_test)
+  remin_enable_sanitizers(fidelity_gate_test)
+  add_test(NAME fidelity_gate_test COMMAND fidelity_gate_test)
+endif()
