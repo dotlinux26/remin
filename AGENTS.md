@@ -209,149 +209,67 @@ View → Controller → Core → Storage/Runtime
 
 ---
 
-## Active UI Issues (current sprint)
+## UI/UX Status — LTS STABLE (baseline: v0.0.3lts, 2026-09-06)
 
-These are the **concrete issues** reported by the user. Each must be fixed.
+> UI/UX đã đẹp và ổn định theo đánh giá của user (không còn lỗi). Đây là **baseline
+> LTS** — mọi thay đổi sau này phải giữ được chuẩn này, không được phá vỡ nhất quán.
+> Nota: các hạng mục polish dưới đây đã hoàn tất.
 
-### 1. Directory Tree View (HIGH PRIORITY)
+### 1. Directory Tree View ✅
+VS Code-style compact, search/filter real-time, file extension + size, tooltip date
+on hover, `Gtk::FileChooserNative` Open File, bắt đầu từ `$HOME`, context menu
+(New File/Folder, Rename, Delete, Copy Path), double-click text file → note editor,
+folder/file icons từ system theme.
 
-**Current state**: Uses `Gtk::Expander` for directories. Has many problems.
+### 2. Broken Button Icons ✅
+Symbolic icons inherit foreground color trong cả light + dark, `.remin-toolbar-btn`.
 
-**Required**:
-- VS Code-style tree view (compact, clean)
-- **Only show expander arrow** for directories that actually have children (no `> > >` for empty dirs)
-- **Compact sizing**: rows should be small (20-22px height), tight padding
-- **File type display**: show extension (`.txt`, `.py`, `.sh`) as a subtle suffix
-- **File size display**: show size on row (e.g., `4.2 KB`, `1.2 MB`)
-- **Date on hover**: tooltip shows last modified date (not on row, only on hover)
-- **Search/filter box**: integrated at top of directory panel, filters tree in real-time
-- **OS-native file dialog**: integrate `Gtk::FileChooserNative` for "Open File" from directory
-- **Starts at `$HOME`** (not `std::filesystem::current_path()`)
-- **Right-click context menu**: New File, New Folder, Rename, Delete, Copy Path
-- **Double-click text files** → opens in note editor
-- **Icons**: proper folder/file icons from system theme (not broken red icons)
+### 3. Toolbar Auto-Show ✅
+Toolbar visible ngay trên first launch, `update_toolbar()` sau `new_terminal_tab()`,
+compact 32-36px, icon + text label.
 
-### 2. Broken Button Icons (HIGH PRIORITY)
+### 4. Find Bar Integration ✅
+Find (Ctrl+F) / Replace (Ctrl+H) cùng chiều cao toolbar, ESC đóng, tự ẩn/hiện theo
+context. **v0.0.3lts**: ESC / xóa find box xóa hết highlight (match + current-match)
+ở **mọi** tab qua `TabView::clear_search()` (broadcast, không phụ thuộc signal chain).
 
-**Current state**: All button icons show as broken/red/error.
+### 5. Tab Focus Highlighting ✅
+Active tab nổi bật (`.remin-tab` checked), chuyển tab highlight ngay lập tức.
 
-**Root cause**: Symbolic icons need CSS color inheritance. In GTK4, `Gtk::Image` with symbolic icons needs the icon to be rendered with the correct foreground color.
+### 6. Terminal Pane Full-Tab ✅
+Pane + children `hexpand/vexpand`, lấp đầy từ toolbar tới status bar.
 
-**Fix needed**:
-- Ensure all `Gtk::Image` widgets using symbolic icons inherit foreground color
-- CSS: `image { color: @text; }` or use `icon-size` property
-- Test with both light and dark themes
-- Add CSS classes to toolbar buttons: `.remin-toolbar-btn`
+### 7. Line Number Gutter Scroll Sync ✅
+Gutter (GtkSourceView line numbers) đồng bộ scroll với editor content.
 
-### 3. Toolbar Auto-Show (HIGH PRIORITY)
+### 8. History Sidebar Persistence ✅ (UI) — bản chất persistence theo design pipeline
+`add_history()` ghi qua SessionController; restore hiển thị từ storage. Persistence
+sâu (per-pane canonical, checkpoint atomic) là phần của core feature §4-6 design.
 
-**Current state**: Toolbar only appears when creating a new tab. On initial launch, toolbar is hidden.
+### 9. Dark Theme Button Colors ✅
+Dùng `@text` / `@text-muted` / semantic variables, không hardcode.
 
-**Fix needed**:
-- `update_toolbar()` must be called in constructor AFTER `new_terminal_tab()`
-- Ensure toolbar is visible on first launch
-- Toolbar height should be compact (32-36px)
-- Toolbar buttons: icon + text label, compact sizing
-
-### 4. Find Bar Integration (HIGH PRIORITY)
-
-**Current state**: Find bar (Ctrl+F) and replace bar (Ctrl+H) are too tall compared to toolbar.
-
-**Fix needed**:
-- Find bar height = toolbar height (same visual weight)
-- Find bar should be integrated into the toolbar row, not a separate overlay
-- Replace bar (Ctrl+H) same height as find bar
-- ESC closes find bar
-- Find bar shows/hides with toolbar context (terminal vs note)
-
-### 5. Tab Focus Highlighting (HIGH PRIORITY)
-
-**Current state**: Only newly created tabs are highlighted. Clicking an existing tab doesn't highlight it.
-
-**Fix needed**:
-- Active tab must have visual highlight (background color change, border, or underline)
-- CSS: `tab:checked` or custom class `.remin-tab-active`
-- When switching tabs, the new active tab must immediately highlight
-- The previously active tab must lose its highlight
-
-### 6. Terminal Pane Full-Tab (HIGH PRIORITY)
-
-**Current state**: Terminal pane has fixed height, doesn't fill the tab.
-
-**Fix needed**:
-- Terminal pane (and all child widgets) must expand to fill available space
-- `set_hexpand(true)` / `set_vexpand(true)` on paned, tree_host, and all containers
-- No fixed `set_size_request` on terminal containers
-- Test: terminal should fill from below toolbar to above status bar
-
-### 7. Line Number Gutter Scroll Sync (HIGH PRIORITY)
-
-**Current state**: Line numbers don't scroll with editor content.
-
-**Fix needed**:
-- Line number gutter must be synced with the TextBuffer's scroll position
-- In GTK4, the gutter is part of the GtkTextView via `set_gutter()`
-- Ensure the gutter scrolls with the view's adjustment
-- Test: scroll editor → line numbers update
-
-### 8. History Sidebar Persistence (HIGH PRIORITY)
-
-**Current state**: History entries may not persist across sessions.
-
-**Fix needed**:
-- `add_history()` must trigger autosaver save
-- History should be persisted to storage (blob store or dedicated table)
-- On restore, history is loaded and displayed
-- Test: add commands, close app, reopen → history preserved
-
-### 9. Dark Theme Button Colors (MEDIUM PRIORITY)
-
-**Current state**: Buttons may not have correct colors in dark theme.
-
-**Fix needed**:
-- Test all button types in dark theme
-- Ensure text/buttons/labels use `@text` / `@text-muted` from theme
-- No hardcoded colors in widget code
-- CSS: use semantic variables only
-
-### 10. Overall UI Polish (MEDIUM PRIORITY)
-
-**Current state**: "Ngoại hình quá xấu" (UI is too ugly).
-
-**Fix needed**:
-- VS Code-inspired compact, clean layout
-- Consistent spacing: 4px/8px grid
-- Typography: single dominant font, tnum figures
-- Subtle borders and dividers
-- No excessive whitespace
-- Status bar should be informative but minimal
-- Menu bar should be clean and organized
+### 10. Overall UI Polish ✅
+VS Code-inspired compact, spacing 4px/8px grid, tnum, border nhẹ, status bar tối giản.
 
 ---
 
 ## TODO Checklist (active development)
 
-### GUI Polish (current sprint)
-- [ ] Directory tree: VS Code-style compact, search, file info
-- [ ] Fix all broken button icons
-- [ ] Toolbar auto-show on launch
-- [ ] Find bar integrated into toolbar
-- [ ] Tab focus highlighting
-- [ ] Terminal pane full-tab
-- [ ] Line number gutter scroll sync
-- [ ] History sidebar persistence
-- [ ] Dark theme button colors
-- [ ] Overall UI beauty pass
+### Core Feature — Workspace Persistence/Recovery Pipeline (current sprint, THE priority)
+Design: `docs/design/workspace-persistence-pipeline.md` (đã gate). Không Window History UI / Ctrl+Shift+H lúc này.
+- [ ] P1 Domain state + migration (TabKind, NoteTabState, UiState + serialization round-trip)
+- [ ] P2 TerminalPane live: capture/restore cwd, cols/rows, per-pane history, interrupted command
+- [ ] P3 Atomic checkpoint: SqliteDb txn RAII, checkpoint(reason), autosave→checkpoint, shutdown flush
+- [ ] P4 Restore workspace đầy đủ (terminals, notes, dir tree, geometry, focus)
+- [ ] P5 Golden acceptance test + report (§16)
 
-### Core Features (next)
-- [ ] Note Save/Save As + autosave toggle
-- [ ] Wire find bar → active terminal VTE search
+### Core Features (secondary / triage sau)
 - [ ] Wire ThemeManager into Application
-- [ ] Wire terminal color profile picker
 - [ ] Wire menu stubs (note.save/save_as, note.preview)
 - [ ] Tab rename + window rename
 - [ ] Custom split dialog (rows x cols)
-- [ ] Fix sign-conversion warnings
+- [ ] Fix sign-conversion warnings (CI clean)
 
 ### Plugin Platform (V2+)
 - [ ] IPlugin interface design
@@ -424,4 +342,4 @@ resources/styles/
 
 ---
 
-*Last updated: 2026-09-04*
+*Last updated: 2026-09-06*

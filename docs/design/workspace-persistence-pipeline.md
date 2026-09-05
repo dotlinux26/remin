@@ -1,6 +1,8 @@
 # Design — Workspace Persistence/Recovery Pipeline (REMIN CORE FEATURE)
 
-> **Status**: PRE-CODE DESIGN (gate). Không viết code từng gap rời rạc.
+> **Status**: IMPLEMENTATION-GATED — đã qua review của user với 5 điểm sửa + thêm
+> schema_version/P2.5 (xem chốt ở cuối doc). Sau các chỉnh sửa này user cho **GO
+> implement P1–P5**. Không viết code từng gap rời rạc; mỗi phase có gate + test.
 > Tiền đề: report `docs/report-history-save-pane-window-tab.md` xác nhận ta mới có
 > foundation; capture/restore chưa đi qua một full end-to-end cycle nào.
 > Doc này chốt **canonical state model + capture/restore pipeline + atomic
@@ -22,7 +24,14 @@ LIVE WORKSPACE
    → VERIFY (không "looks okay")
 ```
 
-**Demo 1 đáng giá nhất cả project**: đóng Remin → mở lại → màn hình về đúng chỗ.
+**Demo 1 đáng giá nhất cả project**: đóng Remin → mở lại → scrollback text về
+**y nguyên (EXACT)** và màn hình căn về **prompt/bottom**. 
+
+> ⚠️ **Wording cam kết (chốt với reviewer)**: ta restore *scrollback = EXACT*,
+> còn *viewport = bottom/prompt trong V1*. Không tuyên bố "restore đúng chỗ tuyệt
+> đối" khi đang scroll lên — VTE 0.76 không expose `get/set_scrollback_offset`
+> (§5.4). Mọi acceptance test phải theo đúng 2 mức này, không ghi viewport ✓ khi
+> user đang scroll lên.
 
 ---
 
@@ -33,7 +42,7 @@ user đang nhìn + context để tiếp tục công việc**:
 
 ```text
 Workspace
-├── identity (id, name, created_at, last_saved_at, generation)
+├── identity (id, name, created_at, last_saved_at, schema_version, generation)
 ├── ui state
 │   ├── active window
 │   └── directory-tree state (current_dir, expanded[], selected, filter, scroll anchor)
@@ -51,7 +60,7 @@ Workspace
 │   │   │  │        ├── cwd                      (shell context cwd)
 │   │   │  │        ├── shell
 │   │   │  │        ├── cols / rows
-│   │   │  │        ├── environment              (filtered, no secrets)
+│   │   │  │        ├── environment              (V1: KHÔNG persist — §3.2)
 │   │   │  │        ├── scrollback (full text)
 │   │   │  │        ├── viewport  (V1: prompt/bottom — xem §5.4)
 │   │   │  │        ├── command_history[]        (per-pane, canonical)
@@ -70,15 +79,19 @@ Workspace
 │   │   └── (surface contract: capture_state()/restore_state())
 ```
 
-**Source of truth (bất biến)**:
+**Source of truth (bất biến)** — boundary Capture/GUI ≠ Core (xem §12):
 
 ```text
-VTE/PTY  →  TerminalPane runtime  →  capture_state()  →  PaneState  →  WorkspaceCore
-WorkspaceCore  →  restore_state()  →  TerminalPaneView  →  VTE + new PTY/shell
+VTE/PTY  →  TerminalPane.runtime_capture adapter  →  TerminalRuntimeSnapshot
+        →  SessionController / WorkspaceSnapshotBuilder  →  WorkspaceCore::apply_runtime_state
+        →  PaneState (canonical, thuộc Core)
+WorkspaceCore  →  canonical state  →  restore adapter (GUI)  →  TerminalPaneView  →  VTE + new PTY/shell
 ```
 
-KHÔNG có: VTE → SQLite, VTE → callback rời rạc, MainWindow → history vector 🔥.
-`WorkspaceCore` là authoritative. Widget GTK chỉ là runtime representation.
+KHÔNG có: VTE → SQLite, VTE → callback rời rạc, MainWindow → history vector 🔥,
+và **KHÔNG có Core gọi thẳng GUI widget**. `WorkspaceCore` là authoritative cho
+**canonical state + giao dịch + generation**; capture adapter + dựng lại view là
+trách nhiệm của **GUI/runtime**. Widget GTK chỉ là runtime representation.
 
 ---
 
@@ -106,14 +119,17 @@ KHÔNG có: VTE → SQLite, VTE → callback rời rạc, MainWindow → history
 ### 3.1 Contract mới của TerminalPane
 
 ```cpp
-// Capture toàn bộ trạng thái terminal hiện tại → PaneState domain.
-remin::core::PaneState capture_state();
+// Adapter thuộc GUI/runtime: đọc trạng thái VTE hiện tại → snapshot thuần data
+// (KHÔNG phải PaneState — trung gian để Core không phụ thuộc GUI, xem §12).
+remin::core::TerminalRuntimeSnapshot runtime_capture();
 
-// Restore: dựng lại VTE theo PaneState, spawn shell tại cwd (xem §5).
-void restore_state(const remin::core::PaneState& state);
+// Adapter thuộc GUI/runtime: dựng lại VTE theo canonical PaneState.
+void runtime_restore(const remin::core::PaneState& state);
 ```
 
 - Capture gọi **khi checkpoint** (không phải mỗi keystroke) — một lần đọc.
+- `WorkspaceSnapshotBuilder` (tầng SessionController) ráp `TerminalRuntimeSnapshot`
+  thành `PaneState` canonical và đẩy vào `WorkspaceCore::apply_runtime_state(...)`.
 - Restore chạy một lần ở đầu đời pane (startup restore hoặc pane mới).
 
 ### 3.2 Nguồn dữ liệu từng field
@@ -123,10 +139,10 @@ void restore_state(const remin::core::PaneState& state);
 | `cwd` | §4 — shell context cwd |
 | `shell` | shell_ đang dùng (shell.hpp.detect_default_shell hoặc PaneState đã lưu) |
 | `cols`, `rows` | `vte_terminal_get_column_count/row_count` |
-| `environment` | giữ nguyên như hiện tại (filtered, không secrets) |
-| `command_history` | §6 — stack từ commit của pane này |
+| `environment` | **V1: KHÔNG persist.** Shell mới spawn inherit env mặc định bình thường; blocklist (TOKEN/PASSWORD/SECRET/KEY) không đủ an toàn. Acceptance về sau chỉ qua explicit allowlist / user opt-in |
+| `command_history` | §6 — stack từ commit của pane này (bắt buộc ở P2, không trễ) |
 | `scrollback` | §5.1 — `vte_terminal_get_text_range` full scrollback + visible |
-| `interrupted_command` | §6.2 — lệnh cuối + có commit chứa `\x03` |
+| `interrupted_command` | §6.2 — `InterruptedCommand{command, timestamp, source}` với `source = CtrlC | process_exit | unknown`; V1 CHỈ gán `CtrlC` khi dựng được từ commit `\x03` thực tế, không suy diễn |
 
 Không populate field bằng default chỉ để serialization test pass.
 
@@ -178,8 +194,9 @@ mount) → log + rơi về `$HOME`.
    set scrollback_lines = max(captured length, 10000)
 2. vte_terminal_feed(captured_text)      ← dựng lại toàn bộ visual + scrollback
                                             từ buffer widget (không qua PTY)
-3. vte_terminal_spawn_async(shell, captured cwd, env)   ← shell prompt in xuống,
-                                            dưới đúng nội dung đã restore
+3. vte_terminal_spawn_async(shell, captured cwd)   ← env INHERIT mặc định (§3.2);
+                                            shell prompt in xuống, dưới đúng
+                                            nội dung đã restore
 4. Viewport: căn về prompt/bottom (§5.4)
 ```
 
@@ -187,16 +204,17 @@ Thứ tự feed-trước-spawn đảm bảo không bị "bash in prompt rồi pa
 Không có `sleep(100ms)` ở bất kỳ đâu.
 
 **Ta KHÔNG restore quá trình** (không hồi sinh vim/ssh). Ta restore: shell
-context (cwd, env) + scrollback + kích thước + viewport, rồi spawn shell mới.
+context (cwd) + scrollback + kích thước + viewport, rồi spawn shell mới với env
+mặc định.
 
 ### 5.3 Fidelity (phân biệt rõ)
 
 | Loại | Có restore không |
 |------|------------------|
 | PTY runtime state (process đang chạy) | ❌ vĩnh viễn ngoài scope |
-| Scrollback text | ✅ đầy đủ (get_text_range → feed) |
-| Visible screen (đang ở prompt / output giữa chừng) | ✅ text restore; screen "gần như y nguyên" |
-| Viewport khi user đang scroll lên | ⚠️ V1: chưa chính xác tuyệt đối — xem §5.4 |
+| Scrollback text | ✅ EXACT (get_text_range → feed) |
+| Visible screen (đang ở prompt / output giữa chừng) | ✅ text restore; ANSI/color/format fidelity phải qua §5.5 gate |
+| Viewport khi user đang scroll lên | V1: chỉ bottom/prompt — xem §5.4 (không claim scroll-đúng-chỗ) |
 
 ### 5.4 Viewport — giới hạn trung thực của VTE 0.76
 
@@ -204,11 +222,36 @@ context (cwd, env) + scrollback + kích thước + viewport, rồi spawn shell m
 có `vte_pty_get_child_process_id`. Vì `set_scroll_on_keystroke/output = TRUE` nên
 trạng thái "đang scroll lên" chỉ xảy ra khi idle.
 
-- V1: viewport restore = **căn về prompt/bottom** — đúng y cho kịch bản demo
-  (user close lúc đang ở prompt/keyboard). Scrollback text vẫn có đủ, user cuộn
-  lên là thấy.
+**Acceptance rõ ràng (chốt với reviewer)**:
+- `scrollback` → **EXACT**
+- `viewport` → **bottom/prompt trong V1** (không claim "đúng chỗ tuyệt đối" khi
+  đang scroll lên)
+
+V1: viewport restore = **căn về prompt/bottom** — đúng y cho kịch bản demo
+(user close lúc đang ở prompt/keyboard). Scrollback text vẫn có đủ, user cuộn
+lên là thấy.
 - Ghi rõ vào Known Limitations; enhancement tương lai = OSC-based scroll tracking
   (shell-integration) hoặc bản VTE khác.
+
+### 5.5 Capture/Restore Fidelity Gate (bắt buộc — KHÔNG coi là "đã chứng minh" vì API tồn tại)
+
+`get_text_range()` trả **text**, nhưng runtime terminal còn cursor, attributes,
+alternate screen, hyperlinks, colors… "feed text lại" chưa chắc tái tạo
+byte-for-byte visual state. → Cần gate kỹ thuật riêng, test nhỏ:
+
+```text
+VTE live terminal
+   ↓ generate ANSI/control sequences      (color, bold, cursor move, alt-screen, NL/CR, wide char)
+↓ capture (get_text_range VTE_FORMAT_TEXT)
+↓ new VTE  →  feed
+↓ compare visual/text semantics:  dòng output từng phần còn đúng thứ tự + nội dung,
+                                   ANSI color/format có giữ được như kỳ vọng không
+```
+
+**Mục tiêu V1 (ghi vào doc, khỏi tự đánh lừa acceptance)**:
+> restore terminal *textual scrollback faithfully*, không restore arbitrary
+> runtime terminal state (cursor vị trí tuyệt đối, alt-screen buffer, hyperlink
+> GRID mảnh…). Nếu gate này fail với thứ đang claim → hạ claim, không mở rộng scope.
 
 ---
 
@@ -229,8 +272,21 @@ Workspace → Window → Tab → Pane → command_history[]
 
 ### 6.2 Interrupted command
 
-- `interrupted_command` = lệnh cuối trong pane + commit kế tiếp có chứa `\x03`
-  (Ctrl+C). Lưu dạng metadata khi bắt được Ctrl+C, không đoán option.
+```cpp
+struct InterruptedCommand {
+    std::string command;
+    std::int64_t timestamp_us;           // khi phát hiện
+    enum class Source { CtrlC, ProcessExit, Unknown } source;
+};
+```
+
+- `source = CtrlC` **CHỈ** khi thực sự quan sát được commit chứa `\x03` ngay sau
+  command đó (heuristic cũ "lệnh cuối + `\x03`" là suy diễn — SIGTERM, app crash,
+  user đóng pane, tool tự exit, process con nhận Ctrl+C mà shell không nhận đều
+  KHÔNG phải Ctrl+C).
+- `ProcessExit` = spawn callback báo shell/chương trình thoát (GChildWatchFunc).
+- `Unknown` = mọi case còn lại. V1 guarantee tối đa: **chỉ ghi `CtrlC` khi
+  quan sát được**, không gọi mọi interrupted process là Ctrl+C.
 
 ### 6.3 Workspace History = view/query, không phải store thứ hai
 
@@ -301,8 +357,8 @@ Một checkpoint lỗi = rollback, **không bao giờ** thành "latest recovery"
 
 - `SqliteDb` thêm **transaction RAII**: `begin()/commit()/rollback()` (giữ mutex).
 - Bảng `snapshots` thêm:
-  `generation INTEGER NOT NULL` (tăng dần, như `kGeneration`), `reason TEXT NOT NULL`
-  (`recovery|autosave|window_history|manual`).
+  `schema_version INTEGER NOT NULL`, `generation INTEGER NOT NULL`,
+  `reason TEXT NOT NULL` (`recovery|autosave|window_history|manual`).
 - `WorkspaceCore::checkpoint(reason)` — API hợp nhất autosave/close/manual:
   chụp + validate + ghi trong 1 transaction + set `generation`, `last_saved_at`.
 - **Recovery = latest valid committed checkpoint** (max generation, trạng thái
@@ -310,10 +366,20 @@ Một checkpoint lỗi = rollback, **không bao giờ** thành "latest recovery"
   được thay bằng `checkpoint(reason=autosave)` — vì scale nhỏ, một workspace
   JSON + scrollback trong 1 transaction là rẻ và đúng atomic.
 
-### 10.3 Generation
+### 10.3 Schema version vs Generation (2 khái niệm RIÊNG BIỆT)
 
-`snapshot 101 → 102 → 103`; nếu 104 lỗi → latest valid = 103. Recovery không bao
-giờ trỏ vào half-written.
+```json
+{ "schema_version": 3, "generation": 108 }
+```
+
+| Khái niệm | Đổi khi | Ý nghĩa |
+|-----------|---------|---------|
+| `schema_version` | cấu trúc dữ liệu thay đổi (thêm TabKind, NoteTabState, PluginState…) | gắn với **shipping code**, cần migration khi tăng |
+| `generation` | mỗi checkpoint thành công | số thứ tự checkpoint, monotonically tăng |
+
+`generation 101 → 102 → 103`; nếu 104 lỗi → latest valid = 103. Recovery không
+bao giờ trỏ vào half-written. Migration theo `schema_version` là bất biến khi
+thêm domain state mới (TabKind/NoteTabState/PluginState sau này).
 
 ---
 
@@ -337,17 +403,22 @@ flush → checkpoint vs bỏ qua.
 ## 12. Layered data flow (bất biến)
 
 ```text
-GUI
- ↓
-SessionController      (orchestration duy nhất)
- ↓
-WorkspaceCore          (capture/restore/checkpoint — authoritative)
- ↓
-Storage                (transaction, schemas)
+GUI runtime  (TerminalPane / NoteTabView / DirectoryTreePanel — capture adapters)
+ ↓ runtime_capture() → TerminalRuntimeSnapshot / NoteState / TreeState
+SessionController  (orchestration duy nhất + WorkspaceSnapshotBuilder)
+ ↓ apply_runtime_state(...)
+WorkspaceCore  (canonical state + validate + checkpoint — authoritative)
+ ↓ transaction
+Storage  (SqliteDb txn RAII, schemas)
 ```
 
-Runtime capture: `VTE/PTY → TerminalPane::capture_state → (controller) → core`
-Runtime restore: `core state → TerminalPane::restore_state → VTE + PTY/shell`
+Restore (chiều ngược): `core canonical → SessionController → runtime adapter
+(GUI) → VTE + PTY/shell / editor / tree`.
+
+**Bất biến**: WorkspaceCore **KHÔNG import GUI** và **KHÔNG gọi
+`TerminalPane::capture_state()`** — Core con không định nghĩa đám widget. Capture
+adapter thuộc GUI/runtime; canonical state + giao dịch thuộc Core. Tách 2 thứ đó
+là lý do tồn tại của `TerminalRuntimeSnapshot` + `WorkspaceSnapshotBuilder`.
 
 MainWindow/NoteTabView/DirectoryTreePanel **không** đọc/ghi Storage thẳng
 (hiện đang vi phạm: main_window history_ / add_history global).
@@ -359,6 +430,7 @@ MainWindow/NoteTabView/DirectoryTreePanel **không** đọc/ghi Storage thẳng
 | Field | SOURCE | SERIALIZATION | STORAGE | RESTORE | VERIFY |
 |-------|--------|---------------|---------|---------|--------|
 | workspace id/name | core | json | workspaces | load | tên đúng |
+| schema_version | core (const) | json + snapshots.schema_version | workspaces/snapshots | migration | tăng khi data schema đổi, không đổi khi checkpoint |
 | generation | core counter | json + snapshots.generation | workspaces/snapshots | recovery chọn max | tăng sau mỗi checkpoint |
 | last_saved_at | checkpoint() | json + column | workspaces | — | != created_at sau save |
 | active window | core focus_window_id | json | workspaces | apply focus | đúng window active |
@@ -370,11 +442,11 @@ MainWindow/NoteTabView/DirectoryTreePanel **không** đọc/ghi Storage thẳng
 | pane shell | PaneState.shell | json | workspaces | spawn shell đó | shell đúng |
 | pane cwd | cwd shell-context (§4) | json | workspaces | spawn tại cwd (tồn tại) | `pwd` bằng |
 | pane cols/rows | vte get_column/row_count | json | workspaces | vte set_size | grid khớp |
-| pane env | filtered env | json | workspaces | spawn env | secrets không lộ |
-| scrollback | get_text_range (full) | json PaneState.scrollback (hoặc scrollbacks table) | transaction | vte feed trước spawn | output cũ còn đủ |
-| viewport | V1 = prompt/bottom | json (marker) | workspaces | align bottom | dòng prompt trên đúng screen |
+| pane env | — V1: KHÔNG persist (§3.2) | — | — | spawn inherit env mặc định | shell chạy được; không secret nào bị lưu |
+| scrollback | get_text_range (full) | json PaneState.scrollback (hoặc scrollbacks table) | transaction | vte feed trước spawn | output cũ còn đủ (EXACT) — §5.5 gate |
+| viewport | V1 = prompt/bottom | json (marker) | workspaces | align bottom | dòng prompt trên đúng screen (KHÔNG claim scroll-đúng-chỗ) |
 | command_history[] | TerminalPane commit stack | json per-pane | workspaces | khôi phục per pane | mỗi pane history riêng |
-| interrupted_command | lệnh cuối + \x03 | json | workspaces | hiển thị metadata | ghi nhận đúng |
+| interrupted_command | InterruptedCommand{cmd, ts, source} (§6.2) | json | workspaces | hiển thị metadata; source ghi đúng sự thật | chỉ CtrlC khi quan sát `\x03` |
 | note tab kind/state | NoteTabView | json NoteTabState | workspaces | recreate NoteTabView + apply | content/cursor/scroll/preview/split đúng |
 | note modified | is_modified() | json | workspaces | · resync dirty-dot | đúng trạng thái unsaved |
 | active/focused pane | core focus_pane_id + GUI click | json | workspaces | apply focus + CSS class | focus đúng pane |
@@ -399,10 +471,18 @@ MainWindow/NoteTabView/DirectoryTreePanel **không** đọc/ghi Storage thẳng
 
 - **Viewport chính xác khi đang scroll lên**: VTE 0.76 không có
   `get/set_scrollback_offset` → V1 căn về prompt; tăng fidelity bằng shell
-  integration (OSC-based scroll tracking) ở phase sau.
+  integration (OSC-based scroll tracking) ở phase sau. Acceptance: scrollback
+  EXACT, viewport bottom/prompt — không hơn.
+- **ANSI/color/format fidelity**: `get_text_range` → text, `feed` dựng lại grid;
+  có thể không tái tạo y nguyên cursor/alt-screen/hyperlink GRID. §5.5 gate quyết
+  claim; nếu fail → hạ claim, không expand scope.
 - **OSC 7 cwd**: phụ thuộc shell có OSC 7; fallback /proc chỉ đọc PID shell
   (không phải child) — hiếm khi sai, nhưng vẫn là heuristic.
 - **Restore không hồi sinh process** (vim/ssh đang chạy bị "ngắt"): đúng thiết kế.
+- **environment KHÔNG được persist ở V1** (blocklist không đủ an toàn); về sau chỉ
+  qua explicit allowlist / user opt-in.
+- **interrupted_command**: V1 chỉ gán `source=CtrlC` khi quan sát `\x03` thực tế;
+  mọi interrupt khác ghi `ProcessExit`/`Unknown`, không đoán.
 - **Note cursor/scroll** chính xác tới iter/offset; scroll tuyệt đối phụ thuộc độ
   cao dòng qui hồi — best-effort.
 
@@ -421,12 +501,15 @@ Kịch bản script thủ công (ghi checklist, **không "looks okay"**).
 **Sau đó**: checkpoint → terminate Remin → start Remin.
 
 **PHẢI restore**: window 1+2 ✓, tabs ✓, pane split ✓, từng pane `cwd` ✓ (check
-`pwd` thực tế), per-pane shell history ✓, terminal scrollback ✓, viewport ✓,
-note content ✓, note tab ✓, note scroll/preview ✓, directory tree + expanded ✓,
-active window/tab/pane ✓, layout ratios ✓.
+`pwd` thực tế), per-pane shell history ✓, terminal scrollback ✓ (**EXACT**),
+viewport = prompt/bottom ✓ (không claim scroll-đúng-chỗ), ANSI/color trong
+scrollback (theo §5.5 gate — phải ghi kết quả thực tế), note content ✓, note tab ✓,
+note scroll/preview ✓, directory tree + expanded ✓, active window/tab/pane ✓,
+layout ratios ✓.
 
 Báo cáo cuối cùng phải có, cho từng field:
 `SOURCE → SERIALIZATION → STORAGE → RESTORE → UI VERIFICATION record`.
+Không có mục nào được ghi "looks okay" thay cho record thực sự.
 
 ---
 
@@ -437,15 +520,17 @@ Báo cáo cuối cùng phải có, cho từng field:
                    │
    ┌───────────────▼───────────────┐
    │ P1 Domain: Tab kind/NoteState │ UNITS: serialization round-trip
-   │       UiState, migration      │
+   │       UiState, migration      │         + schema_version migration
    ├───────────────────────────────┤
-   │ P2 Live Pane: capture/restore │ UNIT: cwd/cols/rows/history/interrupted
-   │       state + cwd + per-pane  │ MANUAL: pwd restore
-   │       history                 │
+   │ P2 Runtime Capture: runtime_capture│ UNIT: cwd/pwd, cols/rows,
+   │   adapter + command_history   │         command_history[p] populated
    ├───────────────────────────────┤
-   │ P3 Atomic: SqliteDb txn,      │ UNIT: checkpoint atomicity,
-   │       checkpoint(reason),     │       generation, recovery=latest valid
-   │       autosave→checkpoint,    │
+   │ P2.5 Fidelity Gate (§5.5)    │ GATE: ANSI/color + scrollback compare;
+   │                               │       nếu fail → hạ claim, không expand scope
+   ├───────────────────────────────┤
+   │ P3 Transaction: SqliteDb txn  │ UNIT: checkpoint atomicity,
+   │       checkpoint(reason),     │       schema_version + generation,
+   │       autosave→checkpoint,    │       recovery=latest valid
    │       shutdown flush          │
    ├───────────────────────────────┤
    │ P4 Restore: full restore      │ MANUAL: note + tree + geometry + focus
@@ -455,14 +540,26 @@ Báo cáo cuối cùng phải có, cho từng field:
    │ P5 Golden acceptance + report │ GOLDEN WORKFLOW §16 (recorded)
    └───────────────┬───────────────┘
                    │
-      Recovery ←───┴───→ Window History (UI, bài sau)
-                (chỉ sau khi capture/restore verify đầy đủ)
+      CORE PERSISTENCE WORKS
+                   │
+   ┌───────────────▼───────────────┐
+   │ Option 1: Recovery            │ shutdown/restart → checkpoint(recovery)
+   │ Option 2: Window History UI   │ bài sau, CHỈ SAU KHI P1–P5 PASS
+   │ Option 3: Input checkpoint    │ ENTER → checkpoint; typing → idle → checkpoint
+   └───────────────────────────────┘
 ```
 
 **KHÔNG implement lúc này**: Window History UI, Ctrl+Shift+H (≠ Ctrl+H find/replace),
 snapshot browser, portable export, plugin persistence. Đó là *consumer* của engine
 này. TerminalTab/NoteTab/PluginTab sau này đều nói với Remin cùng một contract
-`capture_state()/restore_state()` → workspace platform mới thành hình.
+`runtime_capture()/runtime_restore()` → workspace platform mới thành hình.
+
+**Thứ tự bắt buộc**:
+P1–P5 hoàn thành (**Core Persistence Works**) → mới mở Option 1–3.
+Không đảo thứ tự. Không thêm Window History / UI polish trước khi pass được:
+Terminal capture → SQLite transaction → process termination → workspace
+reconstruction → scrollback/history/cwd restore — đây mới là khoảnh khắc Remin
+bắt đầu thực sự tồn tại. UI/UX đã là LTS stable (v0.0.3lts); từ giờ chỉ làm persistence.
 
 ---
 
@@ -470,20 +567,40 @@ này. TerminalTab/NoteTab/PluginTab sau này đều nói với Remin cùng một
 
 | Area | Change |
 |------|--------|
-| `core/workspace/workspace.hpp` | + `generation`, + `UiState` (dir tree, active window) |
+| `core/workspace/workspace.hpp` | + `schema_version`, `generation`, + `UiState` (dir tree, active window) |
 | `core/window/window.hpp` | `Tab` + `TabKind` + `NoteTabState` (migration) |
-| `core/pane/pane.hpp` | `PaneState` giữ nguyên field (giờ sống) |
-| `core/workspace_core.{hpp,cpp}` | `checkpoint(reason)` (capture+validate+write transactional), restore hook, `restore_snapshot` emit |
-| `core/serialization.{hpp,cpp}` | UiState/NoteTabState/kind/generation |
+| `core/pane/pane.hpp` | `PaneState` giữ field (giờ sống); `InterruptedCommand{command,timestamp,source}`; env V1 không dùng |
+| `core/workspace_core.{hpp,cpp}` | `apply_runtime_state(...)` (canonical ingest, không nhận widget), `checkpoint(reason)` (validate+ghi transactional), restore hook, `restore_snapshot` emit |
+| `core/serialization.{hpp,cpp}` | UiState/NoteTabState/kind/schema_version/generation |
 | `storage/sqlite/sqlite_db.{hpp,cpp}` | transaction RAII (BEGIN IMMEDIATE/COMMIT/ROLLBACK) |
-| `storage/sqlite/sqlite_db.cpp` (schema) | snapshots + generation + reason (migration) |
+| `storage/sqlite/sqlite_db.cpp` (schema) | snapshots + schema_version + generation + reason (migration) |
 | `core/persistence_policy` | wire (SessionController get/set; autosaver dùng input_checkpoint) |
 | `core/autosave.cpp` | Terminal/Note flush đổ vào checkpoint transaction |
-| `gui/session/session_controller.cpp` | add_command_to_pane, history query aggregate, persist clear, policy read/write |
-| `gui/terminal/terminal_pane.{hpp,cpp}` | `capture_state()/restore_state()`, cwd §4, viewport §5.4 |
+| `gui/session/session_controller.cpp` | WorkspaceSnapshotBuilder, add_command_to_pane, history query aggregate, persist clear, policy read/write |
+| `gui/terminal/terminal_pane.{hpp,cpp}` | `runtime_capture()/runtime_restore()` adapter, cwd §4, viewport §5.4 |
 | `gui/window/main_window.{hpp,cpp}` | restore đầy đủ, close→checkpoint, bỏ history_ vector, geometry capture |
-| `gui/window/terminal_tab_view.cpp` | add_history → per-pane, gọi capture/restore pane |
+| `gui/window/terminal_tab_view.cpp` | add_history → per-pane, gọi runtime adapter của pane |
 | `gui/window/directory_tree_panel.{hpp,cpp}` | `capture_state()/apply_state()` public |
 | `gui/window/note_tab_view.{hpp,cpp}` | capture/restore NoteTabState |
 | `gui/window/settings_dialog.cpp` | Persistence page (3 policies) liên kết PersistencePolicy |
-| `tests/unit/…` | serialization migration, checkpoint atomicity, per-pane history, cwd fallback logic |
+| `tests/unit/…` | serialization migration, checkpoint atomicity, per-pane history, cwd fallback logic, §5.5 fidelity gate |
+
+---
+
+## 19. Review Log & Approve Record (authoritative)
+
+**Reviewer: user — Verdict: ~95% ready → sau 5 chỉnh sửa = APPROVE IMPLEMENTATION.**
+
+| # | Điểm review | Vị trí áp dụng | Trạng thái |
+|---|-------------|----------------|------------|
+| 1 | Wording cam kết restore: `scrollback=EXACT`, `viewport=bottom/prompt in V1` — không tuyên bố "đúng chỗ tuyệt đối" (VTE 0.76 không expose scrollback offset) | §0, §5.3, §5.4, §16 | ✅ |
+| 2 | Gate kỹ thuật riêng cho `get_text_range()→feed()`: VTE live → ANSI/control → capture → new VTE → feed → so sánh. V1 mục tiêu = **restore textual scrollback faithfully**, không restore arbitrary runtime terminal state | §5.5, P2.5 | ✅ |
+| 3 | `PaneState.environment` **KHÔNG persist ở V1** (blocklist không an toàn: AWS_KEY/GITHUB_TOKEN/KRB5CCNAME/SSH_AUTH_SOCK…). Về sau chỉ allowlist/opt-in; shell new inherit env mặc định | §3.2, §5.2, §13, §15 | ✅ |
+| 4 | `interrupted_command` → `InterruptedCommand{command, timestamp, source=CtrlC\|ProcessExit\|unknown}`. V1 CHỈ gán `CtrlC` khi quan sát `\x03` thực tế, không suy diễn (SIGTERM/app crash/đóng pane/tool exit ≠ Ctrl+C) | §6.2, §3.2, §13 | ✅ |
+| 5 | `WorkspaceCore::checkpoint()` **không được tự capture GUI widget** — phá dependency direction. Boundary: GUI runtime → SessionController/WorkspaceSnapshotBuilder → `WorkspaceCore::apply_runtime_state(...)` → Storage. TerminalRuntimeSnapshot = trung gian thuần data | §1, §3.1, §12, §18 | ✅ |
+| 6 | Tách `schema_version` (đổi khi data structure đổi → cần migration) ≠ `generation` (tăng mỗi checkpoint) | §10.3, §13, §18 | ✅ |
+| 7 | Phase plan thêm **P2.5 Capture/Restore Fidelity Gate** (§5.5); `command_history[]` bắt buộc làm ngay ở **P2** (golden restore phải chứng minh Remin nhớ terminal work) | §17, P2 | ✅ |
+| 8 | Thứ tự chặt: P1–P5 (**Core Persistence Works**) → Option 1 Recovery → Option 2 Window History → Option 3 Input checkpoint. KHÔNG đảo, KHÔNG làm Window History/UI polish trước khi pass vòng capture→txn→terminate→reconstruct→restore | §17 | ✅ |
+
+**GO**: bắt đầu implement P1. Mỗi phase đóng theo gate + test của phase đó, không
+"looks okay". Record từng kết quả `SOURCE → … → UI VERIFICATION`.
