@@ -89,6 +89,12 @@ bool TerminalTabView::focus_search() {
     return true;
 }
 
+void TerminalTabView::clear_search() {
+    for (auto& [id, pane] : panes_) {
+        pane->clear_search();
+    }
+}
+
 TerminalPane* TerminalTabView::pane(const remin::core::PaneId& id) {
     auto it = panes_.find(id.str());
     return it == panes_.end() ? nullptr : it->second.get();

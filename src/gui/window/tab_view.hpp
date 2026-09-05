@@ -35,6 +35,11 @@ public:
     // Ctrl+F / Ctrl+H dispatch target returns true if handled.
     virtual bool focus_search() = 0;
 
+    // Clear any live search highlight on every surface in the tab. The window
+    // find bar is a global controller but its highlight is per-surface, so
+    // hiding/clearing the bar must reach ALL tabs, not just the active one.
+    virtual void clear_search() {}
+
     // Toggle the tab's resizable left sidebar (history / outline). Default is a
     // no-op for tabs that do not expose one.
     virtual void toggle_sidebar() {}

@@ -1331,8 +1331,13 @@ void MainWindow::show_find_bar(bool replace) {
 }
 
 void MainWindow::hide_find_bar() {
-    // Clear both entries so stale highlights are not left on the editor and
-    // the next Ctrl+F opens with a clean slate.
+    // Explicitly clear ALL search highlights first (every tab, every pane).
+    // We must NOT rely on set_text() below to propagate through the widget
+    // changed-signal chain — hiding the bar has to deterministically wipe every
+    // surface's highlight, including the current tab's focused match.
+    clear_all_search_highlights();
+    // Clear both entries so stale text is not left and the next Ctrl+F opens
+    // with a clean slate.
     find_entry_->set_text("");
     replace_entry_->set_text("");
     find_bar_->set_visible(false);
@@ -1428,10 +1433,23 @@ bool MainWindow::on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods
     return false;
 }
 
+void MainWindow::clear_all_search_highlights() {
+    for (auto& tab : tabs_) {
+        tab->clear_search();
+    }
+}
+
 void MainWindow::sync_find_text() {
     if (active_tab_ < 0 || active_tab_ >= (int)tabs_.size()) return;
-    auto* tab = tabs_[active_tab_].get();
     const auto text = find_entry_->get_text();
+    // Empty means the user deleted the whole term: like Esc, wipe every search
+    // highlight (not just the active tab's) so no tab keeps a stale match.
+    if (text.empty()) {
+        clear_all_search_highlights();
+        update_find_match_label();
+        return;
+    }
+    auto* tab = tabs_[active_tab_].get();
     if (tab->kind() == TabKind::Terminal) {
         if (auto* p = static_cast<TerminalTabView*>(tab)->focused_pane())
             p->set_search_text(text);

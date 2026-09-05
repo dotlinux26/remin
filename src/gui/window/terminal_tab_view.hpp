@@ -38,6 +38,7 @@ public:
     void activate() override;
     void deactivate() override;
     bool focus_search() override;
+    void clear_search() override;
 
     // Split the currently focused pane. Returns the new pane id (or empty).
     remin::core::PaneId split(remin::core::PaneTree::Kind kind);

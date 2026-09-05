@@ -30,6 +30,7 @@ public:
     void activate() override;
     void deactivate() override;
     bool focus_search() override;
+    void clear_search() override;
 
     // Toggle the markdown preview split (on by default on first split request).
     void toggle_preview();

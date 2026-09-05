@@ -109,6 +109,12 @@ bool NoteTabView::focus_search() {
     return true;
 }
 
+void NoteTabView::clear_search() {
+    // Empty search term removes every Remin search tag (match + current-match)
+    // and resets the navigation state.
+    if (editor_) editor_->set_search_text("");
+}
+
 void NoteTabView::show_find_replace(bool show_replace) {
     if (editor_) {
         editor_->clear_find_replace_entries();

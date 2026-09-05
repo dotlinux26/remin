@@ -86,6 +86,9 @@ private:
     void sync_find_text();          // push live text to active editor/terminal
     void update_find_match_label(); // refresh "x / y" counter
     bool on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods);
+    // Clear every live search highlight on ALL tabs (the find bar is a shared
+    // controller but each surface owns its own highlight).
+    void clear_all_search_highlights();
 
     // Global sidebar (History / Directory)
     void setup_sidebar();
