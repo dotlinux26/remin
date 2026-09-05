@@ -1,6 +1,7 @@
 #include "gui/window/main_window.hpp"
 #include "gui/window/settings_dialog.hpp"
-#include "terminal/shell/shell.hpp"
+#include <adwaita.h>
+#include <terminal/shell/shell.hpp>
 
 #include <fstream>
 #include <filesystem>
@@ -27,8 +28,8 @@ MainWindow::MainWindow(SessionController* controller,
     } catch (const Glib::Error&) {}
     set_icon_name("remin");
 
-    // Add remin-window CSS class EARLY so CSS rules apply to toolbar buttons created in setup_toolbar()
-    if (theme_) ThemeManager::tag_window(*this);
+    // Add remin-window CSS class for CSS specificity
+    add_css_class("remin-window");
 
     // Root overlay for autosave badge
     overlay_ = Gtk::make_managed<Gtk::Overlay>();
@@ -277,10 +278,13 @@ void MainWindow::setup_menu_bar() {
     actions->add_action("save_as", [this]() { on_note_save_as(); });
     actions->add_action("preview", sigc::mem_fun(*this, &MainWindow::on_toggle_note_preview));
     actions->add_action("dark", [this]() {
-        if (theme_) { theme_->toggle(); refresh_theme(); }
+        AdwStyleManager* sm = adw_style_manager_get_default();
+        AdwColorScheme current = adw_style_manager_get_color_scheme(sm);
+        adw_style_manager_set_color_scheme(sm, current == ADW_COLOR_SCHEME_PREFER_DARK ? ADW_COLOR_SCHEME_FORCE_LIGHT : ADW_COLOR_SCHEME_PREFER_DARK);
     });
     actions->add_action("reload", [this]() {
-        if (theme_) { theme_->apply(theme_->is_dark()); refresh_theme(); }
+        AdwStyleManager* sm = adw_style_manager_get_default();
+        adw_style_manager_set_color_scheme(sm, ADW_COLOR_SCHEME_DEFAULT);
     });
     {
         auto a = Gio::SimpleAction::create(
@@ -1411,7 +1415,7 @@ void MainWindow::toggle_history_sidebar() {
 }
 
 void MainWindow::on_settings() {
-    auto dialog = Gtk::make_managed<SettingsDialog>(*this, theme_, controller_);
+    auto dialog = Gtk::make_managed<SettingsDialog>(*this, controller_);
     dialog->set_transient_for(*this);
     dialog->present();
 }
@@ -1473,9 +1477,9 @@ void MainWindow::open_note_from_path(const std::filesystem::path& path) {
 }
 
 void MainWindow::refresh_theme() {
-    // The ThemeManager applies its provider for the whole display; nothing more
-    // is required than re-tagging the window (idempotent).
-    if (theme_) ThemeManager::tag_window(*this);
+    // AdwStyleManager applies its provider for the whole display; re-tagging
+    // the window ensures CSS class is present for custom styling.
+    if (!has_css_class("remin-window")) add_css_class("remin-window");
 }
 
 void MainWindow::on_terminal_color_profile() {

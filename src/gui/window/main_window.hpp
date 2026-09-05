@@ -3,7 +3,6 @@
 #include "core/autosave.hpp"
 #include "core/workspace_core.hpp"
 #include "gui/session/session_controller.hpp"
-#include "gui/theme/theme_manager.hpp"
 #include "gui/window/directory_tree_panel.hpp"
 #include "gui/window/note_tab_view.hpp"
 #include "gui/window/tab_view.hpp"
@@ -28,7 +27,6 @@ public:
     const std::vector<NoteTabView*>& note_tabs() const { return note_tabs_; }
 
     void show_autosave_badge(bool success);
-    void set_theme(ThemeManager* theme) { theme_ = theme; }
 
 private:
     void setup_header();
@@ -103,9 +101,6 @@ private:
     // Toolbar below header (context-sensitive per active tab)
     Gtk::Box* toolbar_{nullptr};
 
-    // Theme
-    ThemeManager* theme_{nullptr};
-
     // Tab bar — scroller wraps the tab row; a dedicated horizontal scrollbar
     // lives in its own row BELOW the labels so it never overlaps them.
     Gtk::Box* tab_box_{nullptr};
@@ -149,7 +144,7 @@ private:
 
     // Global sidebar (History / Directory) — always visible, like VS Code
     Gtk::Paned* main_paned_{nullptr};
-    bool sidebar_visible_{true};
+    bool sidebar_visible_{false};
     Gtk::Box* sidebar_root_{nullptr};
     Gtk::Stack* sidebar_stack_{nullptr};
     Gtk::ScrolledWindow* history_scroller_{nullptr};

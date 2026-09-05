@@ -1,19 +1,22 @@
 #include "gui/application.hpp"
 
+#include <adwaita.h>
 #include <gtkmm.h>
 
 namespace remin::gui {
 
 Application::Application()
     : Gtk::Application("io.github.remin.remin"),
-      session_(std::make_unique<WorkspaceSession>()),
-      theme_(std::make_unique<ThemeManager>(REMIN_RESOURCE_DIR)) {}
+      session_(std::make_unique<WorkspaceSession>()) {}
 
 void Application::on_activate() {
     if (!session_->ok()) {
         g_warning("remin: session init failed: %s", session_->error().c_str());
         return;
     }
+
+    // Initialize AdwStyleManager for dark/light mode management
+    style_manager_ = adw_style_manager_get_default();
 
     // Register bundled icons GResource so GTK can resolve all symbolic icon
     // names without depending on system icon themes (Adwaita/Yaru/etc.).
@@ -46,12 +49,10 @@ void Application::on_activate() {
         auto settings = Gtk::Settings::get_default();
         if (settings) dark = settings->property_gtk_application_prefer_dark_theme();
     }
-    theme_->apply(dark);
+    adw_style_manager_set_color_scheme(style_manager_, dark ? ADW_COLOR_SCHEME_PREFER_DARK : ADW_COLOR_SCHEME_FORCE_LIGHT);
 
     auto* win = new MainWindow(ctrl, session_->autosaver(), session_->core());
     window_ = win;
-    win->set_theme(theme_.get());
-    ThemeManager::tag_window(*win);
     add_window(*win);
 
     // Scrollback provider for terminal panes

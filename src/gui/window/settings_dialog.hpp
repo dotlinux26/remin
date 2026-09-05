@@ -1,8 +1,8 @@
 #pragma once
 
-#include "gui/theme/theme_manager.hpp"
 #include "gui/session/session_controller.hpp"
 
+#include <adwaita.h>
 #include <gtkmm.h>
 #include <memory>
 
@@ -10,7 +10,7 @@ namespace remin::gui {
 
 class SettingsDialog : public Gtk::Dialog {
 public:
-    SettingsDialog(Gtk::Window& parent, ThemeManager* theme, SessionController* controller);
+    SettingsDialog(Gtk::Window& parent, SessionController* controller);
     ~SettingsDialog() override = default;
 
 private:
@@ -25,7 +25,6 @@ private:
     void on_color_background_changed();
     void save_color_profile();
 
-    ThemeManager* theme_{nullptr};
     SessionController* controller_{nullptr};
 
     Gtk::Notebook* notebook_{nullptr};

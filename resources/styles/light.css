@@ -1,10 +1,5 @@
-/* Remin — Light theme.
- *
- * Palette derived from logo.svg (do not edit logo.svg):
- *   gradient: #4f46e5 (indigo) → #6366f1 → #06b6d4 (cyan)
- *
- * GTK CSS uses @define-color (not var()); colors are defined once here and
- * referenced by @name throughout. No colors are hard-coded in C++.
+/* Remin — Light theme (AdwStyleManager handles all colors).
+ * This file only contains layout/spacing rules. Colors are managed by AdwStyleManager.
  */
 
 @define-color bg             #F5F5F5;
@@ -17,7 +12,11 @@
 @define-color accent_2       #06b6d4;
 @define-color accent_soft    rgba(79, 70, 229, 0.10);
 
-/* Standard GTK controls: consistent light surfaces. */
+/* ============================================================================
+ * LAYOUT / SPACING ONLY - Colors managed by AdwStyleManager
+ * ============================================================================ */
+
+/* Standard GTK controls: consistent surfaces */
 button,
 entry,
 spinbutton,
@@ -27,245 +26,113 @@ treeview,
 textview,
 flowbox > child,
 list > row {
-  color: @text;
-}
-button {
-  background-color: @surface;
-  border: 1px solid @border;
-}
-button:hover {
-  background-color: @surface_hover;
-  border-color: @accent;
-}
-button:active,
-button:checked {
-  background-color: @accent_soft;
-  border-color: @accent;
-}
-entry {
-  background-color: @bg;
-  border: 1px solid @border;
-}
-entry:focus {
-  border-color: @accent;
+  /* Colors managed by AdwStyleManager */
 }
 
-/* Map the GTK standard semantic variables to our palette so ALL widgets
- * (buttons, dialogs, entries, menus) follow the theme, not the system theme. */
-@define-color theme_bg_color @bg;
-@define-color theme_base_color @surface;
-@define-color theme_fg_color @text;
-@define-color theme_text_color @text;
-@define-color theme_selected_bg_color @accent;
-@define-color theme_selected_fg_color #ffffff;
-@define-color theme_unfocused_bg_color @surface;
-@define-color theme_unfocused_fg_color @text_muted;
-@define-color theme_unfocused_text_color @text_muted;
-@define-color theme_unfocused_base_color @bg;
-@define-color theme_unfocused_selected_bg_color @accent;
-@define-color theme_unfocused_selected_fg_color #ffffff;
-@define-color theme_border_color @border;
-@define-color borders @border;
-@define-color border @border;
-@define-color theme_tooltip_bg_color @surface;
-@define-color theme_tooltip_fg_color @text;
-@define-color theme_header_bar_bg_color @surface;
-@define-color theme_header_bar_fg_color @text;
-@define-color popover_bg_color @surface;
-@define-color popover_fg_color @text;
+/* Force all entry/search fields to have sharp 90-degree corners */
+entry,
+searchentry {
+  border-radius: 0;
+  border-style: solid;
+  border-width: 1px;
+  box-shadow: none;
+}
+entry:focus,
+searchentry:focus {
+  border-radius: 0;
+  border-color: #3584E4;
+  outline-style: none;
+}
+searchentry text,
+entry text {
+  border-radius: 0;
+}
 
-/* Always-visible scrollbars (overlay scrolling off look) */
-scrollbar {
-  background-color: transparent;
-}
-scrollbar.vertical {
-  min-width: 8px;
-}
-scrollbar.horizontal {
-  min-height: 8px;
-}
+/* Scrollbars */
+scrollbar { background-color: transparent; }
+scrollbar.vertical { min-width: 8px; }
+scrollbar.horizontal { min-height: 8px; }
 scrollbar slider {
   background-color: rgba(107, 114, 128, 0.45);
-  border-radius: 99px;
-  min-width: 6px;
-  min-height: 6px;
-  margin: 1px;
+  border-radius: 99px; min-width: 6px; min-height: 6px; margin: 1px;
 }
-scrollbar slider:hover {
-  background-color: rgba(107, 114, 128, 0.7);
-}
-scrollbar trough {
-  background-color: transparent;
-  border: none;
-}
+scrollbar slider:hover { background-color: rgba(107, 114, 128, 0.7); }
+scrollbar trough { background-color: transparent; border: none; }
 
-window.remin-window {
-  background-color: @bg;
-}
+/* Main window */
+window.remin-window { background-color: @bg; }
 
-/* Fix symbolic icon colors — inherit foreground color */
+/* Icon colors */
 .remin-toolbar-btn image,
 .remin-tool-btn image,
 .remin-tab image,
 .remin-tab-btn image,
 .remin-find-bar image,
-popover.menu image {
-  color: @text;
-}
+popover.menu image { color: @text; }
 
-/* Tab bar: clean bar with a single divider below, breathing room above */
+/* Tab bar */
 .remin-tab-bar {
   background-color: transparent;
   border-bottom: 1px solid @border;
   padding: 4px 8px 4px 0;  /* No left padding for first tab alignment */
   min-height: 30px;
-  margin: 0 8px 0 8px;  /* 8px gap left and right for the bottom line */
+  margin: 0 8px;  /* 8px gap left and right for the bottom line */
 }
 
-/* A tab = one container: [icon + label ......... × ]. The close button lives
-   INSIDE the tab, so the whole thing reads as a single merged unit, no boxy
-   borders around the label or a detached square close button. */
 .remin-tab {
-  border-radius: 3px;
-  padding: 0 4px;
-  min-height: 24px;
-  min-width: 96px;
-  margin: 0 2px;
-  background-color: transparent;
-  color: @text_muted;
-  font-size: 12px;
+  border-radius: 3px; padding: 0 4px; min-height: 24px; min-width: 96px;
+  margin: 0 2px; background-color: transparent; color: @text_muted; font-size: 12px;
 }
 
-.remin-tab:hover {
-  background-color: @surface;
-  color: @text;
+.remin-tab:hover { background-color: @surface; color: @text; }
+
+/* Active tab — accent underline */
+.remin-tab.checked, .remin-tab.active {
+  color: @accent; background-color: @surface; border-bottom: 2px solid @accent;
 }
 
-/* Active tab — accent underline, clean. Applied to the whole tab container. */
-.remin-tab.checked,
-.remin-tab.active {
-  color: @accent;
-  background-color: @surface;
-  border-bottom: 2px solid @accent;
-}
-
-/* The clickable label area: fills the tab, frame-less, just icon + text. */
+/* Tab label */
 .remin-tab-label {
-  border: none;
-  border-radius: 0;
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  padding: 0 2px;
-  min-height: 22px;
+  border: none; border-radius: 0; background-color: transparent;
+  background-image: none; box-shadow: none; padding: 0 2px; min-height: 22px;
 }
+.remin-tab-label:hover { background-color: transparent; }
+.remin-tab-label label { font-size: 12px; color: inherit; }
 
-.remin-tab-label:hover {
-  background-color: transparent;
-}
-
-.remin-tab-label label {
-  font-size: 12px;
-  color: @text;
-  font-weight: 500;
-}
-
-/* Toolbar buttons: no border, no bg — just icon + text */
+/* Toolbar buttons */
 button.remin-toolbar-btn {
-  min-height: 24px;
-  padding: 2px 6px;
-  border: none;
-  border-radius: 0;
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  color: @text;
+  min-height: 24px; padding: 2px 6px; border: none; border-radius: 0;
+  background-color: transparent; background-image: none; box-shadow: none; color: @text;
 }
-
-button.remin-toolbar-btn:hover {
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-}
-
+button.remin-toolbar-btn:hover { background-color: transparent; background-image: none; box-shadow: none; }
 button.remin-toolbar-btn:focus,
 button.remin-toolbar-btn:active,
 button.remin-toolbar-btn:checked {
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  outline: none;
+  background-color: transparent; background-image: none; box-shadow: none; outline: none;
 }
+button.remin-toolbar-btn image { -gtk-icon-size: 14px; }
 
-window.remin-window button.remin-toolbar-btn {
-  min-height: 24px;
-  padding: 2px 6px;
-  border: none;
-  border-radius: 0;
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  color: @text;
-}
-
-window.remin-window button.remin-toolbar-btn:hover {
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-}
-
-window.remin-window button.remin-toolbar-btn:focus,
-window.remin-window button.remin-toolbar-btn:active,
-window.remin-window button.remin-toolbar-btn:checked {
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  outline: none;
-}
-
-/* HeaderBar icon buttons (e.g. the sidebar toggle next to the window controls):
-   force frame-less so GTK's headerbar button style can't re-add border/bg. */
+/* HeaderBar icon buttons */
 window.remin-window headerbar button.remin-toolbar-btn {
-  background-color: transparent;
-  background-image: none;
-  border: none;
-  box-shadow: none;
-  padding: 2px 6px;
-  min-height: 24px;
+  background-color: transparent; background-image: none; border: none; box-shadow: none;
+  padding: 2px 6px; min-height: 24px;
 }
-
 window.remin-window headerbar button.remin-toolbar-btn:hover {
-  background-color: transparent;
-  background-image: none;
-  border: none;
-  box-shadow: none;
+  background-color: transparent; background-image: none; border: none; box-shadow: none;
 }
 
-/* Window controls (min/max/close): NO background, NO border, NO shadow in ANY state.
-   Targeting GTK's internal windowcontrols selectors to override Adwaita theme. */
+/* Window controls (min/max/close): NO background, NO border, NO shadow in ANY state. */
 windowcontrols.end button.minimize,
 windowcontrols.end button.maximize,
 windowcontrols.end button.close {
-  background-color: transparent;
-  background-image: none;
-  border-style: none;
-  border-top-style: none;
-  border-bottom-style: none;
-  border-left-style: none;
-  border-right-style: none;
-  border-width: 0px;
-  border-color: transparent;
-  border-radius: 0;
-  box-shadow: none;
-  outline-style: none;
-  outline-width: 0;
-  outline-color: transparent;
-  padding: 0;
-  margin: 0;
-  min-width: 28px;
-  min-height: 28px;
+  background-color: transparent; background-image: none;
+  border-style: none; border-top-style: none; border-bottom-style: none;
+  border-left-style: none; border-right-style: none; border-width: 0px;
+  border-color: transparent; border-radius: 0; box-shadow: none;
+  outline-style: none; outline-width: 0; outline-color: transparent;
+  padding: 0; margin: 0; min-width: 28px; min-height: 28px;
+  color: #1f2437;
 }
-
 windowcontrols.end button.minimize:hover,
 windowcontrols.end button.maximize:hover,
 windowcontrols.end button.close:hover,
@@ -275,16 +142,10 @@ windowcontrols.end button.close:focus,
 windowcontrols.end button.minimize:active,
 windowcontrols.end button.maximize:active,
 windowcontrols.end button.close:active {
-  background-color: transparent;
-  background-image: none;
-  border-style: none;
-  border-top-style: none;
-  border-bottom-style: none;
-  border-left-style: none;
-  border-right-style: none;
-  border-width: 0px;
-  border-color: transparent;
-  box-shadow: none;
+  background-color: transparent; background-image: none;
+  border-style: none; border-top-style: none; border-bottom-style: none;
+  border-left-style: none; border-right-style: none; border-width: 0px;
+  border-color: transparent; box-shadow: none;
 }
 
 /* Also target GTK's internal titlebutton class for compatibility */
@@ -294,26 +155,13 @@ window.remin-window headerbar .window-controls,
 window.remin-window headerbar .window-controls *,
 window.remin-window headerbar .window-control,
 window.remin-window headerbar .window-control * {
-  background-color: transparent;
-  background-image: none;
-  border-style: none;
-  border-top-style: none;
-  border-bottom-style: none;
-  border-left-style: none;
-  border-right-style: none;
-  border-width: 0px;
-  border-color: transparent;
-  border-radius: 0;
-  box-shadow: none;
-  outline-style: none;
-  outline-width: 0;
-  outline-color: transparent;
-  padding: 0;
-  margin: 0;
-  min-width: 28px;
-  min-height: 28px;
+  background-color: transparent; background-image: none;
+  border-style: none; border-top-style: none; border-bottom-style: none;
+  border-left-style: none; border-right-style: none; border-width: 0px;
+  border-color: transparent; border-radius: 0; box-shadow: none;
+  outline-style: none; outline-width: 0; outline-color: transparent;
+  padding: 0; margin: 0; min-width: 28px; min-height: 28px;
 }
-
 window.remin-window headerbar button.titlebutton:hover,
 window.remin-window headerbar titlebutton:hover,
 window.remin-window headerbar button.titlebutton:active,
@@ -330,576 +178,264 @@ window.remin-window headerbar .window-controls:active,
 window.remin-window headerbar .window-controls *:active,
 window.remin-window headerbar .window-control:active,
 window.remin-window headerbar .window-control *:active {
-  background-color: transparent;
-  background-image: none;
-  border-style: none;
-  border-top-style: none;
-  border-bottom-style: none;
-  border-left-style: none;
-  border-right-style: none;
-  border-width: 0px;
-  border-color: transparent;
-  box-shadow: none;
-  outline-style: none;
-  outline-width: 0;
-  outline-color: transparent;
+  background-color: transparent; background-image: none;
+  border-style: none; border-top-style: none; border-bottom-style: none;
+  border-left-style: none; border-right-style: none; border-width: 0px;
+  border-color: transparent; box-shadow: none;
+  outline-style: none; outline-width: 0; outline-color: transparent;
 }
 
-/* Preview header — slim row above the markdown preview */
+/* Preview header */
+.remin-preview-header { background-color: @surface; border-bottom: 1px solid @border; padding: 2px 8px; }
+button.remin-preview-toggle { font-size: 11px; color: @text_muted; background-color: transparent; background-image: none; border: none; min-height: 22px; padding: 0 6px; }
+button.remin-preview-toggle:checked { color: @accent; }
 
-/* Preview header — slim row above the markdown preview */
-.remin-preview-header {
-  background-color: @surface;
-  border-bottom: 1px solid @border;
-  padding: 2px 8px;
-}
+/* Tab row */
+.remin-tab-row { min-height: 32px; }
+.remin-tab-actions { margin-left: 8px; }
 
-.remin-preview-toggle {
-  font-size: 11px;
-  color: @text_muted;
-  background-color: transparent;
-  border: none;
-  min-height: 22px;
-  padding: 0 6px;
-}
-
-.remin-preview-toggle:checked {
-  color: @accent;
-}
-
-/* Square, fixed-size buttons in the tab bar (+ new tab buttons) */
+/* Tab buttons */
 .remin-tab-btn {
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-  margin: 0;
-  border: none;
-  border-radius: 4px;
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  outline: none;
-  color: @text_muted;
+  min-width: 28px; min-height: 28px; padding: 0; margin: 0;
+  border: none; border-radius: 0; background-color: transparent;
+  background-image: none; box-shadow: none; outline: none; color: @text_muted;
 }
+.remin-tab-btn:hover { background-color: @surface; color: @text; }
+.remin-tab-btn:active, .remin-tab-btn:focus { background-color: transparent; background-image: none; border: none; box-shadow: none; outline: none; }
+.remin-tab-btn image { -gtk-icon-size: 16px; }
 
-.remin-tab-btn:hover {
-  background-color: @surface;
-  color: @text;
-}
-
-.remin-tab-btn:active,
-.remin-tab-btn:focus {
-  background-color: transparent;
-  background-image: none;
-  border: none;
-  box-shadow: none;
-  outline: none;
-}
-
-.remin-tab-btn image {
-  -gtk-icon-size: 16px;
-}
-
-/* Tab row: horizontal container holding the tab scroller + fixed action buttons */
-.remin-tab-row {
-  min-height: 32px;
-}
-
-/* Fixed action buttons at the right of the tab row (New Terminal, New Note) */
-.remin-tab-actions {
-  margin-left: 8px;
-}
-
-/* Small, round close buttons on tabs — a compact native-looking control. */
+/* Tab close button */
 .remin-tab-close {
-  min-width: 18px;
-  min-height: 18px;
-  padding: 0;
-  margin: 2px 4px 2px 0;
-  border: none;
-  border-radius: 9999px;
-  font-size: 10px;
-  line-height: 18px;
-  background-color: transparent;
-  color: @text_muted;
-  -gtk-icon-size: 12px;
-  background-image: none;
-  box-shadow: none;
-  outline: none;
+  min-width: 18px; min-height: 18px; padding: 0; margin: 2px 4px 2px 0;
+  border: none; border-radius: 9999px; font-size: 10px; line-height: 18px;
+  background-color: transparent; color: @text_muted; -gtk-icon-size: 12px;
+  background-image: none; box-shadow: none; outline: none;
 }
+.remin-tab-close:hover { background-color: rgba(239, 68, 68, 0.1); color: #dc2626; border-color: rgba(220, 38, 38, 0.25); background-image: none; box-shadow: none; outline: none; border-radius: 9999px; }
+.remin-tab-close:focus, .remin-tab-close:active { background-color: transparent; background-image: none; border: none; box-shadow: none; outline: none; }
 
-.remin-tab-close:hover {
-  background-color: rgba(239, 68, 68, 0.1);
-  color: #dc2626;
-  border-color: rgba(220, 38, 38, 0.25);
-  background-image: none;
-  box-shadow: none;
-  outline: none;
-  border-radius: 9999px;
-}
+/* Tab divider */
+.remin-tab-divider { min-height: 1px; background-color: @border; margin: 0; border: none; }
 
-.remin-tab-close:focus,
-.remin-tab-close:active {
-  background-color: transparent;
-  background-image: none;
-  border: none;
-  box-shadow: none;
-  outline: none;
-}
-
-/* Separator/divider between tab bar and content area */
-.remin-tab-divider {
-  min-height: 1px;
-  background-color: @border;
-  margin: 0;
-  border: none;
-}
-
-/* Tab box: vertical container holding the tab scroller + dedicated horizontal scrollbar.
-   The scrollbar lives in its own row BELOW the tab labels, never overlapping them. */
-.remin-tab-box {
-  min-height: 28px; /* tab row + scrollbar row */
-}
-
-.remin-tab-scrollbar {
-  min-height: 6px;
-  margin: 0 8px;
-  border-radius: 3px;
-  background-color: transparent;
-}
-
-.remin-tab-scrollbar slider {
-  min-width: 30px;
-  border-radius: 3px;
-  background-color: @border;
-}
-
-.remin-tab-scrollbar slider:hover {
-  background-color: @text_muted;
-}
+/* Tab box + scrollbar */
+.remin-tab-box { min-height: 28px; }
+.remin-tab-scrollbar { min-height: 6px; margin: 0 8px; border-radius: 3px; background-color: transparent; }
+.remin-tab-scrollbar slider { min-width: 30px; border-radius: 3px; background-color: @border; }
+.remin-tab-scrollbar slider:hover { background-color: @text_muted; }
 
 /* Active tab highlight via notebook checked state */
-notebook > header > tabs > tab:checked {
-  color: @accent;
-  background-color: @accent_soft;
-  border-bottom: 2px solid @accent;
-}
+notebook > header > tabs > tab:checked { color: @accent; background-color: @accent_soft; border-bottom: 2px solid @accent; }
 
-.remin-header-label {
-  color: @text;
-}
+/* Window title */
+.remin-header-label { color: @text; }
 
-.remin-status {
-  color: @text_muted;
-  font-feature-settings: "tnum";
-}
+/* Status */
+.remin-status { color: @text_muted; font-feature-settings: "tnum"; }
 
-/* Autosave badge — pill overlay in top-right corner */
-#autosave-badge {
-  padding: 3px 10px;
-  border-radius: 9999px;
-  font-size: 11px;
-  font-weight: 500;
-}
+/* Autosave badge */
+#autosave-badge { padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 500; }
+.autosave-ok { background-color: rgba(16, 185, 129, 0.14); color: #059669; }
+.autosave-fail { background-color: rgba(239, 68, 68, 0.14); color: #dc2626; }
 
-.autosave-ok {
-  background-color: rgba(16, 185, 129, 0.14);
-  color: #059669;
-}
+/* Toolbar */
+.remin-toolbar { background-color: transparent; border: none; padding: 4px 0; }
 
-.autosave-fail {
-  background-color: rgba(239, 68, 68, 0.14);
-  color: #dc2626;
+/* Tool buttons */
+button.remin-tool-btn {
+  min-height: 24px; padding: 2px 6px; border: none; border-radius: 0;
+  background-color: transparent; background-image: none; box-shadow: none; color: @text_muted;
 }
+button.remin-tool-btn:hover { background-color: transparent; color: @text; }
+button.remin-tool-btn image { -gtk-icon-size: 14px; }
 
-/* Toolbar below header — clean, no border, breathing room */
-.remin-toolbar {
-  background-color: transparent;
-  border: none;
-  padding: 4px 0;
-}
-
-/* Tool buttons: no border, no bg — just icon + text */
-/* Tool buttons: no border, no bg — just icon + text.
-   Use window.remin-window button.remin-tool-btn for higher specificity over global button rule. */
-window.remin-window button.remin-tool-btn {
-  min-height: 24px;
-  padding: 2px 6px;
-  border: none;
-  border-radius: 0;
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  color: @text_muted;
-}
-
-window.remin-window button.remin-tool-btn:hover {
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  color: @text;
-}
-
-window.remin-window button.remin-tool-btn:focus,
-window.remin-window button.remin-tool-btn:active,
-window.remin-window button.remin-tool-btn:checked {
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  outline: none;
-}
-
-window.remin-window button.remin-tool-btn image {
-  -gtk-icon-size: 14px;
-}
-
-/* Right-click context menus — Gtk::Popover with buttons, styled to match editor exactly */
+/* Context menus */
 .remin-context-menu {
-  background-color: transparent;
-  border: none;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  padding: 4px 0;
-  min-width: 200px;
+  background-color: #ffffff; border: none; border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); padding: 4px 0; min-width: 200px;
 }
-
-.remin-context-menu-box {
-  padding: 0;
-}
-
+.remin-context-menu-box { padding: 0; }
 .remin-context-menu-item {
-  min-height: 28px;
-  padding: 4px 16px;
-  border: none;
-  border-radius: 0;
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  color: #1f2437;
-  font-size: 13px;
+  min-height: 28px; padding: 4px 16px; border: none; border-radius: 0;
+  background-color: transparent; background-image: none; box-shadow: none;
+  color: #1f2437; font-size: 13px;
 }
+.remin-context-menu-item:hover { background-color: #eceefb; color: #4f46e5; }
+.remin-context-menu-item:disabled { color: #9ca3b8; }
+.remin-context-menu-separator { background-color: #e2e6f2; min-height: 1px; margin: 4px 8px; border: none; }
 
-.remin-context-menu-item:hover {
-  background-color: #eceefb;
-  color: #4f46e5;
-}
+/* Line-number gutter */
+.remin-gutter { background-color: @surface; color: @text_muted; }
 
-.remin-context-menu-item:disabled {
-  color: #9ca3b8;
-}
+/* Sidebar */
+.remin-sidebar { background-color: @surface; border-right: none; margin-left: 8px; }
+.remin-sidebar-title { color: @text_muted; font-weight: 600; font-size: 11px; letter-spacing: 0.5px; }
+.remin-history-item { background: transparent; border: none; border-radius: 0; padding: 4px 8px; color: @text; }
+.remin-history-item:hover { background-color: @surface_hover; }
 
-.remin-context-menu-separator {
-  background-color: #e2e6f2;
-  min-height: 1px;
-  margin: 4px 8px;
-  border: none;
-}
-
-/* Line-number gutter in the note editor */
-.remin-gutter {
-  background-color: @surface;
-  color: @text_muted;
-}
-
-/* Resizable left sidebar */
-.remin-sidebar {
-  background-color: @surface;
-  border-right: none;  /* Remove right border line */
-  margin-left: 8px;  /* Match header/toolbar left margin */
-}
-
-.remin-sidebar-title {
-  color: @text_muted;
-  font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0.5px;
-}
-
-.remin-history-item {
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  color: @text;
-}
-
-.remin-history-item:hover {
-  background-color: @surface_hover;
-}
-
-/* Active terminal pane highlight — subtle, not a visible button */
-.remin-pane-active {
-  outline: 1px solid @accent;
-  outline-offset: -1px;
-}
+/* Active terminal pane highlight */
+.remin-pane-active { outline: 1px solid @accent; outline-offset: -1px; }
 
 /* Toolbar button label */
-.remin-tool-label {
-  color: @text_muted;
-  font-size: 11px;
-  font-weight: 400;
-}
+.remin-tool-label { color: @text_muted; font-size: 11px; font-weight: 400; }
 
-/* Ensure button children (boxes) are also transparent */
-window.remin-window button.remin-toolbar-btn > box,
-window.remin-window button.remin-toolbar-btn > box > * {
-  background-color: transparent;
-  background-image: none;
-}
-window.remin-window button.remin-toolbar-btn > box > label {
-  background-color: transparent;
-  background-image: none;
-}
+/* Find bar */
+.remin-find-bar { background-color: @surface; border-bottom: 1px solid @border; min-height: 30px; }
+.remin-find-bar > * { margin: 2px 4px; }
 
-/* Unified find bar (same height as toolbar) */
-.remin-find-bar {
-  background-color: @surface;
-  border-bottom: 1px solid @border;
-  min-height: 30px;
-}
-
-.remin-find-bar > * {
-  margin: 2px 4px;
-}
-
-/* Directory tree (VS Code-style compact) */
-.remin-directory-row {
-  min-height: 20px;
-  padding: 1px 4px;
-}
-
-.remin-directory-row:hover {
-  background-color: @surface_hover;
-  border-radius: 3px;
-}
-
-.remin-directory-row image {
-  color: @text;
-}
-
-.remin-directory-name {
-  font-size: 12px;
-  color: @text;
-}
-
-.remin-directory-ext {
-  font-size: 11px;
-  color: @text_muted;
-  margin-left: 2px;
-}
-
-.remin-directory-size {
-  font-size: 11px;
-  color: @text_muted;
-}
-
-/* Directory search box */
-.remin-dir-search {
-  min-height: 26px;
-  border-radius: 4px;
-  border: none;
-  background-color: @bg;
-  color: @text;
-  padding: 2px 6px;
-  font-size: 12px;
-}
-
-.remin-dir-search:focus {
-  border: none;
-  box-shadow: none;
-  outline: none;
-}
-
-/* Find/Replace buttons — small 2px radius, transparent bg, icon+text */
+/* Find/Replace buttons */
 button.remin-find-btn {
-  min-height: 24px;
-  padding: 2px 8px;
-  border: none;
-  border-radius: 2px;
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  color: @text_muted;
+  min-height: 24px; padding: 2px 8px; border: none; border-radius: 2px;
+  background-color: transparent; background-image: none; box-shadow: none; color: @text_muted;
 }
+button.remin-find-btn:hover { background-color: @surface_hover; color: @text; }
+button.remin-find-btn:focus, button.remin-find-btn:active { background-color: transparent; background-image: none; box-shadow: none; outline: none; }
+button.remin-find-btn image { -gtk-icon-size: 14px; }
 
-button.remin-find-btn:hover {
-  background-color: @surface_hover;
-  color: @text;
-}
+/* Directory tree */
+.remin-directory-row { min-height: 20px; padding: 1px 4px; }
+.remin-directory-row:hover { background-color: @surface_hover; border-radius: 3px; }
+.remin-directory-row image { color: @text; }
+.remin-directory-name { font-size: 12px; color: @text; }
+.remin-directory-ext { font-size: 11px; color: @text_muted; margin-left: 2px; }
+.remin-directory-size { font-size: 11px; color: @text_muted; }
+.remin-dir-search { min-height: 26px; border-radius: 0; border: none; background-color: @bg; color: @text; padding: 2px 6px; font-size: 12px; }
+.remin-dir-search:focus { border: none; box-shadow: none; outline: none; }
+.remin-find-entry { min-height: 26px; border-radius: 0; border: none; background-color: @bg; color: @text; padding: 2px 6px; font-size: 12px; }
+.remin-find-entry:focus { border: none; box-shadow: none; outline: none; }
+.remin-dir-reload { min-width: 24px; min-height: 24px; padding: 0; margin: 0; border: none; border-radius: 0; background-color: transparent; background-image: none; box-shadow: none; color: @text_muted; }
+.remin-dir-reload:hover { background-color: @surface; color: @text; }
+.remin-dir-reload image { -gtk-icon-size: 14px; }
+.remin-dir-path { font-size: 11px; color: @text_muted; padding: 2px 6px; font-family: monospace; }
+.remin-directory-row > expander, .remin-directory-row GtkExpander { padding: 0; margin: 0; }
+.remin-directory-row > expander > label, .remin-directory-row GtkExpander > label { font-size: 12px; color: @text; }
 
-button.remin-find-btn:focus,
-button.remin-find-btn:active {
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  outline: none;
+/* Sidebar tabs */
+.remin-sidebar-tabs { padding-bottom: 4px; }
+button.remin-sidebar-tab {
+  min-height: 26px; padding: 2px 8px; border: none; border-radius: 0;
+  background-color: transparent; background-image: none; box-shadow: none;
+  color: @text_muted; font-size: 11px; font-weight: 600;
 }
+button.remin-sidebar-tab:hover { background-color: @surface_hover; color: @text; }
+button.remin-sidebar-tab.active { color: @accent; border-bottom: 2px solid @accent; }
 
-button.remin-find-btn image {
-  -gtk-icon-size: 14px;
-}
+/* Toolbar button label */
+.remin-tool-label { color: @text_muted; font-size: 11px; font-weight: 400; }
 
-/* Find bar search entry — no border in any state */
-.remin-find-entry {
-  min-height: 26px;
-  border-radius: 4px;
-  border: none;
-  background-color: @bg;
-  color: @text;
-  padding: 2px 6px;
-  font-size: 12px;
-}
+/* Unified find bar */
+.remin-find-bar { background-color: @surface; border-bottom: 1px solid @border; min-height: 30px; }
+.remin-find-bar > * { margin: 2px 4px; }
 
-.remin-find-entry:focus {
-  border: none;
-  box-shadow: none;
-  outline: none;
+/* Find/Replace buttons */
+button.remin-find-btn {
+  min-height: 24px; padding: 2px 8px; border: none; border-radius: 2px;
+  background-color: transparent; background-image: none; box-shadow: none; color: @text_muted;
 }
+button.remin-find-btn:hover { background-color: @surface_hover; color: @text; }
+button.remin-find-btn:focus, button.remin-find-btn:active { background-color: transparent; background-image: none; box-shadow: none; outline: none; }
+button.remin-find-btn image { -gtk-icon-size: 14px; }
 
-/* All dialogs: consistent light theme appearance */
-dialog,
-dialog > * {
-  background-color: #ffffff;
-  color: #1f2437;
-}
-dialog button {
-  background-color: transparent;
-  border: none;
-  border-radius: 2px;
-  padding: 6px 16px;
-  margin: 0 4px;
-  color: #1f2437;
-}
-dialog button:hover {
-  background-color: #eceefb;
-}
-dialog button:active,
-dialog button:checked {
-  background-color: rgba(79, 70, 229, 0.10);
-}
-dialog button:focus {
-  outline: none;
-  box-shadow: none;
-}
-dialog entry {
-  background-color: #ffffff;
-  border: 1px solid #e2e6f2;
-  color: #1f2437;
-}
-dialog entry:focus {
-  border-color: #4f46e5;
-}
-dialog label,
-dialog textview {
-  color: #1f2437;
-}
+/* Directory tree */
+.remin-directory-row { min-height: 20px; padding: 1px 4px; }
+.remin-directory-row:hover { background-color: @surface_hover; border-radius: 3px; }
+.remin-directory-row image { color: @text; }
+.remin-directory-name { font-size: 12px; color: @text; }
+.remin-directory-ext { font-size: 11px; color: @text_muted; margin-left: 2px; }
+.remin-directory-size { font-size: 11px; color: @text_muted; }
+.remin-dir-search { min-height: 26px; border-radius: 0; border: none; background-color: @bg; color: @text; padding: 2px 6px; font-size: 12px; }
+.remin-dir-search:focus { border: none; box-shadow: none; outline: none; }
+.remin-find-entry { min-height: 26px; border-radius: 0; border: none; background-color: @bg; color: @text; padding: 2px 6px; font-size: 12px; }
+.remin-find-entry:focus { border: none; box-shadow: none; outline: none; }
+.remin-dir-reload { min-width: 24px; min-height: 24px; padding: 0; margin: 0; border: none; border-radius: 0; background-color: transparent; background-image: none; box-shadow: none; color: @text_muted; }
+.remin-dir-reload:hover { background-color: @surface; color: @text; }
+.remin-dir-reload image { -gtk-icon-size: 14px; }
+.remin-dir-path { font-size: 11px; color: @text_muted; padding: 2px 6px; font-family: monospace; }
+.remin-directory-row > expander, .remin-directory-row GtkExpander { padding: 0; margin: 0; }
+.remin-directory-row > expander > label, .remin-directory-row GtkExpander > label { font-size: 12px; color: @text; }
 
-/* Dialog buttons: 2px radius, gap, no black borders */
-dialog button {
-  background-color: transparent;
-  border: none;
-  border-radius: 2px;
-  padding: 6px 16px;
-  margin: 0 4px;
-  color: #1f2437;
+/* Sidebar tabs */
+.remin-sidebar-tabs { padding-bottom: 4px; }
+button.remin-sidebar-tab {
+  min-height: 26px; padding: 2px 8px; border: none; border-radius: 0;
+  background-color: transparent; background-image: none; box-shadow: none;
+  color: @text_muted; font-size: 11px; font-weight: 600;
 }
-dialog button:hover {
-  background-color: #eceefb;
-}
-dialog button:active,
-dialog button:checked {
-  background-color: rgba(79, 70, 229, 0.10);
-}
-dialog button:focus {
-  outline: none;
-  box-shadow: none;
-}
-dialog entry {
-  background-color: #ffffff;
-  border: 1px solid #e2e6f2;
-  color: #1f2437;
-}
-dialog entry:focus {
-  border-color: #4f46e5;
-}
+button.remin-sidebar-tab:hover { background-color: @surface_hover; color: @text; }
+button.remin-sidebar-tab.active { color: @accent; border-bottom: 2px solid @accent; }
 
-/* Notebook tabs (settings dialog) — single focus ring (accent blue) */
-notebook tab:focus,
-notebook tab:focus-visible {
-  outline-color: @accent;
-  outline-width: 2px;
-  outline-style: solid;
-  outline-offset: -2px;
-  box-shadow: none;
-}
+/* Toolbar button label */
+.remin-tool-label { color: @text_muted; font-size: 11px; font-weight: 400; }
 
-/* Reload button: transparent, icon-only, small */
-.remin-dir-reload {
-  min-width: 24px;
-  min-height: 24px;
-  padding: 0;
-  margin: 0;
-  border: none;
-  border-radius: 4px;
-  background-color: transparent;
-  background-image: none;
-  box-shadow: none;
-  color: @text_muted;
-}
+/* Unified find bar */
+.remin-find-bar { background-color: @surface; border-bottom: 1px solid @border; min-height: 30px; }
+.remin-find-bar > * { margin: 2px 4px; }
 
-.remin-dir-reload:hover {
-  background-color: @surface;
-  color: @text;
-}
+/* Directory tree */
+.remin-directory-row { min-height: 20px; padding: 1px 4px; }
+.remin-directory-row:hover { background-color: @surface_hover; border-radius: 3px; }
+.remin-directory-row image { color: @text; }
+.remin-directory-name { font-size: 12px; color: @text; }
+.remin-directory-ext { font-size: 11px; color: @text_muted; margin-left: 2px; }
+.remin-directory-size { font-size: 11px; color: @text_muted; }
+.remin-dir-search { min-height: 26px; border-radius: 0; border: none; background-color: @bg; color: @text; padding: 2px 6px; font-size: 12px; }
+.remin-dir-search:focus { border: none; box-shadow: none; outline: none; }
+.remin-find-entry { min-height: 26px; border-radius: 0; border: none; background-color: @bg; color: @text; padding: 2px 6px; font-size: 12px; }
+.remin-find-entry:focus { border: none; box-shadow: none; outline: none; }
+.remin-dir-reload { min-width: 24px; min-height: 24px; padding: 0; margin: 0; border: none; border-radius: 0; background-color: transparent; background-image: none; box-shadow: none; color: @text_muted; }
+.remin-dir-reload:hover { background-color: @surface; color: @text; }
+.remin-dir-reload image { -gtk-icon-size: 14px; }
+.remin-dir-path { font-size: 11px; color: @text_muted; padding: 2px 6px; font-family: monospace; }
+.remin-directory-row > expander, .remin-directory-row GtkExpander { padding: 0; margin: 0; }
+.remin-directory-row > expander > label, .remin-directory-row GtkExpander > label { font-size: 12px; color: @text; }
 
-.remin-dir-reload image {
-  -gtk-icon-size: 14px;
+/* Sidebar tabs */
+.remin-sidebar-tabs { padding-bottom: 4px; }
+button.remin-sidebar-tab {
+  min-height: 26px; padding: 2px 8px; border: none; border-radius: 0;
+  background-color: transparent; background-image: none; box-shadow: none;
+  color: @text_muted; font-size: 11px; font-weight: 600;
 }
+button.remin-sidebar-tab:hover { background-color: @surface_hover; color: @text; }
+button.remin-sidebar-tab.active { color: @accent; border-bottom: 2px solid @accent; }
 
-/* Directory path label (shows current directory path) */
-.remin-dir-path {
-  font-size: 11px;
-  color: @text_muted;
-  padding: 2px 6px;
-  font-family: monospace;
+/* Toolbar button label */
+.remin-tool-label { color: @text_muted; font-size: 11px; font-weight: 400; }
+
+/* Unified find bar */
+.remin-find-bar { background-color: @surface; border-bottom: 1px solid @border; min-height: 30px; }
+.remin-find-bar > * { margin: 2px 4px; }
+
+/* Find/Replace buttons */
+button.remin-find-btn {
+  min-height: 24px; padding: 2px 8px; border: none; border-radius: 2px;
+  background-color: transparent; background-image: none; box-shadow: none; color: @text_muted;
 }
+button.remin-find-btn:hover { background-color: @surface_hover; color: @text; }
+button.remin-find-btn:focus, button.remin-find-btn:active { background-color: transparent; background-image: none; box-shadow: none; outline: none; }
+button.remin-find-btn image { -gtk-icon-size: 14px; }
+
+/* Find bar search entry */
+.remin-find-entry { min-height: 26px; border-radius: 0; border: none; background-color: @bg; color: @text; padding: 2px 6px; font-size: 12px; }
+.remin-find-entry:focus { border: none; box-shadow: none; outline: none; }
+
+/* Reload button */
+.remin-dir-reload { min-width: 24px; min-height: 24px; padding: 0; margin: 0; border: none; border-radius: 0; background-color: transparent; background-image: none; box-shadow: none; color: @text_muted; }
+.remin-dir-reload:hover { background-color: @surface; color: @text; }
+.remin-dir-reload image { -gtk-icon-size: 14px; }
+
+/* Directory path label */
+.remin-dir-path { font-size: 11px; color: @text_muted; padding: 2px 6px; font-family: monospace; }
 
 /* Directory tree expander */
-.remin-directory-row > expander,
-.remin-directory-row GtkExpander {
-  padding: 0;
-  margin: 0;
-}
+.remin-directory-row > expander, .remin-directory-row GtkExpander { padding: 0; margin: 0; }
+.remin-directory-row > expander > label, .remin-directory-row GtkExpander > label { font-size: 12px; color: @text; }
 
-.remin-directory-row > expander > label,
-.remin-directory-row GtkExpander > label {
-  font-size: 12px;
-  color: @text;
+/* Sidebar tabs */
+.remin-sidebar-tabs { padding-bottom: 4px; }
+button.remin-sidebar-tab {
+  min-height: 26px; padding: 2px 8px; border: none; border-radius: 0;
+  background-color: transparent; background-image: none; box-shadow: none;
+  color: @text_muted; font-size: 11px; font-weight: 600;
 }
-
-/* Sidebar tabs (History | Directory) */
-.remin-sidebar-tabs {
-  padding-bottom: 4px;
-}
-
-.remin-sidebar-tab {
-  min-height: 26px;
-  padding: 2px 8px;
-  border: none;
-  border-radius: 0;
-  background-color: transparent;
-  color: @text_muted;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.remin-sidebar-tab:hover {
-  background-color: @surface_hover;
-  color: @text;
-}
-
-/* Active sidebar mode tab — highlighted so switching never looks broken */
-.remin-sidebar-tab.active {
-  color: @accent;
-  border-bottom: 2px solid @accent;
-}
+button.remin-sidebar-tab:hover { background-color: @surface_hover; color: @text; }
+button.remin-sidebar-tab.active { color: @accent; border-bottom: 2px solid @accent; }

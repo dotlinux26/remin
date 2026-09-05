@@ -11,7 +11,6 @@ add_library(remin_gui STATIC
   terminal/terminal_pane.cpp
   note/note_editor.cpp
   note/markdown_preview.cpp
-  theme/theme_manager.cpp
 )
 target_include_directories(remin_gui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/..

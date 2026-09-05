@@ -1,13 +1,14 @@
 #include "gui/window/settings_dialog.hpp"
 
+#include <adwaita.h>
 #include <giomm/settings.h>
 #include <gtkmm.h>
 #include <gdk/gdk.h>
 
 namespace remin::gui {
 
-SettingsDialog::SettingsDialog(Gtk::Window& parent, ThemeManager* theme, SessionController* controller)
-    : Gtk::Dialog("Settings", parent, true), theme_(theme), controller_(controller) {
+SettingsDialog::SettingsDialog(Gtk::Window& parent, SessionController* controller)
+    : Gtk::Dialog("Settings", parent, true), controller_(controller) {
     set_default_size(560, 420);
     set_resizable(true);
 
@@ -40,13 +41,19 @@ void SettingsDialog::setup_appearance_page() {
     theme_box->set_halign(Gtk::Align::START);
     auto* theme_label = Gtk::make_managed<Gtk::Label>("Dark theme");
     theme_label->set_valign(Gtk::Align::CENTER);
+    
+    // Get current dark mode from AdwStyleManager
+    AdwStyleManager* style_manager = adw_style_manager_get_default();
+    bool is_dark = adw_style_manager_get_color_scheme(style_manager) == ADW_COLOR_SCHEME_PREFER_DARK;
+    
     dark_theme_switch_ = Gtk::make_managed<Gtk::Switch>();
-    dark_theme_switch_->set_active(theme_->is_dark());
+    dark_theme_switch_->set_active(is_dark);
     dark_theme_switch_->set_valign(Gtk::Align::CENTER);
     dark_theme_switch_->property_active().signal_changed().connect(
         [this]() {
-            if (dark_theme_switch_ && theme_) {
-                theme_->apply(dark_theme_switch_->get_active());
+            if (dark_theme_switch_) {
+                AdwStyleManager* sm = adw_style_manager_get_default();
+                adw_style_manager_set_color_scheme(sm, dark_theme_switch_->get_active() ? ADW_COLOR_SCHEME_PREFER_DARK : ADW_COLOR_SCHEME_FORCE_LIGHT);
             }
             if (controller_) {
                 controller_->set_theme_dark(dark_theme_switch_->get_active());
@@ -134,9 +141,8 @@ void SettingsDialog::setup_behavior_page() {
 }
 
 bool SettingsDialog::on_theme_changed(bool dark) {
-    if (theme_) {
-        theme_->apply(dark);
-    }
+    AdwStyleManager* sm = adw_style_manager_get_default();
+    adw_style_manager_set_color_scheme(sm, dark ? ADW_COLOR_SCHEME_PREFER_DARK : ADW_COLOR_SCHEME_FORCE_LIGHT);
     return true;
 }
 

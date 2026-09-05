@@ -1,9 +1,9 @@
 #pragma once
 
 #include "gui/session/workspace_session.hpp"
-#include "gui/theme/theme_manager.hpp"
 #include "gui/window/main_window.hpp"
 
+#include <adwaita.h>
 #include <gtkmm.h>
 #include <memory>
 
@@ -20,7 +20,7 @@ private:
     bool on_autosave_tick();
 
     std::unique_ptr<WorkspaceSession> session_;
-    std::unique_ptr<ThemeManager> theme_;
+    AdwStyleManager* style_manager_{nullptr};
     MainWindow* window_{nullptr};
     bool autosave_ok_{true};
 };
