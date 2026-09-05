@@ -171,6 +171,32 @@ popover.menu image {
 }
 
 /* Toolbar buttons: no border, no bg — just icon + text */
+button.remin-toolbar-btn {
+  min-height: 24px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @text;
+}
+
+button.remin-toolbar-btn:hover {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+button.remin-toolbar-btn:focus,
+button.remin-toolbar-btn:active,
+button.remin-toolbar-btn:checked {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+}
+
 window.remin-window button.remin-toolbar-btn {
   min-height: 24px;
   padding: 2px 6px;
@@ -217,14 +243,24 @@ window.remin-window headerbar button.remin-toolbar-btn:hover {
 
 /* Native window controls (min/max/close): NO background, NO border in ANY state
    (both themes identical — completely transparent, let GTK native rendering handle it) */
+/* Window controls (min/max/close): NO background, NO border, NO shadow in ANY state.
+   Using GTK-compatible CSS (no !important). */
 window.remin-window headerbar button.titlebutton,
-window.remin-window headerbar titlebutton {
+window.remin-window headerbar titlebutton,
+window.remin-window headerbar .window-controls,
+window.remin-window headerbar .window-controls *,
+window.remin-window headerbar .window-control,
+window.remin-window headerbar .window-control * {
   background-color: transparent;
   background-image: none;
-  border: none;
+  border-style: none;
+  border-width: 0;
+  border-color: transparent;
   border-radius: 0;
   box-shadow: none;
-  outline: none;
+  outline-style: none;
+  outline-width: 0;
+  outline-color: transparent;
   padding: 0;
   margin: 0;
   min-width: 28px;
@@ -238,20 +274,24 @@ window.remin-window headerbar titlebutton:active,
 window.remin-window headerbar button.titlebutton:focus,
 window.remin-window headerbar titlebutton:focus,
 window.remin-window headerbar button.titlebutton:checked,
-window.remin-window headerbar titlebutton:checked {
+window.remin-window headerbar titlebutton:checked,
+window.remin-window headerbar .window-controls:hover,
+window.remin-window headerbar .window-controls *:hover,
+window.remin-window headerbar .window-control:hover,
+window.remin-window headerbar .window-control *:hover,
+window.remin-window headerbar .window-controls:active,
+window.remin-window headerbar .window-controls *:active,
+window.remin-window headerbar .window-control:active,
+window.remin-window headerbar .window-control *:active {
   background-color: transparent;
   background-image: none;
-  border: none;
+  border-style: none;
+  border-width: 0;
+  border-color: transparent;
   box-shadow: none;
-  outline: none;
-}
-
-/* Also target the window controls container */
-window.remin-window headerbar .window-controls,
-window.remin-window headerbar .window-control {
-  background-color: transparent;
-  border: none;
-  box-shadow: none;
+  outline-style: none;
+  outline-width: 0;
+  outline-color: transparent;
 }
 
 /* Preview header — slim row above the markdown preview */
@@ -423,25 +463,40 @@ notebook > header > tabs > tab:checked {
 .remin-toolbar {
   background-color: transparent;
   border: none;
-  padding: 4px 8px;
+  padding: 4px 0;
 }
 
 /* Tool buttons: no border, no bg — just icon + text */
-.remin-tool-btn {
+/* Tool buttons: no border, no bg — just icon + text.
+   Use window.remin-window button.remin-tool-btn for higher specificity over global button rule. */
+window.remin-window button.remin-tool-btn {
   min-height: 24px;
   padding: 2px 6px;
   border: none;
   border-radius: 0;
   background-color: transparent;
+  background-image: none;
+  box-shadow: none;
   color: @text_muted;
 }
 
-.remin-tool-btn:hover {
+window.remin-window button.remin-tool-btn:hover {
   background-color: transparent;
+  background-image: none;
+  box-shadow: none;
   color: @text;
 }
 
-.remin-tool-btn image {
+window.remin-window button.remin-tool-btn:focus,
+window.remin-window button.remin-tool-btn:active,
+window.remin-window button.remin-tool-btn:checked {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
+}
+
+window.remin-window button.remin-tool-btn image {
   -gtk-icon-size: 14px;
 }
 
@@ -530,6 +585,17 @@ notebook > header > tabs > tab:checked {
   color: @text_muted;
   font-size: 11px;
   font-weight: 400;
+}
+
+/* Ensure button children (boxes) are also transparent */
+window.remin-window button.remin-toolbar-btn > box,
+window.remin-window button.remin-toolbar-btn > box > * {
+  background-color: transparent;
+  background-image: none;
+}
+window.remin-window button.remin-toolbar-btn > box > label {
+  background-color: transparent;
+  background-image: none;
 }
 
 /* Unified find bar (same height as toolbar) */

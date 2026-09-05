@@ -27,6 +27,9 @@ MainWindow::MainWindow(SessionController* controller,
     } catch (const Glib::Error&) {}
     set_icon_name("remin");
 
+    // Add remin-window CSS class EARLY so CSS rules apply to toolbar buttons created in setup_toolbar()
+    if (theme_) ThemeManager::tag_window(*this);
+
     // Root overlay for autosave badge
     overlay_ = Gtk::make_managed<Gtk::Overlay>();
     set_child(*overlay_);
