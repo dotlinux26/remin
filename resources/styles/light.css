@@ -14,6 +14,11 @@
 @define-color accent_2       #06b6d4;
 @define-color accent_soft    rgba(79, 70, 229, 0.10);
 
+/* Search highlight semantic colors (queried via StyleContext lookup) */
+@define-color search_match        rgba(79, 70, 229, 0.16);
+@define-color search_current      #ff7600;
+@define-color search_current_fg   #000000;
+
 /* ============================================================================
  * LAYOUT / SPACING / STRUCTURE
  * ============================================================================ */

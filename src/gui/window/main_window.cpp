@@ -74,27 +74,9 @@ MainWindow::MainWindow(SessionController* controller,
         false);
     add_controller(key_ctrl_);
 
-    // Click outside find bar to close it
-    auto click_ctrl = Gtk::GestureClick::create();
-    click_ctrl->set_button(0); // Any button
-click_ctrl->signal_released().connect([this, click_ctrl](int, double x, double y) {
-        if (!find_bar_ || !find_bar_->get_visible()) return;
-        // Find the widget at the click coordinates
-        auto* root = get_child();
-        if (!root) return;
-        auto* target = root->pick(x, y, Gtk::PickFlags::DEFAULT);
-        // Check if the clicked widget or its ancestors include find_bar_
-        for (auto* w = target; w; w = w->get_parent()) {
-            if (w == find_bar_) return; // Click is inside find_bar
-        }
-        // Also check coordinates as fallback
-        auto allocation = find_bar_->get_allocation();
-        if (x < allocation.get_x() || x > allocation.get_x() + allocation.get_width() ||
-            y < allocation.get_y() || y > allocation.get_y() + allocation.get_height()) {
-            hide_find_bar();
-        }
-    });
-    add_controller(click_ctrl);
+    // The find/replace bar stays open until closed explicitly (X button or
+    // Esc). Clicking elsewhere (including the notebook editor) does NOT dismiss
+    // it, so a search survives focus switches.
 
     // Click outside terminal/note area to clear focus (allows global shortcuts like Ctrl+F/H to work)
     auto focus_click_ctrl = Gtk::GestureClick::create();
@@ -731,6 +713,7 @@ void MainWindow::setup_find_bar() {
     find_entry_->set_hexpand(true);
     find_entry_->set_placeholder_text("Search…");
     find_entry_->signal_activate().connect([this]() { on_find_next(); });
+    find_entry_->signal_changed().connect([this]() { sync_find_text(); });
 
     auto* replace_icon = Gtk::make_managed<Gtk::Image>();
     replace_icon->set_from_icon_name("edit-find-replace-symbolic");
@@ -1327,9 +1310,13 @@ void MainWindow::update_header() {
 
 void MainWindow::show_find_bar(bool replace) {
     find_bar_->set_visible(true);
-    find_entry_->grab_focus();
-    find_entry_->set_text("");
-    replace_entry_->set_text("");
+    // In replace mode the typed text must land in the REPLACE field, not the
+    // find field — otherwise typing the replacement silently changes the
+    // search term and invalidates the current match.
+    if (replace)
+        replace_entry_->grab_focus();
+    else
+        find_entry_->grab_focus();
     replace_entry_->set_visible(replace);
     replace_icon_->set_visible(replace);
     replace_btn_->set_visible(replace);
@@ -1344,11 +1331,16 @@ void MainWindow::show_find_bar(bool replace) {
 }
 
 void MainWindow::hide_find_bar() {
+    // Clear both entries so stale highlights are not left on the editor and
+    // the next Ctrl+F opens with a clean slate.
+    find_entry_->set_text("");
+    replace_entry_->set_text("");
     find_bar_->set_visible(false);
     replace_entry_->set_visible(false);
     replace_icon_->set_visible(false);
     replace_btn_->set_visible(false);
     replace_all_btn_->set_visible(false);
+    find_match_label_->set_visible(false);
     // Also hide note editor's find bar if visible
     if (active_tab_ >= 0 && active_tab_ < (int)tabs_.size()) {
         auto* tab = tabs_[active_tab_].get();
@@ -1436,6 +1428,53 @@ bool MainWindow::on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods
     return false;
 }
 
+void MainWindow::sync_find_text() {
+    if (active_tab_ < 0 || active_tab_ >= (int)tabs_.size()) return;
+    auto* tab = tabs_[active_tab_].get();
+    const auto text = find_entry_->get_text();
+    if (tab->kind() == TabKind::Terminal) {
+        if (auto* p = static_cast<TerminalTabView*>(tab)->focused_pane())
+            p->set_search_text(text);
+    } else if (tab->kind() == TabKind::Note) {
+        if (auto* editor = static_cast<NoteTabView*>(tab)->editor())
+            editor->set_search_text(text);
+    }
+    update_find_match_label();
+}
+
+void MainWindow::update_find_match_label() {
+    if (!find_match_label_) return;
+    if (!find_bar_ || !find_bar_->get_visible()) {
+        find_match_label_->set_visible(false);
+        return;
+    }
+    if (active_tab_ < 0 || active_tab_ >= (int)tabs_.size()) {
+        find_match_label_->set_visible(false);
+        return;
+    }
+    auto* tab = tabs_[active_tab_].get();
+    if (tab->kind() != TabKind::Note) {
+        find_match_label_->set_visible(false);
+        return;
+    }
+    auto* editor = static_cast<NoteTabView*>(tab)->editor();
+    if (!editor || find_entry_->get_text().empty()) {
+        find_match_label_->set_visible(false);
+        return;
+    }
+    auto [cur, total] = editor->current_search_position();
+    if (total <= 0) {
+        find_match_label_->set_text("No results");
+        find_match_label_->set_visible(true);
+        return;
+    }
+    if (cur > 0)
+        find_match_label_->set_text(std::to_string(cur) + " / " + std::to_string(total));
+    else
+        find_match_label_->set_text(std::to_string(total) + " matches");
+    find_match_label_->set_visible(true);
+}
+
 void MainWindow::on_find_next() {
     if (active_tab_ < 0 || active_tab_ >= (int)tabs_.size()) return;
     auto* tab = tabs_[active_tab_].get();
@@ -1449,6 +1488,7 @@ void MainWindow::on_find_next() {
         if (auto* editor = static_cast<NoteTabView*>(tab)->editor()) {
             editor->set_search_text(find_entry_->get_text());
             editor->search_next();
+            update_find_match_label();
         }
     }
 }
@@ -1466,6 +1506,7 @@ void MainWindow::on_find_prev() {
         if (auto* editor = static_cast<NoteTabView*>(tab)->editor()) {
             editor->set_search_text(find_entry_->get_text());
             editor->search_previous();
+            update_find_match_label();
         }
     }
 }
@@ -1478,6 +1519,7 @@ void MainWindow::on_replace() {
         if (auto* editor = n->editor()) {
             editor->set_replace_text(replace_entry_->get_text());
             editor->do_replace();
+            update_find_match_label();
         }
     }
 }
@@ -1490,6 +1532,7 @@ void MainWindow::on_replace_all() {
         if (auto* editor = n->editor()) {
             editor->set_replace_text(replace_entry_->get_text());
             editor->do_replace_all();
+            update_find_match_label();
         }
     }
 }

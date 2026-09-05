@@ -53,6 +53,15 @@ public:
     void do_replace();
     void do_replace_all();
     [[nodiscard]] int match_count() const;
+    // Returns {current_position_1based_or_0, total_matches}.
+    // (0, total) when cursor is not on a match; (0,0) when no search active.
+    [[nodiscard]] std::pair<int,int> current_search_position() const;
+
+    // Re-tint all occurrences matching the active search text. Searches are
+    // enumerated via GtkSourceSearchContext (respecting its case/whole-word/
+    // regex/wrap settings); Remin owns the highlight rendering with two
+    // semantic tags: "other matches" and the focused "current match".
+    void refresh_match_highlight();
 
     // Dirty tracking — mirrors GtkSourceBuffer::modified.
     [[nodiscard]] bool is_modified() const;
@@ -72,6 +81,7 @@ private:
     void on_buffer_changed();
     bool on_preview_tick();
     void do_search(bool forward);
+    bool on_highlight_tick();
 
     std::function<void()> on_change_;
     std::function<void()> on_save_;
@@ -84,6 +94,42 @@ private:
     GtkSourceView* source_view_{nullptr};
     GtkSourceBuffer* source_buffer_{nullptr};
     GtkSourceSearchContext* search_context_{nullptr};
+
+    // Two semantic highlight tags: "other matches" and "current match".
+    // Rendered by Remin; GtkSourceSearchContext owns search semantics only.
+    GtkTextTag* search_match_tag_{nullptr};
+    GtkTextTag* search_current_tag_{nullptr};
+
+    // Refreshes the highlight tag colours from the current theme palette
+    // (via @define-color search_match / search_current / search_current_fg).
+    void refresh_search_colors();
+    void ensure_search_tags();
+    void set_search_tag_priorities();
+
+    // ---- Viewport-aware search highlight -----------------------------------
+    // The current search match (by occurrence index) and its byte offsets.
+    // Kept WITHOUT re-scanning the whole document on navigation/scroll (the
+    // occurrence data is cached by GtkSourceSearchContext).
+    int current_occurrence_{-1};      // 0-based; -1 = none
+    int current_match_start_{-1};     // buffer offset of current match
+    int current_match_end_{-1};       // buffer offset of current match end
+
+    // Visible (viewport + overscan) buffer offset window.
+    static constexpr int kOverscanLines = 200;
+
+    sigc::connection scroll_timer_;
+    bool scroll_pending_{false};
+    void on_scroll_changed();
+    void schedule_viewport_render();
+    bool on_scroll_tick();
+    void visible_offset_window(int& start, int& end);
+    void remove_all_search_highlights();
+    void render_search_highlights();
+    // Locate the current occurrence after a cached forward/backward search.
+    void update_current_from_selection();
+
+    sigc::connection highlight_timer_;
+    bool highlight_pending_{false};
 
     sigc::connection preview_timer_;
     bool preview_pending_{false};

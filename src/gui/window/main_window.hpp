@@ -83,6 +83,8 @@ private:
     void on_find_prev();
     void on_replace();
     void on_replace_all();
+    void sync_find_text();          // push live text to active editor/terminal
+    void update_find_match_label(); // refresh "x / y" counter
     bool on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods);
 
     // Global sidebar (History / Directory)
