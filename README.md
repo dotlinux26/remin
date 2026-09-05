@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo2.svg" width="96" height="96" alt="Remin logo" />
+  <img src="remin-logo.svg" width="96" height="96" alt="Remin logo" />
 </p>
 
 <h1 align="center">Remin</h1>

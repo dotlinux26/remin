@@ -13,6 +13,7 @@ constexpr const char* kTempPrefix = "remin-note-";
 constexpr const char* kPathPrefix = "note-path:";
 constexpr const char* kAutosaveTempKey = "settings:autosave-temp";
 constexpr const char* kAutoReloadKey = "settings:autoreload";
+constexpr const char* kAutoShowPanelKey = "settings:autoshow-panel";
 constexpr const char* kThemeDarkKey = "settings:theme-dark";
 constexpr const char* kColorProfileFgKey = "settings:color-profile-fg";
 constexpr const char* kColorProfileBgKey = "settings:color-profile-bg";
@@ -192,6 +193,17 @@ bool SessionController::auto_reload_enabled() const {
 void SessionController::set_auto_reload_enabled(bool enabled) {
     if (!storage_) return;
     storage_->store_scrollback(meta_id(kAutoReloadKey), enabled ? "1" : "0");
+}
+
+bool SessionController::auto_show_panel_enabled() const {
+    if (!storage_) return false;
+    const std::string val = storage_->load_scrollback(meta_id(kAutoShowPanelKey));
+    return val == "1";
+}
+
+void SessionController::set_auto_show_panel_enabled(bool enabled) {
+    if (!storage_) return;
+    storage_->store_scrollback(meta_id(kAutoShowPanelKey), enabled ? "1" : "0");
 }
 
 bool SessionController::theme_dark() const {

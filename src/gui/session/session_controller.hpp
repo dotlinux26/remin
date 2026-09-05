@@ -85,6 +85,11 @@ public:
     [[nodiscard]] bool auto_reload_enabled() const;
     void set_auto_reload_enabled(bool enabled);
 
+    // Setting: auto-open the history/directory sidebar panel on launch.
+    // Defaults to off (panel stays hidden until the user opens it).
+    [[nodiscard]] bool auto_show_panel_enabled() const;
+    void set_auto_show_panel_enabled(bool enabled);
+
     // -- User preferences (theme, color profile) --
     // Dark/light theme preference
     [[nodiscard]] bool theme_dark() const;

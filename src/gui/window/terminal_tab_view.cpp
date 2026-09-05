@@ -138,15 +138,15 @@ void TerminalTabView::show_pane_menu(Gtk::Widget& pane_widget, double x, double 
 
     // Build items for the shared ContextMenu.
     std::vector<ContextMenu::Item> items;
-    items.push_back({"Copy", [self, pid]() { if (auto* p = self->pane(pid)) p->copy_clipboard(); }, has_selection});
-    items.push_back({"Paste", [self, pid]() { if (auto* p = self->pane(pid)) p->paste_clipboard(); }});
+    items.push_back({"Copy (Ctrl+Shift+C)", [self, pid]() { if (auto* p = self->pane(pid)) p->copy_clipboard(); }, has_selection});
+    items.push_back({"Paste (Ctrl+Shift+V)", [self, pid]() { if (auto* p = self->pane(pid)) p->paste_clipboard(); }});
     items.push_back({"Select All", [self, pid]() { if (auto* p = self->pane(pid)) p->select_all(); }});
     items.push_back({ContextMenu::SEPARATOR_LABEL, {}});
     items.push_back({"Split Horizontally (Alt+H)", [self]() { self->split(remin::core::PaneTree::Kind::SplitHorizontal); }});
     items.push_back({"Split Vertically (Alt+V)", [self]() { self->split(remin::core::PaneTree::Kind::SplitVertical); }});
     items.push_back({ContextMenu::SEPARATOR_LABEL, {}});
     items.push_back({"Clear Scrollback", [self, pid]() { if (auto* p = self->pane(pid)) p->clear_scrollback(); }});
-    items.push_back({"Close Pane", [self]() { self->close_focused_pane(); }});
+    items.push_back({"Close Pane (Alt+K)", [self]() { self->close_focused_pane(); }});
     items.push_back({"Color Profile…", [self]() { if (self->on_color_request_) self->on_color_request_(); }});
 
     // Use the shared ContextMenu module — same look/behavior everywhere.

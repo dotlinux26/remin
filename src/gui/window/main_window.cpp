@@ -140,6 +140,10 @@ click_ctrl->signal_released().connect([this, click_ctrl](int, double x, double y
         new_terminal_tab();
     }
 
+    // Apply startup sidebar visibility from the persisted setting. Default is
+    // closed; the toggle icon must match the actual (open/closed) state.
+    apply_initial_sidebar_state();
+
     // Connect tab switching signal via notify on visible-child-name property
     content_stack_->property_visible_child_name().signal_changed().connect(
         [this]() {
@@ -172,14 +176,21 @@ void MainWindow::setup_header() {
     header_box_->set_halign(Gtk::Align::CENTER);
     header_box_->set_valign(Gtk::Align::CENTER);
 
-    const std::string logo_path = std::string(REMIN_RESOURCE_DIR) + "/logo.svg";
-    try {
-        auto tex = Gdk::Texture::create_from_filename(logo_path);
-        logo_image_ = Gtk::make_managed<Gtk::Image>(tex);
-        logo_image_->set_pixel_size(22);
-    } catch (const Glib::Error&) {}
-
-    if (logo_image_) header_box_->append(*logo_image_);
+// NOTE: Logo deliberately disabled for now — the current SVG didn't fit the
+// header visually. Commented out (not removed) so a future logo can be
+// re-enabled easily by uncommenting the block below.
+//
+// const std::string logo_path = std::string(REMIN_RESOURCE_DIR) + "/logo.svg";
+//     try {
+//         auto tex = Gdk::Texture::create_from_filename(logo_path);
+//         logo_image_ = Gtk::make_managed<Gtk::Picture>();
+//         logo_image_->set_content_fit(Gtk::ContentFit::CONTAIN);
+//         logo_image_->set_paintable(tex);
+//         // Wide logo; size the box to the text aspect so it renders full-width
+//         // without inflating the 46px header (GtkImage+set_pixel_size would
+//         // force a square and squash the wide texture).
+//         logo_image_->set_size_request(140, 30);
+//     } catch (const Glib::Error&) {}
 
     header_label_ = Gtk::make_managed<Gtk::Label>("Remin");
     header_label_->add_css_class("remin-header-label");
@@ -216,8 +227,7 @@ void MainWindow::setup_menu_bar() {
     terminal_menu->append("Split Horizontally (Alt+H)", "win.split_h");
     terminal_menu->append("Split Vertically (Alt+V)", "win.split_v");
     terminal_menu->append("Custom Split…", "win.custom_split");
-    terminal_menu->append_section(Gio::Menu::create()); // separator
-    terminal_menu->append("Close Pane", "win.close_pane");
+    terminal_menu->append("Close Pane (Alt+K)", "win.close_pane");
     terminal_menu->append_section(Gio::Menu::create()); // separator
     terminal_menu->append("Find…", "win.find");
     terminal_menu->append("Color Profile…", "win.colors");
@@ -241,7 +251,7 @@ void MainWindow::setup_menu_bar() {
 
     // History menu
     auto history_menu = Gio::Menu::create();
-    history_menu->append("Show History Sidebar", "win.toggle_history");
+    history_menu->append("Show/Hide Panel", "win.toggle_history");
     history_menu->append("Clear History", "win.clear_history");
 
     auto menu_model = Gio::Menu::create();
@@ -359,7 +369,7 @@ void MainWindow::update_toolbar() {
         split_v->signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::on_split_terminal_vertical));
         toolbar_->append(*split_v);
         toolbar_->append(*make_tool_btn(
-            "window-close-symbolic", "Close", "Close Pane",
+            "window-close-symbolic", "Close", "Close Pane (Alt+K)",
             sigc::mem_fun(*this, &MainWindow::on_close_terminal_pane)));
         toolbar_->append(*make_tool_btn(
             "edit-find-symbolic", "Find", "Find (Ctrl+F)",
@@ -503,7 +513,10 @@ void MainWindow::setup_content_stack() {
     main_paned_->set_wide_handle(false);
     main_paned_->set_start_child(*sidebar_root_);
     main_paned_->set_end_child(*content_stack_);
-    main_paned_->set_position(200);
+    // Default closed; auto-open is applied in the constructor via
+    // apply_initial_sidebar_state() if the user opted in.
+    main_paned_->set_position(0);
+    sidebar_visible_ = false;
 }
 
 void MainWindow::restore_workspace() {
@@ -1320,6 +1333,11 @@ bool MainWindow::on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods
         on_split_terminal_vertical();
         return true;
     }
+    // Alt+K kills the focused terminal pane/tab.
+    if ((mods & Gdk::ModifierType::ALT_MASK) != Gdk::ModifierType(0) && (keyval == GDK_KEY_k || keyval == GDK_KEY_K)) {
+        on_close_terminal_pane();
+        return true;
+    }
     return false;
 }
 
@@ -1419,6 +1437,24 @@ void MainWindow::toggle_history_sidebar() {
             sidebar_toggle_btn_->set_icon_name("sidebar-show-symbolic");
             sidebar_toggle_btn_->set_tooltip_text("Show Sidebar (Ctrl+P)");
         }
+    }
+}
+
+void MainWindow::apply_initial_sidebar_state() {
+    if (!main_paned_) return;
+
+    const bool open = controller_ && controller_->auto_show_panel_enabled();
+    sidebar_visible_ = open;
+    main_paned_->set_position(open ? 220 : 0);
+
+    if (sidebar_toggle_btn_) {
+        sidebar_toggle_btn_->set_icon_name(open ? "sidebar-hide-symbolic" : "sidebar-show-symbolic");
+        sidebar_toggle_btn_->set_tooltip_text(open ? "Hide Sidebar (Ctrl+P)" : "Show Sidebar (Ctrl+P)");
+    }
+
+    // Refresh if showing directory
+    if (open && sidebar_stack_ && sidebar_stack_->get_visible_child_name() == "directory") {
+        if (directory_panel_) directory_panel_->refresh();
     }
 }
 

@@ -51,6 +51,7 @@ private:
     void on_note_save_as();
     void on_terminal_color_profile();
     void toggle_history_sidebar();
+    void apply_initial_sidebar_state();
     void clear_history();
     void on_settings();
     void open_note_from_path(const std::filesystem::path& path);
@@ -91,7 +92,7 @@ private:
     // Header
     Gtk::HeaderBar* header_{nullptr};
     Gtk::Box* header_box_{nullptr};
-    Gtk::Image* logo_image_{nullptr};
+    Gtk::Picture* logo_image_{nullptr};
     Gtk::Label* header_label_{nullptr};
     Gtk::Button* sidebar_toggle_btn_{nullptr};
 

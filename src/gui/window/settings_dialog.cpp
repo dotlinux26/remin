@@ -137,6 +137,28 @@ void SettingsDialog::setup_behavior_page() {
     ar_box->append(*autoreload_switch_);
     page->append(*ar_box);
 
+    auto* panel_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+    panel_box->set_halign(Gtk::Align::START);
+    auto* panel_label = Gtk::make_managed<Gtk::Label>("Show panel on startup");
+    panel_label->set_valign(Gtk::Align::CENTER);
+    panel_box->append(*panel_label);
+    auto* panel_switch = Gtk::make_managed<Gtk::Switch>();
+    panel_switch->set_active(controller_ ? controller_->auto_show_panel_enabled() : false);
+    panel_switch->set_valign(Gtk::Align::CENTER);
+    panel_switch->property_active().signal_changed().connect(
+        [this, panel_switch]() {
+            if (controller_) {
+                controller_->set_auto_show_panel_enabled(panel_switch->get_active());
+            }
+        });
+    panel_box->append(*panel_switch);
+    auto* panel_hint = Gtk::make_managed<Gtk::Label>("Open the history/file panel (Ctrl+P) automatically when starting the app.");
+    panel_hint->set_wrap(true);
+    panel_hint->set_halign(Gtk::Align::START);
+    panel_hint->add_css_class("dim-label");
+    page->append(*panel_box);
+    page->append(*panel_hint);
+
     notebook_->append_page(*page, "Behavior");
 }
 
