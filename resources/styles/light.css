@@ -7,7 +7,7 @@
  * referenced by @name throughout. No colors are hard-coded in C++.
  */
 
-@define-color bg             #ffffff;
+@define-color bg             #F5F5F5;
 @define-color surface        #f6f7fb;
 @define-color surface_hover  #eceefb;
 @define-color border         #e2e6f2;
@@ -117,8 +117,9 @@ popover.menu image {
 .remin-tab-bar {
   background-color: transparent;
   border-bottom: 1px solid @border;
-  padding: 4px 8px 4px 8px;
+  padding: 4px 8px 4px 0;  /* No left padding for first tab alignment */
   min-height: 30px;
+  margin: 0 8px 0 8px;  /* 8px gap left and right for the bottom line */
 }
 
 /* A tab = one container: [icon + label ......... × ]. The close button lives
@@ -170,17 +171,30 @@ popover.menu image {
 }
 
 /* Toolbar buttons: no border, no bg — just icon + text */
-.remin-toolbar-btn {
+window.remin-window button.remin-toolbar-btn {
   min-height: 24px;
   padding: 2px 6px;
   border: none;
   border-radius: 0;
   background-color: transparent;
+  background-image: none;
+  box-shadow: none;
   color: @text;
 }
 
-.remin-toolbar-btn:hover {
+window.remin-window button.remin-toolbar-btn:hover {
   background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+window.remin-window button.remin-toolbar-btn:focus,
+window.remin-window button.remin-toolbar-btn:active,
+window.remin-window button.remin-toolbar-btn:checked {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
 }
 
 /* HeaderBar icon buttons (e.g. the sidebar toggle next to the window controls):
@@ -746,7 +760,7 @@ notebook tab:focus-visible {
 
 /* Sidebar tabs (History | Directory) */
 .remin-sidebar-tabs {
-  border-bottom: none;  /* Remove bottom line under tabs */
+  padding-bottom: 4px;
 }
 
 .remin-sidebar-tab {

@@ -266,12 +266,13 @@ Gtk::Widget* DirectoryTreePanel::create_row(const std::string& name, bool is_dir
         });
         box->add_controller(click);
 
-        auto right_click = Gtk::GestureClick::create();
-        right_click->set_button(3);
-        right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
-            show_context_menu(*box, full_path, name, true);
-        });
-        box->add_controller(right_click);
+        // No context menu for "Back .." - it's a navigation element, not a folder
+        // auto right_click = Gtk::GestureClick::create();
+        // right_click->set_button(3);
+        // right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
+        //     show_context_menu(*box, full_path, name, true);
+        // });
+        // box->add_controller(right_click);
     } else if (is_dir) {
         bool has_children = false;
         try {

@@ -222,8 +222,9 @@ popover.menu image {
 .remin-tab-bar {
   background-color: transparent;
   border-bottom: 1px solid @border;
-  padding: 4px 8px 4px 8px;
+  padding: 4px 8px 4px 0;  /* No left padding for first tab alignment */
   min-height: 30px;
+  margin: 0 8px 0 8px;  /* 8px gap left and right for the bottom line */
 }
 
 /* A tab = one container: [icon + label ......... × ]. The close button lives
@@ -280,8 +281,8 @@ popover.menu image {
 }
 
 /* Toolbar buttons: no border, no bg — just icon + text.
-   Use button.remin-toolbar-btn for higher specificity over global button rule. */
-button.remin-toolbar-btn {
+   Use window.remin-window for higher specificity over global button rule. */
+window.remin-window button.remin-toolbar-btn {
   min-height: 24px;
   padding: 2px 6px;
   border: none;
@@ -292,10 +293,19 @@ button.remin-toolbar-btn {
   color: @text;
 }
 
-button.remin-toolbar-btn:hover {
+window.remin-window button.remin-toolbar-btn:hover {
   background-color: transparent;
   background-image: none;
   box-shadow: none;
+}
+
+window.remin-window button.remin-toolbar-btn:focus,
+window.remin-window button.remin-toolbar-btn:active,
+window.remin-window button.remin-toolbar-btn:checked {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  outline: none;
 }
 
 /* HeaderBar icon buttons (e.g. the sidebar toggle next to the window controls):
@@ -783,7 +793,7 @@ button.remin-find-btn image {
 
 /* Sidebar tabs (History | Directory) */
 .remin-sidebar-tabs {
-  border-bottom: none;  /* Remove bottom line under tabs */
+  padding-bottom: 4px;
 }
 
 button.remin-sidebar-tab {

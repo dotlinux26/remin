@@ -8,7 +8,8 @@ void ContextMenu::show(Gtk::Widget& anchor, double x, double y,
     // Matches editor's native right-click menu look when styled correctly.
     auto* popover = Gtk::make_managed<Gtk::Popover>();
     popover->set_has_arrow(false);
-    popover->set_position(Gtk::PositionType::BOTTOM);
+    // Position to the RIGHT of the anchor point so menu expands leftward
+    popover->set_position(Gtk::PositionType::RIGHT);
     popover->add_css_class("remin-context-menu");
 
     auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
@@ -38,8 +39,9 @@ void ContextMenu::show(Gtk::Widget& anchor, double x, double y,
     popover->set_child(*box);
     popover->set_parent(anchor);
 
+    // Point to a rect slightly to the LEFT of the click so popover appears to the right
     auto* rect = new Gdk::Rectangle();
-    rect->set_x(static_cast<int>(x));
+    rect->set_x(static_cast<int>(x) - 1);
     rect->set_y(static_cast<int>(y));
     rect->set_width(1);
     rect->set_height(1);

@@ -299,7 +299,7 @@ void MainWindow::setup_menu_bar() {
 }
 
 void MainWindow::setup_toolbar() {
-    toolbar_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
+    toolbar_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
     toolbar_->add_css_class("remin-toolbar");
     toolbar_->set_margin_top(2);
     toolbar_->set_margin_bottom(2);
