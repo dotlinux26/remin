@@ -1,8 +1,12 @@
 #pragma once
 
+#include "core/pane/pane.hpp"
+#include "core/terminal/cwd.hpp"
+
 #include <gtkmm.h>
 #include <string>
 #include <functional>
+#include <optional>
 
 struct _VteTerminal;
 typedef struct _VteTerminal VteTerminal;
@@ -22,8 +26,18 @@ public:
     // Feed input from the host side (e.g. copied text).
     void feed(std::string_view data);
 
-    // Read the current scrollback buffer text.
-    std::string capture_scrollback();
+    // Read the full scrollback buffer text (scrollback + visible region).
+    std::string capture_scrollback() const;
+
+    // -- Runtime persistence adapters (design §3.1/§5/§4) --
+    // Capture the VTE's current runtime state as pure data. The host routes
+    // this through the SessionController into canonical PaneState.
+    // command_history is intentionally left empty here (see its comment in
+    // TerminalRuntimeSnapshot): canonical history lives in core.
+    [[nodiscard]] remin::core::TerminalRuntimeSnapshot runtime_capture() const;
+    // Deterministic restore: resize → feed captured text → spawn the shell in
+    // the captured cwd (design §5.2). Feed runs BEFORE spawn, no sleeps.
+    void runtime_restore(const remin::core::PaneState& state);
 
     // The short title shown in the tab strip.
     [[nodiscard]] const char* title() const { return title_.c_str(); }
@@ -64,15 +78,35 @@ private:
     // Key handler for Ctrl+Shift+C/V copy/paste.
     static gboolean on_key_pressed(GtkEventControllerKey* controller, guint keyval,
                                    guint keycode, GdkModifierType state, gpointer user_data);
+    // Spawn callback: records the shell's PID (for the §4 /proc/<pid>/cwd
+    // fallback).
+    static void on_spawned_trampoline(VteTerminal* terminal, GPid pid,
+                                      GError* error, gpointer user_data);
+
+    // Spawn the configured shell in `cwd` (empty cwd → shell default).
+    void spawn_shell(const std::string& cwd);
+
+    // Resolve the directory the shell currently stands in (design §4.2):
+    // OSC 7 URI → /proc/<shell_pid>/cwd → cached → $HOME.
+    std::string resolve_capture_cwd() const;
+    // Restore-side decision: spawn where the captured dir still exists, else
+    // $HOME (design §4.2).
+    static std::string resolve_restore_cwd(const std::string& captured);
 
     std::string shell_;
     std::string cwd_;
+    // Last observed cwd; updated by runtime_capture() (const) so the §4
+    // cached fallback survives repeated capture without a live OSC 7 shell.
+    mutable std::string cached_cwd_;
     std::string title_;
+    long shell_pid_{0};
     VteTerminal* vte_{nullptr};
     Gtk::Widget* widget_{nullptr};
     std::function<void()> on_input_;
     std::function<void(std::string)> on_command_;
     std::string commit_buf_;
+    std::string last_command_;
+    std::optional<remin::core::InterruptedCommand> interrupted_;
 };
 
 } // namespace remin::gui

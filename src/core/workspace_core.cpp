@@ -327,6 +327,47 @@ bool WorkspaceCore::set_pane_ratio(const TabId& tab, const PaneId& pane, double 
     return false;
 }
 
+// -- Per-pane command history (canonical, design §6) --
+
+bool WorkspaceCore::add_command_to_pane(const TabId& tab, const PaneId& pane,
+                                        std::string command) {
+    if (!ws_current_ || command.empty()) return false;
+    for (auto& w : ws_current_->windows) {
+        for (auto& t : w.tabs) {
+            if (t.id != tab) continue;
+            PaneTree* node = find_pane(&t.pane_tree, pane);
+            if (!node || !node->pane()) return false;
+            auto& hist = node->pane()->state.command_history;
+            // Adjacent repeats collapse (pressing Up+Enter re-runs a command).
+            if (!hist.empty() && hist.back() == command) return true;
+            hist.push_back(std::move(command));
+            if (hist.size() > kMaxCommandHistoryPerPane) {
+                using Diff = std::vector<std::string>::difference_type;
+                const Diff drop = static_cast<Diff>(hist.size() - kMaxCommandHistoryPerPane);
+                hist.erase(hist.begin(), hist.begin() + drop);
+            }
+            mark_dirty();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool WorkspaceCore::clear_command_history() {
+    if (!ws_current_) return false;
+    for (auto& w : ws_current_->windows) {
+        for (auto& t : w.tabs) {
+            std::vector<Pane*> panes;
+            t.pane_tree.collect_panes(panes);
+            for (auto* p : panes) {
+                if (p) p->state.command_history.clear();
+            }
+        }
+    }
+    mark_dirty();
+    return true;
+}
+
 // -- Snapshot --
 
 SnapshotId WorkspaceCore::create_snapshot() {

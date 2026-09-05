@@ -268,49 +268,56 @@ void SessionController::set_terminal_colors(const std::string& fg, const std::st
     storage_->store_scrollback(meta_id(kTerminalBgKey), bg);
 }
 
-void SessionController::add_command_history(const std::string& command) {
-    if (!storage_ || command.empty()) return;
-    // Load existing history, append, save back (max 2000 entries)
+bool SessionController::add_command_to_pane(const remin::core::TabId& tab,
+                                            const remin::core::PaneId& pane,
+                                            const std::string& command) {
+    return core_ && core_->add_command_to_pane(tab, pane, command);
+}
+
+void SessionController::migrate_legacy_command_history() {
+    // Design §6.1: the pre-canonical sidebar stored one global, newline-
+    // separated list under `settings:command-history`. Migrate it once into the
+    // first terminal pane's canonical per-pane history, then drop the old key.
+    if (!storage_) return;
     constexpr const char* kHistoryKey = "settings:command-history";
     std::string existing = storage_->load_scrollback(meta_id(kHistoryKey));
-    std::vector<std::string> history;
-    if (!existing.empty()) {
-        // Parse newline-separated history
-        std::istringstream iss(existing);
-        std::string line;
-        while (std::getline(iss, line)) {
-            if (!line.empty()) history.push_back(line);
+    if (existing.empty()) return;
+
+    remin::core::Workspace* ws = core_ ? core_->current_workspace() : nullptr;
+    if (!ws) return;
+    for (auto& w : ws->windows) {
+        for (auto& t : w.tabs) {
+            std::vector<remin::core::Pane*> panes;
+            t.pane_tree.collect_panes(panes);
+            for (auto* p : panes) {
+                if (!p) continue;
+                // Only seed into a pane with no history; dedupe via the core API.
+                if (!p->state.command_history.empty()) continue;
+                std::istringstream iss(existing);
+                std::string line;
+                while (std::getline(iss, line)) {
+                    if (!line.empty()) core_->add_command_to_pane(t.id, p->id, line);
+                }
+                storage_->store_scrollback(meta_id(kHistoryKey), "");
+                return;
+            }
         }
     }
-    // Avoid exact duplicates of the last entry
-    if (history.empty() || history.back() != command) {
-        history.push_back(command);
-    }
-    // Trim to 2000
-    if (history.size() > 2000) {
-        history.erase(history.begin(), history.begin() + (history.size() - 1000));
-    }
-    // Serialize back
-    std::string serialized;
-    for (const auto& h : history) {
-        serialized += h;
-        serialized += '\n';
-    }
-    storage_->store_scrollback(meta_id(kHistoryKey), serialized);
 }
 
 std::vector<std::string> SessionController::get_command_history() const {
     std::vector<std::string> result;
-    if (!storage_) return result;
-    constexpr const char* kHistoryKey = "settings:command-history";
-    std::string existing = storage_->load_scrollback(meta_id(kHistoryKey));
-    if (existing.empty()) return result;
-    std::istringstream iss(existing);
-    std::string line;
-    while (std::getline(iss, line)) {
-        if (!line.empty()) result.push_back(line);
+    if (!core_) return result;
+    const remin::core::Workspace* ws = core_->current_workspace();
+    if (!ws) return result;
+    for (const auto& e : remin::core::aggregate_command_history(*ws)) {
+        result.push_back(e.command);
     }
     return result;
+}
+
+bool SessionController::clear_command_history() {
+    return core_ && core_->clear_command_history();
 }
 
 } // namespace remin::gui

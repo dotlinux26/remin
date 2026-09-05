@@ -105,12 +105,13 @@ TerminalPane* TerminalTabView::focused_pane() {
     return pane(id);
 }
 
-void TerminalTabView::add_history(const std::string& command) {
+void TerminalTabView::add_history(const remin::core::PaneId& pane,
+                                  const std::string& command) {
     if (command.empty()) return;
-    // Persist to storage
-    if (controller_) controller_->add_command_history(command);
-    // Notify MainWindow's global sidebar
-    if (on_history_) on_history_(command);
+    // Persist to the pane's canonical per-pane history (design §6.1).
+    if (controller_) controller_->add_command_to_pane(tab_, pane, command);
+    // Notify MainWindow to re-query the aggregate history sidebar.
+    if (on_history_) on_history_();
 }
 
 // Load and apply saved terminal colors to all panes in this tab
@@ -187,7 +188,9 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
             controller_->autosaver()->note_terminal_activity(pid);
         });
     }
-    raw->set_command_callback([this](std::string cmd) { add_history(std::move(cmd)); });
+    raw->set_command_callback([this, new_pane](std::string cmd) {
+        add_history(new_pane, std::move(cmd));
+    });
     panes_.emplace(new_pane.str(), std::move(pane));
 
     // Apply saved terminal colors to the new pane immediately
@@ -267,7 +270,9 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
                         controller_->autosaver()->note_terminal_activity(cid);
                     });
                 }
-                raw->set_command_callback([this](std::string cmd) { add_history(std::move(cmd)); });
+                raw->set_command_callback([this, pid](std::string cmd) {
+                    add_history(pid, std::move(cmd));
+                });
                 panes_.emplace(pid.str(), std::move(p));
                 it = panes_.find(pid.str());
             }

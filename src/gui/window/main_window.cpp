@@ -613,13 +613,9 @@ void MainWindow::setup_sidebar() {
     const char* home = std::getenv("HOME");
     if (directory_panel_) directory_panel_->set_root(home ? home : "/");
 
-    // Load persisted command history
-    if (controller_) {
-        auto persisted = controller_->get_command_history();
-        for (auto& cmd : persisted) {
-            history_.push_back(std::move(cmd));
-        }
-    }
+    // Migrate the legacy global command-history blob into the canonical
+    // per-pane history (one-time), then show the aggregate sidebar.
+    if (controller_) controller_->migrate_legacy_command_history();
     update_history_sidebar();
     set_sidebar_mode("history");
 }
@@ -651,25 +647,29 @@ void MainWindow::update_history_sidebar() {
     if (!history_list_) return;
     while (auto* child = history_list_->get_first_child()) history_list_->remove(*child);
 
-    auto const add = [this](const std::string& cmd, guint index) {
+    // The sidebar is an aggregate QUERY of the workspace's per-pane canonical
+    // history (design §6.3) — never a second local store.
+    std::vector<std::string> history;
+    if (controller_) history = controller_->get_command_history();
+
+    auto const add = [this](const std::string& cmd) {
         auto* btn = Gtk::make_managed<Gtk::Button>(cmd);
         btn->add_css_class("remin-history-item");
         btn->set_halign(Gtk::Align::FILL);
-        btn->signal_clicked().connect([this, index]() {
-            std::string c = history_[index];
+        btn->signal_clicked().connect([this, cmd]() {
             if (active_tab_ >= 0 && active_tab_ < (int)tabs_.size() &&
                 tabs_[active_tab_]->kind() == TabKind::Terminal) {
                 auto* t = static_cast<TerminalTabView*>(tabs_[active_tab_].get());
-                if (auto* p = t->focused_pane()) p->feed(c);
+                if (auto* p = t->focused_pane()) p->feed(cmd);
             }
         });
         history_list_->append(*btn);
     };
 
-    const auto back = std::min<std::size_t>(history_.size(), 500);
-    const auto start = history_.size() - back;
+    const auto back = std::min<std::size_t>(history.size(), 500);
+    const auto start = history.size() - back;
     for (std::size_t i = 0; i < back; ++i) {
-        add(history_[start + i], static_cast<guint>(start + i));
+        add(history[start + i]);
     }
     if (history_scroller_) {
         auto v = history_scroller_->get_vadjustment();
@@ -678,7 +678,8 @@ void MainWindow::update_history_sidebar() {
 }
 
 void MainWindow::clear_history() {
-    history_.clear();
+    // Persist the clear over the canonical per-pane histories (design §6.3).
+    if (controller_) controller_->clear_command_history();
     update_history_sidebar();
 }
 
@@ -793,10 +794,7 @@ void MainWindow::new_terminal_tab() {
     view->set_open_file_callback([this](const std::filesystem::path& path) {
         open_note_from_path(path);
     });
-    view->set_history_callback([this](const std::string& cmd) {
-        history_.push_back(cmd);
-        // Avoid unbounded growth
-        if (history_.size() > 2000) history_.erase(history_.begin(), history_.begin() + (history_.size() - 1000));
+    view->set_history_callback([this]() {
         update_history_sidebar();
     });
     view->set_close_tab_request_callback([this, view]() {

@@ -117,9 +117,20 @@ public:
     [[nodiscard]] std::optional<ColorProfile> terminal_colors() const;
     void set_terminal_colors(const std::string& fg, const std::string& bg);
 
-    // -- Command history persistence --
-    void add_command_history(const std::string& command);
+    // -- Command history (canonical, per-pane, design §6) --
+    // Route a completed command into the pane's canonical history (core).
+    bool add_command_to_pane(const remin::core::TabId& tab,
+                            const remin::core::PaneId& pane,
+                            const std::string& command);
+    // One-time migration of the legacy global `settings:command-history` blob
+    // into the first terminal pane's canonical history (design §6.1: keep the
+    // old key only to migrate).
+    void migrate_legacy_command_history();
+    // Aggregate view over all panes of the current workspace (provenance kept
+    // in core; this flattens to command text for the sidebar).
     [[nodiscard]] std::vector<std::string> get_command_history() const;
+    // Persist a clear: empty every pane's canonical history.
+    bool clear_command_history();
 
     // -- Snapshots --
     remin::core::SnapshotId create_snapshot();

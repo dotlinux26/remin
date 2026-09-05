@@ -98,6 +98,15 @@ public:
     bool focus_pane(const TabId& tab, const PaneId& pane);
     bool set_pane_ratio(const TabId& tab, const PaneId& pane, double ratio);
 
+    // -- Per-pane command history (canonical) --
+    // Append a completed command to the pane's history. Adjacent repeats are
+    // collapsed and the list is capped (design §6.1). Returns false when the
+    // tab/pane does not exist or the command is empty.
+    bool add_command_to_pane(const TabId& tab, const PaneId& pane, std::string command);
+    // Clear every pane's command history across the open workspace. Persisted
+    // at the next checkpoint (`clear_history()` must survive a restart).
+    bool clear_command_history();
+
     // -- Snapshot --
     SnapshotId create_snapshot();
     bool restore_snapshot(const SnapshotId& snap);

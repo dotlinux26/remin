@@ -56,7 +56,9 @@ public:
     // The currently focused pane (navigable / target of focused actions).
     TerminalPane* focused_pane();
 
-    void add_history(const std::string& command);
+    // Record a completed command for the given pane: routes into the pane's
+    // canonical per-pane history via the controller, then refreshes the sidebar.
+    void add_history(const remin::core::PaneId& pane, const std::string& command);
 
     // Host callback invoked by the pane's right-click "Color Profile…" item.
     // MainWindow wires this to its color profile dialog.
@@ -69,8 +71,10 @@ public:
         on_open_file_ = std::move(cb);
     }
 
-    // Callback for command history — MainWindow wires this to its global sidebar.
-    void set_history_callback(std::function<void(const std::string&)> cb) {
+    // Callback for command history — MainWindow wires this to its sidebar.
+    // No payload: the sidebar is an aggregate query (design §6.3), so the host
+    // re-reads canonical history from the controller on each call.
+    void set_history_callback(std::function<void()> cb) {
         on_history_ = std::move(cb);
     }
 
@@ -107,7 +111,7 @@ private:
     remin::core::PaneId active_pane_;
     std::function<void()> on_color_request_;
     std::function<void(const std::filesystem::path&)> on_open_file_;
-    std::function<void(const std::string&)> on_history_;
+    std::function<void()> on_history_;
 
     // Callback to request closing the entire tab (when last pane is closed)
     std::function<void()> on_close_tab_request_;

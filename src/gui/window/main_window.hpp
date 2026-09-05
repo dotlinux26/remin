@@ -165,7 +165,6 @@ private:
     DirectoryTreePanel* directory_panel_{nullptr};
     bool first_directory_show_{true};  // first Files tab open → scroll to top
     Gtk::Button* sidebar_mode_tabs_[2]{nullptr, nullptr};
-    std::vector<std::string> history_;
 
     // Key controller for accelerators
     Glib::RefPtr<Gtk::EventControllerKey> key_ctrl_;

@@ -258,8 +258,9 @@ VS Code-inspired compact, spacing 4px/8px grid, tnum, border nhẹ, status bar t
 
 ### Core Feature — Workspace Persistence/Recovery Pipeline (current sprint, THE priority)
 Design: `docs/design/workspace-persistence-pipeline.md` (đã gate). Không Window History UI / Ctrl+Shift+H lúc này.
-- [ ] P1 Domain state + migration (TabKind, NoteTabState, UiState + serialization round-trip)
-- [ ] P2 TerminalPane live: capture/restore cwd, cols/rows, per-pane history, interrupted command
+- [x] P1 Domain state + migration (TabKind, NoteTabState, UiState + serialization round-trip)
+- [x] P2 TerminalPane live: `runtime_capture()/runtime_restore()` (cwd §4 OSC7→/proc→cached→$HOME, cols/rows, full scrollback §5.1, Ctrl+C `\x03` detection §6.2), per-pane canonical `command_history` (`WorkspaceCore::add_command_to_pane`, cap 1000) + aggregate sidebar (§6.3, `settings:command-history` migrated once)
+- [ ] P2.5 Fidelity gate (§5.5): VTE live → ANSI/control → capture → new VTE → feed → compare (manual, checklist)
 - [ ] P3 Atomic checkpoint: SqliteDb txn RAII, checkpoint(reason), autosave→checkpoint, shutdown flush
 - [ ] P4 Restore workspace đầy đủ (terminals, notes, dir tree, geometry, focus)
 - [ ] P5 Golden acceptance test + report (§16)

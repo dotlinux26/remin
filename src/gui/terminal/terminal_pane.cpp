@@ -3,7 +3,11 @@
 #include <vte/vte.h>
 #include <vte/vteregex.h>
 #include <glibmm.h>
+
+#include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <cstdlib>
 
 namespace remin::gui {
 
@@ -22,18 +26,11 @@ TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd)
     if (cwd_.empty()) {
         if (const char* home = std::getenv("HOME")) cwd_ = home;
     }
+    cached_cwd_ = cwd_;
 
-    // Spawn the shell into the terminal's PTY.
-    const char* shell_argv[] = { shell_.c_str(), nullptr };
-    char** envp = nullptr;
-    vte_terminal_spawn_async(
-        vte_,
-        VTE_PTY_DEFAULT,
-        cwd_.empty() ? nullptr : cwd_.c_str(),
-        const_cast<char**>(shell_argv),
-        envp,
-        G_SPAWN_SEARCH_PATH,
-        nullptr, nullptr, nullptr, -1, nullptr, nullptr, nullptr);
+    // Spawn the shell into the terminal's PTY (records the shell PID so the
+    // §4 /proc/<pid>/cwd cwd fallback can read it).
+    spawn_shell(cwd_);
 
     // Terminal profile: transparent background, semantic colors come from CSS.
     vte_terminal_set_scrollback_lines(vte_, 10000);
@@ -85,15 +82,102 @@ Gtk::Widget& TerminalPane::widget() {
     return *widget_;
 }
 
+void TerminalPane::spawn_shell(const std::string& cwd) {
+    if (!vte_) return;
+    const char* shell_argv[] = { shell_.c_str(), nullptr };
+    char** envp = nullptr;
+    vte_terminal_spawn_async(
+        vte_,
+        VTE_PTY_DEFAULT,
+        cwd.empty() ? nullptr : cwd.c_str(),
+        const_cast<char**>(shell_argv),
+        envp,
+        G_SPAWN_SEARCH_PATH,
+        nullptr, nullptr, nullptr, -1, nullptr,
+        &TerminalPane::on_spawned_trampoline, this);
+    if (!cwd.empty()) cwd_ = cwd;
+}
+
+void TerminalPane::on_spawned_trampoline(VteTerminal*, GPid pid,
+                                         GError*, gpointer user_data) {
+    auto* self = static_cast<TerminalPane*>(user_data);
+    self->shell_pid_ = static_cast<long>(pid);
+}
+
+std::string TerminalPane::resolve_capture_cwd() const {
+    // 1. OSC 7 — the shell's own report of $PWD (URI form).
+    const char* uri = vte_ ? vte_terminal_get_current_directory_uri(vte_) : nullptr;
+    const std::string osc7 = uri ? remin::core::terminal::osc7_file_uri_to_path(uri) : "";
+    // 2. /proc/<shell_pid>/cwd — only the shell's own cwd, never a child's.
+    const std::string proc = remin::core::terminal::read_proc_cwd(shell_pid_);
+    // 3+4. cached value, then $HOME.
+    const char* home = std::getenv("HOME");
+    return remin::core::terminal::pick_capture_cwd(osc7, proc, cached_cwd_,
+                                                   home ? home : "");
+}
+
+std::string TerminalPane::resolve_restore_cwd(const std::string& captured) {
+    const char* home = std::getenv("HOME");
+    return remin::core::terminal::pick_restore_cwd(captured, home ? home : "");
+}
+
+remin::core::TerminalRuntimeSnapshot TerminalPane::runtime_capture() const {
+    remin::core::TerminalRuntimeSnapshot snap;
+    if (!vte_) return snap;
+    snap.cols = static_cast<std::uint32_t>(vte_terminal_get_column_count(vte_));
+    snap.rows = static_cast<std::uint32_t>(vte_terminal_get_row_count(vte_));
+    snap.shell = shell_;
+    snap.scrollback = capture_scrollback();
+    snap.cwd = resolve_capture_cwd();
+    if (!snap.cwd.empty()) cached_cwd_ = snap.cwd;
+    snap.interrupted_command = interrupted_;
+    return snap;
+}
+
+void TerminalPane::runtime_restore(const remin::core::PaneState& state) {
+    if (!vte_) return;
+
+    // Empty VTE → first build is a fresh shell (nothing to restore).
+    if (state.scrollback.empty() && state.cols == 0 && state.rows == 0 &&
+        state.cwd.empty() && state.shell.empty()) {
+        return;
+    }
+
+    // 1. Grid size first (design §5.2): the captured scrollback wraps to the
+    //    captured dimensions.
+    if (state.cols > 0 && state.rows > 0) {
+        vte_terminal_set_size(vte_, static_cast<glong>(state.cols),
+                              static_cast<glong>(state.rows));
+    }
+
+    // 2. Feed-before-spawn: rebuild the scrollback from the raw text buffer so
+    //    the shell prompt lands below exactly the restored content.
+    if (!state.scrollback.empty()) {
+        vte_terminal_feed(vte_, state.scrollback.data(),
+                          static_cast<gssize>(state.scrollback.size()));
+    }
+
+    // 3. Spawn a fresh shell (env inherits the default environment, §3.2) in
+    //    the captured cwd if it still exists.
+    if (!state.shell.empty()) shell_ = state.shell;
+    cached_cwd_ = state.cwd;
+    spawn_shell(resolve_restore_cwd(state.cwd));
+}
+
 void TerminalPane::feed(std::string_view data) {
     if (vte_) {
         vte_terminal_feed(vte_, data.data(), static_cast<gssize>(data.size()));
     }
 }
 
-std::string TerminalPane::capture_scrollback() {
+std::string TerminalPane::capture_scrollback() const {
     if (!vte_) return {};
-    char* text = vte_terminal_get_text_format(vte_, VTE_FORMAT_TEXT);
+    // Full range: negative start covers the entire scrollback buffer, end is
+    // just past the visible region (design §5.1).
+    const glong rows = vte_terminal_get_row_count(vte_);
+    gsize len = 0;
+    char* text = vte_terminal_get_text_range_format(vte_, VTE_FORMAT_TEXT,
+                                                    -(1 << 30), 0, rows, 0, &len);
     std::string out = text ? text : "";
     if (text) g_free(text);
     return out;
@@ -162,21 +246,35 @@ void TerminalPane::clear_scrollback() {
 void TerminalPane::on_commit_trampoline(GtkWidget*, const char* text, guint size, gpointer user_data) {
     auto* self = static_cast<TerminalPane*>(user_data);
     if (self->on_input_) self->on_input_();
+    if (!text || size == 0) return;
+
+    // Interrupted command (design §6.2): a literal \x03 in a commit right after
+    // a completed line is evidence the user pressed Ctrl+C on that command.
+    // Only here do we ever claim source = CtrlC — never guessed otherwise.
+    const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+    if (std::memchr(text, 0x03, static_cast<std::size_t>(size)) &&
+        !self->last_command_.empty()) {
+        self->interrupted_ = remin::core::InterruptedCommand{
+            self->last_command_, now_us, remin::core::InterruptedCommand::Source::CtrlC};
+    }
 
     // Accumulate committed text and emit each completed line as a command.
-    if (self->on_command_ && text && size > 0) {
-        self->commit_buf_.append(text, size);
-        std::size_t pos = 0;
-        while ((pos = self->commit_buf_.find('\n')) != std::string::npos) {
-            std::string line = self->commit_buf_.substr(0, pos);
-            self->commit_buf_.erase(0, pos + 1);
-            // Trim surrounding whitespace.
-            auto b = line.find_first_not_of(" \t\r");
-            auto e = line.find_last_not_of(" \t\r");
-            if (b != std::string::npos && e != std::string::npos) {
-                line = line.substr(b, e - b + 1);
-            }
-            if (!line.empty()) self->on_command_(line);
+    self->commit_buf_.append(text, size);
+    std::size_t pos = 0;
+    while ((pos = self->commit_buf_.find('\n')) != std::string::npos) {
+        std::string line = self->commit_buf_.substr(0, pos);
+        self->commit_buf_.erase(0, pos + 1);
+        // Trim surrounding whitespace.
+        auto b = line.find_first_not_of(" \t\r");
+        auto e = line.find_last_not_of(" \t\r");
+        if (b != std::string::npos && e != std::string::npos) {
+            line = line.substr(b, e - b + 1);
+        }
+        if (!line.empty()) {
+            self->last_command_ = line;
+            if (self->on_command_) self->on_command_(line);
         }
     }
 }

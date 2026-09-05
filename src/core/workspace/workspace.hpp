@@ -61,4 +61,33 @@ struct Workspace {
     }
 };
 
+// One command-history entry with provenance: which window → tab → pane ran it.
+// The History sidebar is an aggregate query over the whole workspace's panes
+// (design §6.3) — a view, not a second store.
+struct HistoryEntry {
+    WindowId window;
+    TabId tab;
+    PaneId pane;
+    std::string command;
+};
+
+// Aggregate every pane's canonical `command_history` in window → tab → pane →
+// command order. Terminal-only (note tabs carry no pane tree history).
+[[nodiscard]] inline std::vector<HistoryEntry> aggregate_command_history(const Workspace& ws) {
+    std::vector<HistoryEntry> out;
+    for (const auto& w : ws.windows) {
+        for (const auto& t : w.tabs) {
+            std::vector<const Pane*> panes;
+            t.pane_tree.collect_panes(panes);
+            for (const auto* p : panes) {
+                if (!p) continue;
+                for (const auto& cmd : p->state.command_history) {
+                    out.push_back({w.id, t.id, p->id, cmd});
+                }
+            }
+        }
+    }
+    return out;
+}
+
 } // namespace remin::core

@@ -8,6 +8,8 @@ set(REMIN_TEST_SOURCES
   unit/autosave_test.cpp
   unit/workspace_lock_test.cpp
   unit/persistence_policy_test.cpp
+  unit/history_test.cpp
+  unit/terminal_cwd_test.cpp
 )
 
 foreach(test_src ${REMIN_TEST_SOURCES})
