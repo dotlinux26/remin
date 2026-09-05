@@ -355,7 +355,52 @@ window.remin-window headerbar button.remin-toolbar-btn:hover {
 /* Native window controls (min/max/close): NO background, NO border in ANY state
    (both themes identical — completely transparent, let GTK native rendering handle it) */
 /* Window controls (min/max/close): NO background, NO border, NO shadow in ANY state.
-   Using GTK-compatible CSS (no !important). */
+   Targeting GTK's internal windowcontrols selectors to override Adwaita theme. */
+windowcontrols.end button.minimize,
+windowcontrols.end button.maximize,
+windowcontrols.end button.close {
+  background-color: transparent;
+  background-image: none;
+  border-style: none;
+  border-top-style: none;
+  border-bottom-style: none;
+  border-left-style: none;
+  border-right-style: none;
+  border-width: 0px;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  outline-style: none;
+  outline-width: 0;
+  outline-color: transparent;
+  padding: 0;
+  margin: 0;
+  min-width: 28px;
+  min-height: 28px;
+}
+
+windowcontrols.end button.minimize:hover,
+windowcontrols.end button.maximize:hover,
+windowcontrols.end button.close:hover,
+windowcontrols.end button.minimize:focus,
+windowcontrols.end button.maximize:focus,
+windowcontrols.end button.close:focus,
+windowcontrols.end button.minimize:active,
+windowcontrols.end button.maximize:active,
+windowcontrols.end button.close:active {
+  background-color: transparent;
+  background-image: none;
+  border-style: none;
+  border-top-style: none;
+  border-bottom-style: none;
+  border-left-style: none;
+  border-right-style: none;
+  border-width: 0px;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* Also target GTK's internal titlebutton class for compatibility */
 window.remin-window headerbar button.titlebutton,
 window.remin-window headerbar titlebutton,
 window.remin-window headerbar .window-controls,
@@ -365,7 +410,11 @@ window.remin-window headerbar .window-control * {
   background-color: transparent;
   background-image: none;
   border-style: none;
-  border-width: 0;
+  border-top-style: none;
+  border-bottom-style: none;
+  border-left-style: none;
+  border-right-style: none;
+  border-width: 0px;
   border-color: transparent;
   border-radius: 0;
   box-shadow: none;
@@ -397,7 +446,11 @@ window.remin-window headerbar .window-control *:active {
   background-color: transparent;
   background-image: none;
   border-style: none;
-  border-width: 0;
+  border-top-style: none;
+  border-bottom-style: none;
+  border-left-style: none;
+  border-right-style: none;
+  border-width: 0px;
   border-color: transparent;
   box-shadow: none;
   outline-style: none;
