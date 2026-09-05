@@ -10,6 +10,18 @@
 
 namespace remin::core {
 
+// Why a running command was interrupted. V1 only ever records CtrlC when a
+// literal \x03 commit was observed right after the command — every other case
+// is ProcessExit (the process exited while we had a command span) or Unknown
+// (we cannot tell). Never guess Ctrl+C for e.g. SIGTERM/app crash/closed pane.
+struct InterruptedCommand {
+    enum class Source { CtrlC, ProcessExit, Unknown };
+
+    std::string command;
+    std::int64_t timestamp_us{0};  // when the interruption was observed
+    Source source{Source::Unknown};
+};
+
 // Terminal state for a pane: what scrollback/command state we can re-create
 // on restore. This is a Remin model, NOT a VTE object snapshot.
 struct PaneState {
@@ -17,10 +29,10 @@ struct PaneState {
     std::string shell;
     std::uint32_t cols{0};
     std::uint32_t rows{0};
-    std::vector<std::string> environment;      // filtered, no secrets
+    std::vector<std::string> environment;      // V1: NOT persisted (see design §3.2)
     std::vector<std::string> command_history;  // per-pane history
     std::string scrollback;                    // captured buffer (text)
-    std::optional<std::string> interrupted_command; // process that was running
+    std::optional<InterruptedCommand> interrupted_command;
 };
 
 // A leaf pane within a tab. Holds the terminal state for that pane.

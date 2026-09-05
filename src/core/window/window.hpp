@@ -9,11 +9,32 @@
 
 namespace remin::core {
 
-// A tab within a window: a title and a tree of panes.
+// Semantic type of a tab, first-class in the core domain. GUI TabView maps
+// 1:1 from here (not the other way). New kinds (Log, Diff, …) extend this enum.
+enum class TabKind { Terminal, Note };
+
+// Full note-tab state so a note surface can be rebuilt from a checkpoint.
+struct NoteTabState {
+    std::string document_id;
+    std::string path;           // on-disk path ("" = temp draft)
+    std::string title;
+    std::string content;
+    bool modified{false};
+    int cursor{0};              // buffer offset
+    double scroll{0.0};         // relative scroll 0..1 (best-effort)
+    bool preview_enabled{false};
+    double split_ratio{0.5};
+    bool sync_scroll{false};
+};
+
+// A tab within a window: metadata + a tree of panes (or note state).
 struct Tab {
     TabId id;
     std::string title;
-    PaneTree pane_tree;
+    TabKind kind{TabKind::Terminal};
+    std::optional<NoteTabState> note_state;  // only meaningful for kind == Note
+
+    PaneTree pane_tree;  // still populated for Terminal tabs
 
     Tab() = default;
     // Helper for tests / construction.
