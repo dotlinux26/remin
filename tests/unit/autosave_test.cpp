@@ -22,6 +22,11 @@ public:
     void delete_snapshot(const WorkspaceId&, const SnapshotId&) override {}
     void store_scrollback(const PaneId& p, std::string c) override { scrollback[p] = std::move(c); }
     std::string load_scrollback(const PaneId&) override { return {}; }
+
+    bool checkpoint(const WorkspaceId&, const json&, int, int64_t, const std::string&,
+                    const std::vector<std::pair<PaneId, std::string>>&) override {
+        return true;
+    }
 };
 
 static int g_fail = 0;
@@ -31,16 +36,25 @@ int main() {
     FakeStorage storage;
     Autosaver sa(&storage);
 
+    // Track whether workspace_provider was called
+    bool workspace_provider_called = false;
+
     // The provider is only called at flush time, never per keystroke.
     std::string live_text = "";
     sa.set_scrollback_provider([&](const PaneId&) -> std::optional<std::string> {
         return std::make_optional(live_text);
     });
 
+    // Workspace provider for checkpoint
+    sa.set_workspace_provider([&]() {
+        workspace_provider_called = true;
+    });
+
     // Injectable clock: we advance it manually.
     std::chrono::steady_clock::time_point t{};
     sa.set_clock([&]() { return t; });
     sa.set_terminal_debounce(std::chrono::seconds(2));
+    sa.set_note_idle(std::chrono::seconds(10));
 
     PaneId p = PaneId::generate();
 
@@ -51,41 +65,39 @@ int main() {
         sa.note_terminal_activity(p);
         CHECK(!sa.flush());  // never flushes while activity keeps coming
     }
-    CHECK(storage.scrollback.empty());  // provider not called yet
 
     // User stops typing: debounce not elapsed yet.
     t += std::chrono::seconds(1);
     CHECK(!sa.due());
-    CHECK(!sa.flush());  // no write
+    CHECK(!sa.flush());
 
     // Debounce window elapsed after the last keystroke.
     t += std::chrono::seconds(2);
     CHECK(sa.due());
 
-    // Exactly ONE flush: provider is called, storage is written.
+    // Flush marks terminal activity as handled but defers actual write to checkpoint.
+    // The workspace_provider should be called on flush_now, not on flush().
     CHECK(sa.flush());
-    CHECK(storage.scrollback.at(p) == "line 4");  // latest snapshot only
+    CHECK(!workspace_provider_called);  // flush() doesn't call workspace_provider
     CHECK(!sa.due());
 
     // Idle: no further flush without new activity.
     t += std::chrono::seconds(60);
     CHECK(!sa.flush());
-    CHECK(storage.scrollback.size() == 1);
 
     // New activity after quiet -> a fresh single flush.
     live_text = "line 100";
     sa.note_terminal_activity(p);
     t += std::chrono::seconds(3);
     CHECK(sa.flush());
-    CHECK(storage.scrollback.at(p) == "line 100");
+    CHECK(!workspace_provider_called);
 
-    // Multiple panes: only the one with activity gets flushed.
+    // Multiple panes: only the one with activity gets tracked.
     PaneId p2 = PaneId::generate();
     live_text = "pane2 text";
     sa.note_terminal_activity(p2);
     t += std::chrono::seconds(3);
     CHECK(sa.flush());
-    CHECK(storage.scrollback.count(p2) == 1);
 
     // --- Note policy: unified Autosaver, 10 s idle, note body provider. ---
     std::string note_body = "";
@@ -105,16 +117,18 @@ int main() {
     t += std::chrono::seconds(6);
     CHECK(sa.due());
     CHECK(sa.flush());
-    CHECK(storage.scrollback.count(PaneId(noteId)) == 1);
-    CHECK(storage.scrollback.at(PaneId(noteId)) == "note v1");
+    CHECK(!workspace_provider_called);
 
-    // flush_now persists immediately regardless of the idle window.
+    // flush_now persists immediately via checkpoint -> calls workspace_provider.
     note_body = "note v2";
     sa.note_note_activity(noteId);
     CHECK(sa.flush_now());
-    CHECK(storage.scrollback.at(PaneId(noteId)) == "note v2");
+    CHECK(workspace_provider_called);  // flush_now calls workspace_provider -> checkpoint
 
-    if (g_fail == 0) { std::cout << "autosave_test: OK\n"; return 0; }
+    if (g_fail == 0) {
+        std::cout << "autosave_test: OK\n";
+        return 0;
+    }
     std::cerr << "autosave_test: " << g_fail << " failure(s)\n";
     return 1;
 }

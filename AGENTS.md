@@ -261,7 +261,7 @@ Design: `docs/design/workspace-persistence-pipeline.md` (đã gate). Không Wind
 - [x] P1 Domain state + migration (TabKind, NoteTabState, UiState + serialization round-trip)
 - [x] P2 TerminalPane live: `runtime_capture()/runtime_restore()` (cwd §4 OSC7→/proc→cached→$HOME, cols/rows, full scrollback §5.1, Ctrl+C `\x03` detection §6.2), per-pane canonical `command_history` (`WorkspaceCore::add_command_to_pane`, cap 1000) + aggregate sidebar (§6.3, `settings:command-history` migrated once)
 - [x] P2.5 Fidelity gate (§5.5): VTE live → ANSI/control → capture → new VTE → feed → compare (textual scrollback EXACT round-trip, semantic content preserved, color/format NOT preserved — recorded)
-- [ ] P3 Atomic checkpoint: SqliteDb txn RAII, checkpoint(reason), autosave→checkpoint, shutdown flush
+- [x] P3 Atomic checkpoint: SqliteDb txn RAII (BEGIN IMMEDIATE/COMMIT/ROLLBACK), `checkpoint(reason)` writes workspace + scrollbacks + snapshot atomically, generation + schema_version + reason persisted, autosave → checkpoint, shutdown flush via `signal_close_request()`
 - [ ] P4 Restore workspace đầy đủ (terminals, notes, dir tree, geometry, focus)
 - [ ] P5 Golden acceptance test + report (§16)
 

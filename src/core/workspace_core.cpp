@@ -368,6 +368,74 @@ bool WorkspaceCore::clear_command_history() {
     return true;
 }
 
+// -- Per-pane runtime state ingestion --
+
+void WorkspaceCore::apply_runtime_state(const TabId& tab, const PaneId& pane,
+                                       const remin::core::TerminalRuntimeSnapshot& snap) {
+    if (!ws_current_) return;
+    for (auto& w : ws_current_->windows) {
+        for (auto& t : w.tabs) {
+            if (t.id != tab) continue;
+            PaneTree* node = find_pane(&t.pane_tree, pane);
+            if (!node || !node->pane()) return;
+            auto& st = node->pane()->state;
+            st.cwd = snap.cwd;
+            st.shell = snap.shell;
+            st.cols = snap.cols;
+            st.rows = snap.rows;
+            st.scrollback = snap.scrollback;
+            st.interrupted_command = snap.interrupted_command;
+            // command_history is already canonical (stored in core via add_command_to_pane)
+            // but the runtime snapshot may carry a fresh copy; overlay it:
+            if (!snap.command_history.empty()) st.command_history = snap.command_history;
+            mark_dirty();
+            return;
+        }
+    }
+}
+
+// -- Checkpoint (atomic persistence) --
+
+bool WorkspaceCore::checkpoint(const std::string& reason) {
+    if (!ws_current_) return false;
+    if (!storage_) return false;
+
+    // Update workspace metadata
+    ws_current_->last_saved_at = std::chrono::system_clock::now();
+    ws_current_->generation++;
+
+    // Serialize workspace to JSON
+    remin::core::json ws_json;
+    to_json(ws_json, *ws_current_);
+
+    // Collect all pane scrollbacks from current workspace
+    std::vector<std::pair<PaneId, std::string>> scrollbacks;
+    for (const auto& w : ws_current_->windows) {
+        for (const auto& t : w.tabs) {
+            std::vector<const Pane*> panes;
+            t.pane_tree.collect_panes(panes);
+            for (const auto* p : panes) {
+                if (p && !p->state.scrollback.empty()) {
+                    scrollbacks.emplace_back(p->id, p->state.scrollback);
+                }
+            }
+        }
+    }
+
+    // Single atomic write via Storage::checkpoint
+    const int schema_version = ws_current_->schema_version;
+    const int64_t generation = ws_current_->generation;
+    bool ok = storage_->checkpoint(ws_current_->id, ws_json, schema_version,
+                                   generation, reason, scrollbacks);
+    if (ok) {
+        ws_dirty_ = false;
+        // Add snapshot id to workspace's snapshot list
+        // Note: snapshot id was generated inside storage->checkpoint; we don't have it back.
+        // For now, we don't track it in workspace; can be extended later.
+    }
+    return ok;
+}
+
 // -- Snapshot --
 
 SnapshotId WorkspaceCore::create_snapshot() {

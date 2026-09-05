@@ -36,6 +36,17 @@ public:
     // Scrollback blobs (large binary/text, stored separately from metadata)
     virtual void store_scrollback(const PaneId& pane, std::string content) = 0;
     virtual std::string load_scrollback(const PaneId& pane) = 0;
+
+    // Atomic checkpoint: writes workspace JSON, all scrollback blobs, and a
+    // snapshot row in a single transaction. Returns true on success.
+    // `generation` is the new generation number (monotonically increasing).
+    // `reason` is one of: "recovery", "autosave", "window_history", "manual".
+    virtual bool checkpoint(const WorkspaceId& ws_id,
+                           const json& workspace_state,
+                           int schema_version,
+                           int64_t generation,
+                           const std::string& reason,
+                           const std::vector<std::pair<PaneId, std::string>>& scrollbacks) = 0;
 };
 
 // Callback sink for events emitted by WorkspaceCore. GUI/CLI/IPC subscribe.
@@ -110,6 +121,18 @@ public:
     // -- Snapshot --
     SnapshotId create_snapshot();
     bool restore_snapshot(const SnapshotId& snap);
+
+    // Atomic checkpoint: captures runtime state, validates, writes workspace +
+    // scrollbacks + snapshot in a single transaction, increments generation.
+    // `reason` is one of: "recovery", "autosave", "window_history", "manual".
+    // Returns false if no workspace is open or transaction fails.
+    bool checkpoint(const std::string& reason);
+
+    // Ingest runtime pane state from the GUI layer (scrollback, cwd, cols/rows,
+    // interrupted_command) into the canonical PaneState before checkpoint.
+    // Called by SessionController via WorkspaceSnapshotBuilder.
+    void apply_runtime_state(const TabId& tab, const PaneId& pane,
+                            const remin::core::TerminalRuntimeSnapshot& snap);
 
     // Mark state dirty (used by autosave scheduler).
     void mark_dirty();

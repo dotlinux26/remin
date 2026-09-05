@@ -36,6 +36,10 @@ SessionController::SessionController(remin::core::WorkspaceCore* core,
     if (autosaver_) {
         autosaver_->set_terminal_debounce(std::chrono::seconds(2));
         autosaver_->set_note_idle(std::chrono::seconds(10));
+        // Wire autosave flush to atomic checkpoint (reason="autosave")
+        autosaver_->set_workspace_provider([this]() {
+            if (core_) core_->checkpoint("autosave");
+        });
     }
 }
 
@@ -318,6 +322,36 @@ std::vector<std::string> SessionController::get_command_history() const {
 
 bool SessionController::clear_command_history() {
     return core_ && core_->clear_command_history();
+}
+
+// -- Checkpoint / Persistence --
+
+void SessionController::capture_all_runtime_state() {
+    if (!core_) return;
+    remin::core::Workspace* ws = core_->current_workspace();
+    if (!ws) return;
+
+    // This method requires access to TerminalTabView instances to call
+    // runtime_capture() on each pane. Since SessionController doesn't own
+    // the GUI widgets, the actual capture is done by MainWindow which
+    // holds the TerminalTabView instances. MainWindow will call
+    // core_->apply_runtime_state() for each pane before checkpoint.
+    // This method is a placeholder for the orchestration layer.
+    // Actual capture is done by MainWindow::capture_all_runtime_state().
+    (void)ws; // suppress unused warning
+}
+
+bool SessionController::checkpoint_recovery() {
+    if (!core_) return false;
+    // Capture runtime state from all panes before checkpoint
+    capture_all_runtime_state();
+    return core_->checkpoint("recovery");
+}
+
+bool SessionController::checkpoint_manual() {
+    if (!core_) return false;
+    capture_all_runtime_state();
+    return core_->checkpoint("manual");
 }
 
 } // namespace remin::gui

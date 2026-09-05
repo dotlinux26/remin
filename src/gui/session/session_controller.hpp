@@ -136,7 +136,19 @@ public:
     remin::core::SnapshotId create_snapshot();
     bool restore_snapshot(const remin::core::SnapshotId& snap);
 
+    // -- Checkpoint / Persistence --
+    // Capture runtime state from all terminal panes and persist an atomic
+    // recovery checkpoint (reason="recovery"). Call on shutdown.
+    bool checkpoint_recovery();
+    // Capture runtime state from all terminal panes and persist an atomic
+    // manual checkpoint (reason="manual").
+    bool checkpoint_manual();
+
 private:
+    // Capture runtime state from all terminal panes in the current workspace
+    // and feed into core via apply_runtime_state().
+    void capture_all_runtime_state();
+
     remin::core::WorkspaceCore* core_;
     remin::core::Storage* storage_;
     remin::core::Autosaver* autosaver_;

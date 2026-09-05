@@ -97,6 +97,10 @@ private:
 
     void restore_workspace();
 
+    // Capture runtime state (scrollback, cwd, etc.) from all terminal panes
+    // and feed into core via apply_runtime_state(). Call before checkpoint.
+    void capture_all_runtime_state();
+
     SessionController* controller_;
     remin::core::Autosaver* autosaver_;
     remin::core::WorkspaceCore* core_;

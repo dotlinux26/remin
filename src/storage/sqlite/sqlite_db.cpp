@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS snapshots (
     revision INTEGER NOT NULL,
     size_bytes INTEGER NOT NULL DEFAULT 0,
     state_json TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    generation INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT 'manual',
     PRIMARY KEY (workspace_id, id)
 ) WITHOUT ROWID;
 
@@ -31,7 +34,15 @@ CREATE TABLE IF NOT EXISTS scrollbacks (
     updated_at TEXT NOT NULL
 );
 )SQL";
-}
+
+// Migration: add schema_version, generation, reason to snapshots if missing.
+constexpr const char* kMigrations[] = {
+    "ALTER TABLE snapshots ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;",
+    "ALTER TABLE snapshots ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;",
+    "ALTER TABLE snapshots ADD COLUMN reason TEXT NOT NULL DEFAULT 'manual';",
+    nullptr
+};
+} // namespace
 
 SqliteDb::SqliteDb(std::string path) : path_(std::move(path)) {}
 
@@ -55,6 +66,12 @@ bool SqliteDb::initialize() {
         err_ = errmsg ? errmsg : "schema error";
         if (errmsg) sqlite3_free(errmsg);
         return false;
+    }
+    // Run migrations idempotently (ignore "duplicate column" errors).
+    for (int i = 0; kMigrations[i]; ++i) {
+        char* mer = nullptr;
+        sqlite3_exec(db_, kMigrations[i], nullptr, nullptr, &mer);
+        if (mer) sqlite3_free(mer);
     }
     return true;
 }

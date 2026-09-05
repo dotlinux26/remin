@@ -126,6 +126,15 @@ MainWindow::MainWindow(SessionController* controller,
     // closed; the toggle icon must match the actual (open/closed) state.
     apply_initial_sidebar_state();
 
+    // Connect shutdown checkpoint: capture runtime state + atomic recovery checkpoint
+    // when the window is about to close (X button, Alt+F4, etc.).
+    signal_close_request().connect(
+        [this]() -> bool {
+            if (controller_) controller_->checkpoint_recovery();
+            return false; // allow the window to close
+        },
+        false);
+
     // Connect tab switching signal via notify on visible-child-name property
     content_stack_->property_visible_child_name().signal_changed().connect(
         [this]() {
@@ -146,9 +155,9 @@ MainWindow::MainWindow(SessionController* controller,
     update_header();
     update_tab_bar();
     update_status_bar();
-}
+    }
 
-MainWindow::~MainWindow() = default;
+    MainWindow::~MainWindow() = default;
 
 void MainWindow::setup_header() {
     header_ = Gtk::make_managed<Gtk::HeaderBar>();
@@ -564,7 +573,22 @@ void MainWindow::restore_workspace() {
     update_status_bar();
 }
 
-void MainWindow::setup_sidebar() {
+// Capture runtime state (scrollback, cwd, cols/rows, interrupted_command)
+    // from all terminal panes and feed into core via apply_runtime_state().
+    // Call before any checkpoint (autosave, recovery, manual).
+    void MainWindow::capture_all_runtime_state() {
+        if (!core_) return;
+        for (auto* term_tab : term_tabs_) {
+            const remin::core::TabId tab_id = term_tab->tab_id();
+            for (const auto& [pane_id_str, pane] : term_tab->panes()) {
+                remin::core::PaneId pane_id(pane_id_str);
+                auto snap = pane->runtime_capture();
+                core_->apply_runtime_state(tab_id, pane_id, snap);
+            }
+        }
+    }
+
+    void MainWindow::setup_sidebar() {
     // Shared sidebar mode switcher — History | Files, always both visible so
     // switching modes never "hides" the other tab.
     auto* tab_bar = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);

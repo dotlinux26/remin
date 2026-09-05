@@ -56,6 +56,13 @@ public:
     // The currently focused pane (navigable / target of focused actions).
     TerminalPane* focused_pane();
 
+    // Const access to panes map for runtime capture iteration.
+    const std::map<std::string, std::unique_ptr<TerminalPane>>& panes() const noexcept { return panes_; }
+
+    // Access the tab and window IDs for checkpoint/runtime capture.
+    [[nodiscard]] const remin::core::TabId& tab_id() const noexcept { return tab_; }
+    [[nodiscard]] const remin::core::WindowId& window_id() const noexcept { return window_; }
+
     // Record a completed command for the given pane: routes into the pane's
     // canonical per-pane history via the controller, then refreshes the sidebar.
     void add_history(const remin::core::PaneId& pane, const std::string& command);

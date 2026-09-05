@@ -22,6 +22,134 @@ SqliteStorage::SqliteStorage(std::string db_path)
 
 SqliteStorage::~SqliteStorage() = default;
 
+bool SqliteStorage::checkpoint(const remin::core::WorkspaceId& ws_id,
+                               const remin::core::json& workspace_state,
+                               int schema_version,
+                               int64_t generation,
+                               const std::string& reason,
+                               const std::vector<std::pair<remin::core::PaneId, std::string>>& scrollbacks) {
+    if (!ok_) return false;
+
+    SqliteDb::Transaction tx = db_->begin_transaction();
+    if (!tx.ok()) {
+        err_ = db_->error_message();
+        return false;
+    }
+
+    // 1. Write workspace JSON
+    const auto j = workspace_state.dump();
+    sqlite3_stmt* stmt = nullptr;
+    const char* ws_sql = R"SQL(
+        INSERT INTO workspaces (id, name, working_directory, created_at, last_saved_at, json)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            working_directory = excluded.working_directory,
+            last_saved_at = excluded.last_saved_at,
+            json = excluded.json;
+    )SQL";
+    if (sqlite3_prepare_v2(db_->raw(), ws_sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        err_ = sqlite3_errmsg(db_->raw());
+        tx.rollback();
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    const char* name = workspace_state.value("name", "").c_str();
+    sqlite3_bind_text(stmt, 2, name, -1, SQLITE_TRANSIENT);
+    const char* wd = workspace_state.value("working_directory", "").c_str();
+    sqlite3_bind_text(stmt, 3, wd, -1, SQLITE_TRANSIENT);
+    const char* created = workspace_state.value("created_at", "").c_str();
+    sqlite3_bind_text(stmt, 4, created, -1, SQLITE_TRANSIENT);
+    const auto la = now_iso();
+    sqlite3_bind_text(stmt, 5, la.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 6, j.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        err_ = sqlite3_errmsg(db_->raw());
+        sqlite3_finalize(stmt);
+        tx.rollback();
+        return false;
+    }
+    sqlite3_finalize(stmt);
+
+    // 2. Write all scrollbacks
+    for (const auto& [pane, content] : scrollbacks) {
+        stmt = nullptr;
+        const char* sb_sql = R"SQL(
+            INSERT INTO scrollbacks (pane_id, content, updated_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(pane_id) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at;
+        )SQL";
+        if (sqlite3_prepare_v2(db_->raw(), sb_sql, -1, &stmt, nullptr) != SQLITE_OK) {
+            err_ = sqlite3_errmsg(db_->raw());
+            tx.rollback();
+            return false;
+        }
+        sqlite3_bind_text(stmt, 1, pane.str().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, content.c_str(), -1, SQLITE_TRANSIENT);
+        const auto ts = now_iso();
+        sqlite3_bind_text(stmt, 3, ts.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            err_ = sqlite3_errmsg(db_->raw());
+            sqlite3_finalize(stmt);
+            tx.rollback();
+            return false;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // 3. Create snapshot row
+    remin::core::SnapshotId snap_id = remin::core::SnapshotId::generate();
+    const auto snap_ts = now_iso();
+    const auto snap_state = workspace_state.dump();
+    const auto snap_size = static_cast<sqlite3_int64>(snap_state.size());
+    stmt = nullptr;
+    const char* snap_sql = R"SQL(
+        INSERT INTO snapshots (id, workspace_id, timestamp, revision, size_bytes, state_json, schema_version, generation, reason)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);
+    )SQL";
+    if (sqlite3_prepare_v2(db_->raw(), snap_sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        err_ = sqlite3_errmsg(db_->raw());
+        tx.rollback();
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, snap_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, snap_ts.c_str(), -1, SQLITE_TRANSIENT);
+    // revision = count of existing snapshots + 1
+    int revision = 1;
+    {
+        sqlite3_stmt* cnt = nullptr;
+        sqlite3_prepare_v2(db_->raw(), "SELECT COUNT(*) FROM snapshots WHERE workspace_id=?1;", -1, &cnt, nullptr);
+        sqlite3_bind_text(cnt, 1, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(cnt) == SQLITE_ROW) {
+            revision = sqlite3_column_int(cnt, 0) + 1;
+        }
+        sqlite3_finalize(cnt);
+    }
+    sqlite3_bind_text(stmt, 1, snap_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, snap_ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 4, revision);
+    sqlite3_bind_int64(stmt, 5, static_cast<sqlite3_int64>(snap_size));
+    sqlite3_bind_text(stmt, 6, snap_state.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 7, schema_version);
+    sqlite3_bind_int64(stmt, 8, generation);
+    sqlite3_bind_text(stmt, 9, reason.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        err_ = sqlite3_errmsg(db_->raw());
+        sqlite3_finalize(stmt);
+        tx.rollback();
+        return false;
+    }
+    sqlite3_finalize(stmt);
+
+    if (!tx.commit()) {
+        err_ = db_->error_message();
+        return false;
+    }
+    return true;
+}
+
 std::vector<remin::core::Workspace> SqliteStorage::list_workspaces() {
     std::vector<remin::core::Workspace> out;
     std::lock_guard<std::recursive_mutex> lk(db_->mutex());

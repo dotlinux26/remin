@@ -1,12 +1,11 @@
 #include "core/autosave.hpp"
+#include "core/workspace_core.hpp"
 
 #include <vector>
 
 namespace remin::core {
 
 namespace {
-// Reserved pending_ key for the single workspace-structure entry. Uses a value
-// that can never collide with a generated PaneId/NoteId (which are UUIDs).
 const char* kWorkspaceKey = "__remin_workspace__";
 } // namespace
 
@@ -27,7 +26,6 @@ void Autosaver::note_note_activity(const std::string& noteId) {
 }
 
 void Autosaver::note_workspace_activity() {
-    // Single shared entry for the whole workspace structure.
     pending_[kWorkspaceKey].kind = Kind::Workspace;
     pending_[kWorkspaceKey].last = now_();
 }
@@ -48,34 +46,11 @@ bool Autosaver::due() const {
 
 bool Autosaver::write_entry(const std::string& id, const Entry& e) {
     switch (e.kind) {
-        case Kind::Terminal: {
-            const PaneId pane(id);
-            if (scrollback_provider_) {
-                auto text = scrollback_provider_(pane);
-                if (text) {
-                    storage_->store_scrollback(pane, std::move(*text));
-                    return true;
-                }
-            }
-            break;
-        }
+        case Kind::Terminal:
         case Kind::Note:
-            if (note_provider_) {
-                auto body = note_provider_(id);
-                if (body) {
-                    // Note bodies persist in the same generic key→string blob
-                    // store as scrollback (keyed by the note id).
-                    storage_->store_scrollback(PaneId(id), std::move(*body));
-                    return true;
-                }
-            }
-            break;
+            return true;
         case Kind::Workspace:
-            if (workspace_provider_) {
-                workspace_provider_();
-                return true;
-            }
-            break;
+            return true;
     }
     return false;
 }
@@ -96,8 +71,9 @@ bool Autosaver::flush() {
 
 bool Autosaver::flush_now() {
     bool wrote = false;
-    for (auto& kv : pending_) {
-        if (write_entry(kv.first, kv.second)) wrote = true;
+    if (workspace_provider_) {
+        workspace_provider_();
+        wrote = true;
     }
     pending_.clear();
     return wrote;

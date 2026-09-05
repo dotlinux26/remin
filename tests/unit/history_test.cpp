@@ -47,6 +47,11 @@ public:
     void delete_snapshot(const WorkspaceId&, const SnapshotId&) override {}
     void store_scrollback(const PaneId&, std::string) override {}
     std::string load_scrollback(const PaneId&) override { return {}; }
+
+    bool checkpoint(const WorkspaceId&, const json&, int, int64_t, const std::string&,
+                    const std::vector<std::pair<PaneId, std::string>>&) override {
+        return true;
+    }
 };
 
 int main() {
