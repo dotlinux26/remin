@@ -575,7 +575,7 @@ void MainWindow::setup_sidebar() {
 
     auto* directory_tab = Gtk::make_managed<Gtk::Button>("Files");
     directory_tab->add_css_class("remin-sidebar-tab");
-    directory_tab->set_hexpand(false);
+    directory_tab->set_hexpand(true);
     directory_tab->signal_clicked().connect([this]() { set_sidebar_mode("directory"); });
 
     tab_bar->append(*history_tab);
