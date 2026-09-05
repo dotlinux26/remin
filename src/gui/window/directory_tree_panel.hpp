@@ -37,7 +37,7 @@ private:
     bool matches_filter(const std::string& name) const;
     Gtk::Widget* create_row(const std::string& name, bool is_dir, const std::filesystem::path& full_path);
     void populate_children(Gtk::Box* children_box, const std::filesystem::path& dir_path);
-    void show_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir);
+    void show_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir, double x, double y);
     void create_new_file(const std::filesystem::path& dir);
     void create_new_folder(const std::filesystem::path& dir);
     void rename_item(const std::filesystem::path& path);

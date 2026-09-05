@@ -316,8 +316,8 @@ Gtk::Widget* DirectoryTreePanel::create_row(const std::string& name, bool is_dir
 
         auto right_click = Gtk::GestureClick::create();
         right_click->set_button(3);
-        right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
-            show_context_menu(*box, full_path, name, true);
+        right_click->signal_pressed().connect([this, box, full_path, name](int, double x, double y) {
+            show_context_menu(*box, full_path, name, true, x, y);
         });
         box->add_controller(right_click);
     } else {
@@ -328,8 +328,8 @@ Gtk::Widget* DirectoryTreePanel::create_row(const std::string& name, bool is_dir
         box->add_controller(click);
         auto right_click = Gtk::GestureClick::create();
         right_click->set_button(3);
-        right_click->signal_pressed().connect([this, box, full_path, name](int, double, double) {
-            show_context_menu(*box, full_path, name, false);
+        right_click->signal_pressed().connect([this, box, full_path, name](int, double x, double y) {
+            show_context_menu(*box, full_path, name, false, x, y);
         });
         box->add_controller(right_click);
     }
@@ -361,7 +361,7 @@ void DirectoryTreePanel::populate_children(Gtk::Box* children_box, const std::fi
     } catch (const std::exception&) {}
 }
 
-void DirectoryTreePanel::show_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir) {
+void DirectoryTreePanel::show_context_menu(Gtk::Widget& widget, const std::filesystem::path& path, const std::string& name, bool is_dir, double x, double y) {
     std::vector<ContextMenu::Item> items;
 
     if (is_dir) {
@@ -380,7 +380,7 @@ void DirectoryTreePanel::show_context_menu(Gtk::Widget& widget, const std::files
         if (display) display->get_clipboard()->set_text(path.string());
     }});
 
-    ContextMenu::show(widget, 0, 0, items);
+    ContextMenu::show(widget, x, y, items);
 }
 
 void DirectoryTreePanel::create_new_file(const std::filesystem::path& dir) {
