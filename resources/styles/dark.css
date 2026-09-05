@@ -377,6 +377,7 @@ windowcontrols.end button.close {
   margin: 0;
   min-width: 28px;
   min-height: 28px;
+  color: #1f2437;
 }
 
 windowcontrols.end button.minimize:hover,
@@ -398,6 +399,7 @@ windowcontrols.end button.close:active {
   border-width: 0px;
   border-color: transparent;
   box-shadow: none;
+  color: #1f2437;
 }
 
 /* Also target GTK's internal titlebutton class for compatibility */
@@ -425,6 +427,7 @@ window.remin-window headerbar .window-control * {
   margin: 0;
   min-width: 28px;
   min-height: 28px;
+  color: #1f2437;
 }
 
 window.remin-window headerbar button.titlebutton:hover,
@@ -456,6 +459,7 @@ window.remin-window headerbar .window-control *:active {
   outline-style: none;
   outline-width: 0;
   outline-color: transparent;
+  color: #1f2437;
 }
 
 /* Preview header — slim row above the markdown preview */
