@@ -63,12 +63,13 @@ struct Workspace {
 
 // One command-history entry with provenance: which window → tab → pane ran it.
 // The History sidebar is an aggregate query over the whole workspace's panes
-// (design §6.3) — a view, not a second store.
+// (design §6.3) — a view, not a second store. `record` keeps the command text
+// plus its timestamp; identity is carried by the window/tab/pane fields.
 struct HistoryEntry {
     WindowId window;
     TabId tab;
     PaneId pane;
-    std::string command;
+    CommandRecord record;
 };
 
 // Aggregate every pane's canonical `command_history` in window → tab → pane →
@@ -89,5 +90,16 @@ struct HistoryEntry {
     }
     return out;
 }
+
+// A closed-window history entry: captured when a window is closed with
+// Window History policy ON. Contains the full window state at close time.
+struct ClosedWindowSnapshot {
+    SnapshotId id;
+    WindowId window_id;   // original window identity
+    std::string label;    // window label at close time
+    std::chrono::system_clock::time_point closed_at;
+    std::string workspace_state_json;  // serialized window state (tabs, panes, geometry, focus)
+    std::uint64_t generation{0};       // workspace generation at close
+};
 
 } // namespace remin::core

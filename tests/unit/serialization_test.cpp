@@ -64,7 +64,8 @@ int main() {
     p.state.shell = "/bin/bash";
     p.state.cols = 120;
     p.state.rows = 36;
-    p.state.command_history = {"pwd", "nmap -sV 10.10.10.5", "ffuf -u http://10.10.10.5/FUZZ"};
+    p.state.command_history = {
+        {"pwd", 1000}, {"nmap -sV 10.10.10.5", 2000}, {"ffuf -u http://10.10.10.5/FUZZ", 3000}};
     p.state.scrollback = "user@host:~$ pwd\n/home/user/research/gitlab\n";
     p.state.interrupted_command =
         InterruptedCommand{"ffuf -u http://10.10.10.5/FUZZ", 1234567,
@@ -123,7 +124,10 @@ int main() {
     CHECK(ps.shell == "/bin/bash");
     CHECK(ps.cols == 120 && ps.rows == 36);
     CHECK(ps.command_history.size() == 3);
-    CHECK(ps.command_history[2] == "ffuf -u http://10.10.10.5/FUZZ");
+    CHECK(ps.command_history[0].command == "pwd");
+    CHECK(ps.command_history[0].timestamp_us == 1000);
+    CHECK(ps.command_history[2].command == "ffuf -u http://10.10.10.5/FUZZ");
+    CHECK(ps.command_history[2].timestamp_us == 3000);
     CHECK(ps.scrollback.rfind("user@host:~$ pwd", 0) == 0);
     CHECK(ps.interrupted_command.has_value());
     CHECK(ps.interrupted_command->source == InterruptedCommand::Source::CtrlC);
@@ -199,6 +203,11 @@ int main() {
     CHECK(lt.pane_tree.pane()->state.interrupted_command.has_value());
     CHECK(lt.pane_tree.pane()->state.interrupted_command->source == InterruptedCommand::Source::Unknown);
     CHECK(lt.pane_tree.pane()->state.interrupted_command->command == "vim");
+    // Legacy `command_history` is a plain string array → migrated to records
+    // with an unknowable (0) timestamp.
+    CHECK(lt.pane_tree.pane()->state.command_history.size() == 1);
+    CHECK(lt.pane_tree.pane()->state.command_history[0].command == "ls");
+    CHECK(lt.pane_tree.pane()->state.command_history[0].timestamp_us == 0);
 
     if (g_failures == 0) {
         std::cout << "serialization_test: OK\n";

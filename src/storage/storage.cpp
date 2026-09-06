@@ -53,14 +53,15 @@ bool SqliteStorage::checkpoint(const remin::core::WorkspaceId& ws_id,
         tx.rollback();
         return false;
     }
-    sqlite3_bind_text(stmt, 1, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
-    const char* name = workspace_state.value("name", "").c_str();
-    sqlite3_bind_text(stmt, 2, name, -1, SQLITE_TRANSIENT);
-    const char* wd = workspace_state.value("working_directory", "").c_str();
-    sqlite3_bind_text(stmt, 3, wd, -1, SQLITE_TRANSIENT);
-    const char* created = workspace_state.value("created_at", "").c_str();
-    sqlite3_bind_text(stmt, 4, created, -1, SQLITE_TRANSIENT);
-    const auto la = now_iso();
+    const std::string ws_id_str = ws_id.str();
+    const std::string name = workspace_state.value("name", "");
+    const std::string wd = workspace_state.value("working_directory", "");
+    const std::string created = workspace_state.value("created_at", "");
+    const std::string la = now_iso();
+    sqlite3_bind_text(stmt, 1, ws_id_str.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, wd.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, created.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 5, la.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 6, j.c_str(), -1, SQLITE_TRANSIENT);
     if (sqlite3_step(stmt) != SQLITE_DONE) {
@@ -84,9 +85,10 @@ bool SqliteStorage::checkpoint(const remin::core::WorkspaceId& ws_id,
             tx.rollback();
             return false;
         }
-        sqlite3_bind_text(stmt, 1, pane.str().c_str(), -1, SQLITE_TRANSIENT);
+        const std::string pane_str = pane.str();
+        const std::string ts = now_iso();
+        sqlite3_bind_text(stmt, 1, pane_str.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 2, content.c_str(), -1, SQLITE_TRANSIENT);
-        const auto ts = now_iso();
         sqlite3_bind_text(stmt, 3, ts.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(stmt) != SQLITE_DONE) {
             err_ = sqlite3_errmsg(db_->raw());
@@ -113,21 +115,21 @@ bool SqliteStorage::checkpoint(const remin::core::WorkspaceId& ws_id,
         return false;
     }
     sqlite3_bind_text(stmt, 1, snap_id.str().c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, ws_id_str.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, snap_ts.c_str(), -1, SQLITE_TRANSIENT);
     // revision = count of existing snapshots + 1
     int revision = 1;
     {
         sqlite3_stmt* cnt = nullptr;
         sqlite3_prepare_v2(db_->raw(), "SELECT COUNT(*) FROM snapshots WHERE workspace_id=?1;", -1, &cnt, nullptr);
-        sqlite3_bind_text(cnt, 1, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(cnt, 1, ws_id_str.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(cnt) == SQLITE_ROW) {
             revision = sqlite3_column_int(cnt, 0) + 1;
         }
         sqlite3_finalize(cnt);
     }
     sqlite3_bind_text(stmt, 1, snap_id.str().c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, ws_id_str.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, snap_ts.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 4, revision);
     sqlite3_bind_int64(stmt, 5, static_cast<sqlite3_int64>(snap_size));
@@ -326,6 +328,78 @@ std::string SqliteStorage::load_scrollback(const remin::core::PaneId& pane) {
     }
     sqlite3_finalize(stmt);
     return out;
+}
+
+void SqliteStorage::store_closed_window(const remin::core::ClosedWindowSnapshot& snap) {
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = R"SQL(
+        INSERT INTO closed_windows (id, workspace_id, window_id, label, closed_at, state_json, generation)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
+    )SQL";
+    if (sqlite3_prepare_v2(db_->raw(), sql, -1, &stmt, nullptr) != SQLITE_OK) return;
+    sqlite3_bind_text(stmt, 1, snap.id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, snap.workspace_state_json.empty() ? "" : snap.workspace_state_json.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, snap.window_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, snap.label.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 5, remin::core::to_iso8601(snap.closed_at).c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 6, snap.workspace_state_json.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 7, static_cast<sqlite3_int64>(snap.generation));
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+std::vector<remin::core::ClosedWindowSnapshot> SqliteStorage::list_closed_windows(const remin::core::WorkspaceId& ws_id) {
+    std::vector<remin::core::ClosedWindowSnapshot> out;
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = "SELECT id, window_id, label, closed_at, state_json, generation FROM closed_windows WHERE workspace_id=?1 ORDER BY closed_at DESC;";
+    if (sqlite3_prepare_v2(db_->raw(), sql, -1, &stmt, nullptr) != SQLITE_OK) return out;
+    sqlite3_bind_text(stmt, 1, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        remin::core::ClosedWindowSnapshot s;
+        s.id = remin::core::SnapshotId{reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0))};
+        s.window_id = remin::core::WindowId{reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1))};
+        s.label = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        s.closed_at = remin::core::from_iso8601(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)));
+        s.workspace_state_json = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+        s.generation = sqlite3_column_int64(stmt, 5);
+        out.push_back(std::move(s));
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
+std::optional<remin::core::ClosedWindowSnapshot> SqliteStorage::load_closed_window(const remin::core::WorkspaceId& ws_id, const remin::core::SnapshotId& snap_id) {
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = "SELECT window_id, label, closed_at, state_json, generation FROM closed_windows WHERE workspace_id=?1 AND id=?2;";
+    if (sqlite3_prepare_v2(db_->raw(), sql, -1, &stmt, nullptr) != SQLITE_OK) return std::nullopt;
+    sqlite3_bind_text(stmt, 1, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, snap_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<remin::core::ClosedWindowSnapshot> result;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        remin::core::ClosedWindowSnapshot s;
+        s.id = snap_id;
+        s.workspace_state_json = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        s.window_id = remin::core::WindowId{reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0))};
+        s.label = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        s.closed_at = remin::core::from_iso8601(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+        s.generation = sqlite3_column_int64(stmt, 4);
+        result = std::move(s);
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+void SqliteStorage::delete_closed_window(const remin::core::WorkspaceId& ws_id, const remin::core::SnapshotId& snap_id) {
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_->raw(), "DELETE FROM closed_windows WHERE workspace_id=?1 AND id=?2;", -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, ws_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, snap_id.str().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 }
 
 } // namespace remin::storage

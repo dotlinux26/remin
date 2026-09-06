@@ -58,6 +58,10 @@ private:
     void on_note_save_as();
     void on_terminal_color_profile();
     void toggle_history_sidebar();
+    // Ctrl+Shift+H: open/focus the sidebar's History panel (spec §9). Opens the
+    // sidebar when hidden, then switches to History mode (behavior only — the
+    // panel visual is frozen).
+    void open_history_panel();
     void apply_initial_sidebar_state();
     void clear_history();
     void on_settings();
@@ -93,7 +97,10 @@ private:
     // Global sidebar (History / Directory)
     void setup_sidebar();
     void set_sidebar_mode(const std::string& mode);
+    // History sub-mode switcher (Commands / Transcripts / Windows).
+    void set_history_sub_mode(const std::string& mode);
     void update_history_sidebar();
+    void update_history_windows_list();
 
     void restore_workspace();
 
@@ -101,9 +108,17 @@ private:
     // and feed into core via apply_runtime_state(). Call before checkpoint.
     void capture_all_runtime_state();
 
+    // Capture the current window state as a ClosedWindowSnapshot for window
+    // history (when window_history_enabled = ON).
+    remin::core::ClosedWindowSnapshot capture_closed_window();
+
     SessionController* controller_;
     remin::core::Autosaver* autosaver_;
     remin::core::WorkspaceCore* core_;
+
+    // The core window this (single) MainWindow represents. All new tabs land in
+    // it; capture_all_runtime_state() writes geometry/focus back to it.
+    remin::core::WindowId window_id_;
 
     // Header
     Gtk::HeaderBar* header_{nullptr};
@@ -159,13 +174,20 @@ private:
     sigc::connection autosave_badge_hide_;
     std::function<void()> update_tab_overflow_fn;
 
-    // Global sidebar (History / Directory) — always visible, like VS Code
+// Global sidebar (History / Directory) — always visible, like VS Code
     Gtk::Paned* main_paned_{nullptr};
     bool sidebar_visible_{false};
     Gtk::Box* sidebar_root_{nullptr};
     Gtk::Stack* sidebar_stack_{nullptr};
     Gtk::ScrolledWindow* history_scroller_{nullptr};
-    Gtk::Box* history_list_{nullptr};
+    // History sub-modes: Commands / Transcripts / Windows (spec §9).
+    // Override frozen rule: dropdown instead of 3 horizontal tabs.
+    Gtk::Button* history_sub_mode_btn_{nullptr};
+    Gtk::Label* current_mode_label_{nullptr};
+    Gtk::Stack* history_sub_stack_{nullptr};
+    Gtk::Box* history_commands_list_{nullptr};   // current history_list_
+    Gtk::Box* history_transcripts_list_{nullptr}; // placeholder
+    Gtk::Box* history_windows_list_{nullptr};     // closed windows
     DirectoryTreePanel* directory_panel_{nullptr};
     bool first_directory_show_{true};  // first Files tab open → scroll to top
     Gtk::Button* sidebar_mode_tabs_[2]{nullptr, nullptr};

@@ -1,11 +1,14 @@
 #include "gui/window/terminal_tab_view.hpp"
 #include "gui/window/main_window.hpp"
 #include "gui/session/session_controller.hpp"
+#include "gui/session/workspace_session.hpp"
 #include "gui/ui/context_menu.hpp"
 #include "terminal/shell/shell.hpp"
 
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 
 namespace {
 
@@ -132,10 +135,10 @@ TerminalPane* TerminalTabView::focused_pane() {
 }
 
 void TerminalTabView::add_history(const remin::core::PaneId& pane,
-                                  const std::string& command) {
-    if (command.empty()) return;
+                                  remin::core::CommandRecord record) {
+    if (record.command.empty()) return;
     // Persist to the pane's canonical per-pane history (design §6.1).
-    if (controller_) controller_->add_command_to_pane(tab_, pane, command);
+    if (controller_) controller_->add_command_to_pane(tab_, pane, record);
     // Notify MainWindow to re-query the aggregate history sidebar.
     if (on_history_) on_history_();
 }
@@ -206,7 +209,7 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
     if (new_pane.empty()) return {};
 
     auto shell = shell_;
-    auto pane = std::make_unique<TerminalPane>(shell, "");
+    auto pane = std::make_unique<TerminalPane>(shell, "", pane_history_file(new_pane));
     auto* raw = pane.get();
     if (controller_->autosaver()) {
         auto pid = new_pane;
@@ -214,8 +217,8 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
             controller_->autosaver()->note_terminal_activity(pid);
         });
     }
-    raw->set_command_callback([this, new_pane](std::string cmd) {
-        add_history(new_pane, std::move(cmd));
+    raw->set_command_callback([this, new_pane](remin::core::CommandRecord rec) {
+        add_history(new_pane, std::move(rec));
     });
     panes_.emplace(new_pane.str(), std::move(pane));
 
@@ -288,7 +291,7 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
             auto it = panes_.find(pid.str());
             if (it == panes_.end()) {
                 // Lazy-create a terminal for a pane we don't have yet.
-                auto p = std::make_unique<TerminalPane>(shell_, "");
+                auto p = std::make_unique<TerminalPane>(shell_, "", pane_history_file(pid));
                 auto* raw = p.get();
                 if (controller_->autosaver()) {
                     auto cid = pid;
@@ -296,8 +299,8 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
                         controller_->autosaver()->note_terminal_activity(cid);
                     });
                 }
-                raw->set_command_callback([this, pid](std::string cmd) {
-                    add_history(pid, std::move(cmd));
+                raw->set_command_callback([this, pid](remin::core::CommandRecord rec) {
+                    add_history(pid, std::move(rec));
                 });
                 panes_.emplace(pid.str(), std::move(p));
                 it = panes_.find(pid.str());
@@ -454,8 +457,13 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                 if (!node.pane()) break;
                 const auto& pid = node.pane()->id;
                 const auto& state = node.pane()->state;
+                // Seed this pane's dedicated shell history from the pane's
+                // canonical command history so restored ↑/↓ recall exactly the
+                // commands THIS pane ran (§6.1 isolation).
+                const std::string hist_file = pane_history_file(pid);
+                seed_shell_history(hist_file, state.command_history);
                 // Create terminal pane with the persisted state
-                auto p = std::make_unique<TerminalPane>(shell_, state.cwd);
+                auto p = std::make_unique<TerminalPane>(shell_, state.cwd, hist_file);
                 auto* raw = p.get();
                 if (controller_->autosaver()) {
                     auto cid = pid;
@@ -463,8 +471,8 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                         controller_->autosaver()->note_terminal_activity(cid);
                     });
                 }
-                raw->set_command_callback([this, pid](std::string cmd) {
-                    add_history(pid, std::move(cmd));
+                raw->set_command_callback([this, pid](remin::core::CommandRecord rec) {
+                    add_history(pid, std::move(rec));
                 });
                 // Restore the terminal state (scrollback, cwd, cols/rows, etc.)
                 raw->runtime_restore(state);
@@ -562,6 +570,24 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
 
     tree_host_->append(build_and_restore(tree));
     Glib::signal_idle().connect_once([this]() { walk_restore(*tree_host_); });
+}
+
+std::string TerminalTabView::pane_history_file(const remin::core::PaneId& pane) {
+    std::string dir = remin::gui::WorkspaceSession::data_dir() + "/history";
+    try {
+        std::filesystem::create_directories(dir);
+    } catch (...) {}
+    return dir + "/pane-" + pane.str() + ".hist";
+}
+
+void TerminalTabView::seed_shell_history(const std::string& path,
+                                         const std::vector<remin::core::CommandRecord>& commands) {
+    if (commands.empty()) return;
+    try {
+        std::ofstream out(path, std::ios::trunc);
+        if (!out) return;
+        for (const auto& r : commands) out << r.command << '\n';
+    } catch (...) {}
 }
 
 } // namespace remin::gui

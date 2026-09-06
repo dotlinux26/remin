@@ -261,9 +261,32 @@ Design: `docs/design/workspace-persistence-pipeline.md` (đã gate). Không Wind
 - [x] P1 Domain state + migration (TabKind, NoteTabState, UiState + serialization round-trip)
 - [x] P2 TerminalPane live: `runtime_capture()/runtime_restore()` (cwd §4 OSC7→/proc→cached→$HOME, cols/rows, full scrollback §5.1, Ctrl+C `\x03` detection §6.2), per-pane canonical `command_history` (`WorkspaceCore::add_command_to_pane`, cap 1000) + aggregate sidebar (§6.3, `settings:command-history` migrated once)
 - [x] P2.5 Fidelity gate (§5.5): VTE live → ANSI/control → capture → new VTE → feed → compare (textual scrollback EXACT round-trip, semantic content preserved, color/format NOT preserved — recorded)
-- [x] P3 Atomic checkpoint: SqliteDb txn RAII (BEGIN IMMEDIATE/COMMIT/ROLLBACK), `checkpoint(reason)` writes workspace + scrollbacks + snapshot atomically, generation + schema_version + reason persisted, autosave → checkpoint, shutdown flush via `signal_close_request()`
-- [x] P4 Restore workspace đầy đủ (terminals, notes, dir tree, geometry, focus)
-- [ ] P5 Golden acceptance test + report (§16)
+- [x] P3 Atomic checkpoint: SqliteDb txn RAII (BEGIN IMMEDIATE/COMMIT/ROLLBACK), `checkpoint(reason)` writes workspace + scrollbacks + snapshot atomically, generation + schema_version + reason persisted, autosave → checkpoint, shutdown flush via `signal_close_request()`. **Window identity: checkpoint UPDATE các Window đang tồn tại; generation = version, KHÔNG tạo Window mới.**
+- [x] P4 Restore workspace đầy đủ (terminals, notes, dir tree, geometry, focus) — restore binds `focus_window_id` (most recent), KHÔNG prune các window khác, KHÔNG tạo default window khi có state hợp lệ
+- [x] P5 Golden acceptance test + report (§16) — runtime-verified 2026-09-06 trên binary release với DB cô lập (chi tiết: `tests/golden/GOLDEN_ACCEPTANCE_CHECKLIST.md` → "Window Identity & Persistence Semantics"). 8/8 invariant pass: identity ổn định qua autosave (generations = versions), restart không tăng window count, W42+W51 sống sót không duplicate, most-recent = focus_window_id, setting OFF cleanup tường minh + fresh single window. Bug tìm được lúc verify: `Autosaver::flush()` không gọi workspace provider → checkpoint autosave chết (generation 0) — đã fix, verify checkpoints bump generation.
+
+### Refs (cập nhật 2026-09-06)
+
+- `docs/design/terminal-history-semantics.md` — Terminal History Semantics (chốt
+  với user 2026-09-06): **3 khái niệm tách bạch — Screen State / Command History /
+  Terminal Transcript**. `clear` là screen-state op, KHÔNG xóa history/transcript.
+  `command_history[]` là canonical per-pane (không dựa `~/.bash_history`);
+  History UI search từ Workspace → Windows → Tabs → Panes. ↑↓ vẫn shell-owned.
+  VTE scrollback = screen state, KHÔNG = "toàn bộ lịch sử pane".
+- `docs/design/history-system-spec.md` — **History System SPEC (3-mode)**: History =
+  Commands (command_history[] per-pane, click = insert vào input KHÔNG execute) +
+  Transcripts (Remin-owned transcript path, KHÔNG phụ thuộc VTE current screen,
+  clear không xóa) + Windows (closed-window snapshots, recovery ≠ window history).
+  UI History panel FROZEN — wire behavior + state only, khác: `Ctrl+Shift+H`.
+  Model: CommandRecord / TranscriptChunk / ClosedWindowSnapshot riêng biệt.
+  Implementation order A–G; acceptance yêu cầu đủ 7 thứ đồng thời.
+  `implement-note-1.md` đã superseded bởi semantics + spec này.
+- `docs/problem-terminal-transcript-capture.md` — **P0-B CAPTURE FIDELITY FAILING**:
+  blob scrollback tồn tại (~10KB) nhưng nội dung gần như blank + prompt, thiếu
+  output thật. PHẢI chứng minh capture chứa marker deterministic
+  (`printf 'REMIN_CAPTURE_A\n'` / `ls` / `printf 'REMIN_CAPTURE_B\n'`) trước khi
+  nói scrollback hoạt động. Acceptance: per-pane transcript + command_history
+  tách biệt, no cross-contamination, no crash.
 
 ### Core Features (secondary / triage sau)
 - [ ] Wire ThemeManager into Application
@@ -293,6 +316,87 @@ Design: `docs/design/workspace-persistence-pipeline.md` (đã gate). Không Wind
 | ADR-0005 | IPC | CLI ↔ GUI communication |
 | ADR-0006 | No daemon (V1) | Simplicity, single-instance lock |
 | ADR-0007 | No icon library | Text-first design, minimal icons |
+
+---
+
+## Window Identity & Persistence Semantics (P5 contract — READ FIRST)
+
+> Đây là hợp đồng bất biến của feature workspace persistence/recovery. Mọi thay đổi
+> liên quan Window/checkpoint/restore phải khớp đúng các quy tắc dưới đây.
+
+### 1. Window = entity có identity ổn định
+
+```text
+Window
+├── id          # bất biến, sinh một lần
+├── label       # tên người dùng đặt ("GitLab Audit"), rename chỉ đổi label
+├── state       # tabs / panes / ui state hiện tại
+└── lifecycle   # open / closed
+```
+
+- **Autosave/checkpoint chỉ UPDATE state của Window đang tồn tại.** KHÔNG BAO GIỜ
+  INSERT Window mới vì autosave chạy.
+- **Checkpoint là version (generation) của workspace state, không phải Window mới.**
+
+```text
+W42    ← same W42 across G101, G102, G103 (generations = versions, not windows)
+```
+
+### 2. Contract chuẩn
+
+| Thời điểm | Hành vi bắt buộc |
+|-----------|------------------|
+| Autosave  | capture live state → UPDATE từng Window đang mở → +1 generation. Không W43/W44. |
+| Nhiều Window | checkpoint cập nhật TẤT CẢ window đang mở (W42+W51): **không merge, không clone, không duplicate record**. |
+| Shutdown   | capture live state **ngay trước teardown** → update mọi Window → `checkpoint("recovery")` → destroy. Không restore ảnh cũ hơn. |
+| Startup    | **trước tiên** tìm latest valid recovery checkpoint → reconstruct → restore → **sau đó mới** cân nhắc tạo Window mặc định. KHÔNG tạo default window trước rồi restore. |
+| Default window | Chỉ tạo window mới khi KHÔNG có persisted/recovery state dùng được (DB rỗng). DB có valid W42 → restore W42, **không** tạo "My Window 2". |
+
+### 3. Programmatic invariants (giữ bằng test/DB query)
+
+- Autosave lặp (create W42 → checkpoint ×3) ⇒ **1 Window identity + nhiều generations**.
+- Restart app ⇒ **Window count trong DB không tăng** chỉ vì restart.
+- Tạo W42 + W51, checkpoint, shutdown, restart ⇒ **đúng W42 + W51**, không thêm default window.
+
+### 4. Setting: `persist_open_windows` (key `settings:persist-open-windows`, default ON)
+
+- **ON**: window đang mở tham gia recovery checkpoint; startup restore latest open-window state.
+- **OFF**: không persist/restore session window; startup **clear window state cũ** (cleanup)
+  rồi app chạy fresh. Cleanup phải tường minh — tuyệt đối không INSERT window lặp khi OFF.
+- Note: việc tắt setting KHÔNG được âm thầm sinh duplicate Window entity.
+
+### 5. "Most recent window"
+
+Là window từ **latest valid committed workspace state**, KHÔNG phải `MAX(created_at)` /
+max ID / window mới nhất vừa INSERT. Triển khai V1: `Workspace::focus_window_id` (ghi mỗi
+khi window được focus/add) = "window dùng gần nhất" tại checkpoint cuối.
+
+### 6. Ba khái niệm TÁCH BẠCH — không lẫn lộn
+
+```text
+History
+├── Commands      # những gì user đã chạy (sidebar hiện tại, aggregate §6.3)
+└── Windows       # (future) window đã đóng, muốn gọi lại — closed-window snapshot
+
+Recovery          # workspace cuối cùng trước shutdown/restart
+```
+
+- Closing helper: nếu đóng W51 — Window History OFF ⇒ xóa cục bộ; Window History ON ⇒
+  capture final state + label + timestamp thành closed-window history, xóa live W51.
+- Việc đóng window/khôi phục **không được** tạo/spawn Window mới trong core.
+
+### 7. Triển khai V1 (GUI đơn MainWindow)
+
+- GUI dùng 1 core window; restore binds vào `focus_window_id` (most recent) và hiển thị
+  window đó. **KHÔNG prune/xóa các window khác khỏi model** — chúng là entities hợp lệ,
+  phải sống sót qua restart (DB count ổn định). Multi-window GUI = V2+.
+- Default label của window mới = `My Window N` (N tăng dần, tránh trùng)
+  (`SessionController::default_window_label`).
+- **Autosaver**: periodic `flush()` (tick 250ms) → khi có `Kind::Workspace` entry due,
+  gọi workspace provider → runtime capture + `checkpoint("autosave")`. `flush_now()`
+  dành cho explicit save / shutdown. Đây là fix P5 (autosave checkpoint chết vì
+  `flush()` không gọi provider).
+- Setting key `settings:persist-open-windows` (default "1" = ON; rỗng = "1").
 
 ---
 

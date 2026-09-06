@@ -73,10 +73,12 @@ TerminalTabView(SessionController* controller,
     // Access the tab and window IDs for checkpoint/runtime capture.
     [[nodiscard]] const remin::core::TabId& tab_id() const noexcept { return tab_; }
     [[nodiscard]] const remin::core::WindowId& window_id() const noexcept { return window_; }
+    // The currently focused pane id (persisted as Window::focus_pane_id).
+    [[nodiscard]] const remin::core::PaneId& focused_pane_id() const noexcept { return active_pane_; }
 
     // Record a completed command for the given pane: routes into the pane's
     // canonical per-pane history via the controller, then refreshes the sidebar.
-    void add_history(const remin::core::PaneId& pane, const std::string& command);
+    void add_history(const remin::core::PaneId& pane, remin::core::CommandRecord record);
 
     // Host callback invoked by the pane's right-click "Color Profile…" item.
     // MainWindow wires this to its color profile dialog.
@@ -114,6 +116,13 @@ private:
     Gtk::Widget& build_node(const remin::core::PaneTree& node);
     void show_pane_menu(Gtk::Widget& pane_widget, double x, double y);
     void load_and_apply_saved_colors();
+    // Per-pane shell history isolation (§6.1): each pane gets a dedicated
+    // $HISTFILE so shell ↑/↓ never leaks another pane's commands. The file is
+    // seeded from the pane's canonical command history before spawn so restored
+    // panes recall exactly their own history.
+    static std::string pane_history_file(const remin::core::PaneId& pane);
+    static void seed_shell_history(const std::string& path,
+                                   const std::vector<remin::core::CommandRecord>& commands);
 
     SessionController* controller_;
     MainWindow* main_window_;

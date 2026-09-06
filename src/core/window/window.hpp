@@ -49,7 +49,7 @@ struct Tab {
 // A window: metadata + ordered tabs + focused pane within focused tab.
 struct Window {
     WindowId id;
-    std::string title;
+    std::string label;  // user-visible window name; rename changes this only
     std::int32_t x{0};
     std::int32_t y{0};
     std::uint32_t width{0};
@@ -63,7 +63,7 @@ struct Window {
     static Window create(std::string title, WindowId id = WindowId::generate()) {
         Window w;
         w.id = std::move(id);
-        w.title = std::move(title);
+        w.label = std::move(title);
         return w;
     }
 };

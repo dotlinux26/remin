@@ -37,6 +37,12 @@ public:
     virtual void store_scrollback(const PaneId& pane, std::string content) = 0;
     virtual std::string load_scrollback(const PaneId& pane) = 0;
 
+    // Closed-window history (Window History, distinct from Recovery snapshots)
+    virtual void store_closed_window(const ClosedWindowSnapshot& snap) = 0;
+    virtual std::vector<ClosedWindowSnapshot> list_closed_windows(const WorkspaceId& ws_id) = 0;
+    virtual std::optional<ClosedWindowSnapshot> load_closed_window(const WorkspaceId& ws_id, const SnapshotId& snap_id) = 0;
+    virtual void delete_closed_window(const WorkspaceId& ws_id, const SnapshotId& snap_id) = 0;
+
     // Atomic checkpoint: writes workspace JSON, all scrollback blobs, and a
     // snapshot row in a single transaction. Returns true on success.
     // `generation` is the new generation number (monotonically increasing).
@@ -100,6 +106,12 @@ public:
 
     // -- Tabs --
     TabId add_tab(const WindowId& window, std::string title, PaneTree initial_pane);
+    // Register a Note tab (kind=Note + NoteTabState) in the window. Returns the
+    // new tab id.
+    TabId add_note_tab(const WindowId& window, std::string title, NoteTabState state);
+    // Overwrite the NoteTabState of an existing note tab (capture time).
+    bool set_tab_note_state(const WindowId& window, const TabId& tab,
+                            const NoteTabState& state);
     bool remove_tab(const WindowId& window, const TabId& tab);
     bool focus_tab(const WindowId& window, const TabId& tab);
 
@@ -112,8 +124,8 @@ public:
     // -- Per-pane command history (canonical) --
     // Append a completed command to the pane's history. Adjacent repeats are
     // collapsed and the list is capped (design §6.1). Returns false when the
-    // tab/pane does not exist or the command is empty.
-    bool add_command_to_pane(const TabId& tab, const PaneId& pane, std::string command);
+    // tab/pane does not exist or the record is empty.
+    bool add_command_to_pane(const TabId& tab, const PaneId& pane, CommandRecord record);
     // Clear every pane's command history across the open workspace. Persisted
     // at the next checkpoint (`clear_history()` must survive a restart).
     bool clear_command_history();
@@ -146,8 +158,7 @@ public:
     // explicit persist()/save.
     [[nodiscard]] bool dirty() const { return ws_dirty_; }
 
-    // Forcibly persist now and clear the dirty flag (used on shutdown).
-    bool persist_now() { return persist(); }
+    [[nodiscard]] Storage* storage() const { return storage_; }
 
 private:
     Storage* storage_;

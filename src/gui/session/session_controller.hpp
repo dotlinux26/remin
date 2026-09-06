@@ -3,7 +3,10 @@
 #include "core/autosave.hpp"
 #include "core/workspace_core.hpp"
 
+#include <functional>
+#include <optional>
 #include <string>
+#include <utility>
 
 namespace remin::gui {
 
@@ -35,6 +38,12 @@ public:
     remin::core::WindowId add_window(const std::string& title);
     bool rename_window(const remin::core::WindowId& id, const std::string& title);
 
+    // The core window the single V1 MainWindow represents. New tabs (terminal
+    // and note) are created in this window; restore_workspace() binds it.
+    // Multi-window GUI is V2+ (the core model already supports windows[]).
+    [[nodiscard]] remin::core::WindowId current_window() const { return current_window_; }
+    void set_current_window(const remin::core::WindowId& id) { current_window_ = id; }
+
     // -- Terminal tabs --
     struct TerminalTab {
         remin::core::WindowId window;
@@ -57,12 +66,17 @@ public:
     bool close_tab(const remin::core::WindowId& window, const remin::core::TabId& tab);
 
     // -- Notes --
-    // Names a new note; its body is persisted/loaded via the storage blob
-    // store keyed by the returned id.
+    // Names a new note AND registers it as a Note tab in the current window;
+    // its body is persisted/loaded via the storage blob store keyed by the
+    // returned id.
     std::string new_note();
     std::string load_note(const std::string& noteId);
     // Create a note tab from existing NoteTabState (for restore).
     std::string restore_note(const remin::core::NoteTabState& state);
+    // The core window/tab that hosts the given note id (""/empty when absent).
+    // Used at capture time to write the note's state back into the core tab.
+    [[nodiscard]] std::optional<std::pair<remin::core::WindowId, remin::core::TabId>>
+    note_tab_binding(const std::string& noteId) const;
 
     // Explicit file persistence for a note (Save / Save As / temp-file).
     // A note has an optional assigned file path; until it does, an explicit
@@ -91,6 +105,28 @@ public:
     // Defaults to off (panel stays hidden until the user opens it).
     [[nodiscard]] bool auto_show_panel_enabled() const;
     void set_auto_show_panel_enabled(bool enabled);
+
+    // Setting: persist & restore open windows (the window session layout).
+    //  - ON (default): open windows are UPDATED in place at every checkpoint
+    //     (stable Window identity — an autosave never creates a new Window;
+    //     a checkpoint is a new *generation* of the state, not a new Window),
+    //     and on startup the latest valid checkpoint's window state is
+    //     restored (most recently active window). No default Window is created
+    //     when a valid persisted window exists.
+    //  - OFF: open-window session state is not persisted/restored. Startup
+    //     clears the stored window state (explicit cleanup) so the app runs
+    //     fresh — turning this OFF must NEVER silently accumulate duplicate
+    //     Window entities.
+    // Note/scrollback blobs are unaffected by this setting.
+    [[nodiscard]] bool persist_open_windows() const;
+    void set_persist_open_windows(bool enabled);
+
+    // Setting: Window History — capture closed windows for later restore.
+    //  - ON: when a window is closed, capture its final state + label + timestamp
+    //     into the closed-window history (can be restored later via History panel).
+    //  - OFF: closed windows are not recorded (no reopenable history entry).
+    [[nodiscard]] bool window_history_enabled() const;
+    void set_window_history_enabled(bool enabled);
 
     // Setting: what MainWindow should do when the user closes a note tab that
     // still has unsaved edits.
@@ -123,7 +159,7 @@ public:
     // Route a completed command into the pane's canonical history (core).
     bool add_command_to_pane(const remin::core::TabId& tab,
                             const remin::core::PaneId& pane,
-                            const std::string& command);
+                            const remin::core::CommandRecord& record);
     // One-time migration of the legacy global `settings:command-history` blob
     // into the first terminal pane's canonical history (design §6.1: keep the
     // old key only to migrate).
@@ -146,10 +182,35 @@ public:
     // manual checkpoint (reason="manual").
     bool checkpoint_manual();
 
+    // Runtime capture channel. MainWindow is the only owner of the GUI surface
+    // widgets (TerminalTabView/NoteTabView/DirectoryTreePanel); this controller
+    // cannot capture them itself. MainWindow registers the real capture here,
+    // and the controller invokes it (if set) before every checkpoint so the
+    // captured runtime state is written atomically (autosave / recovery /
+    // manual).
+    using RuntimeCaptureCallback = std::function<void()>;
+    void set_runtime_capture_callback(RuntimeCaptureCallback cb) { runtime_capture_ = std::move(cb); }
+
 private:
+    // Resolve the single core window this MainWindow represents: the pinned
+    // current_window_ → workspace focus window → first window → new window.
+    [[nodiscard]] remin::core::WindowId ensure_window();
+
+    // Next non-colliding "My Window N" label for a freshly created window.
+    [[nodiscard]] std::string
+    default_window_label(const remin::core::Workspace* ws) const;
+
     // Capture runtime state from all terminal panes in the current workspace
-    // and feed into core via apply_runtime_state().
+    // and feed into core via apply_runtime_state(). Implementation is owned by
+    // MainWindow (registered through set_runtime_capture_callback); this
+    // wrapper just dispatches to it so every checkpoint precedes a capture.
     void capture_all_runtime_state();
+
+    // The core window the current single MainWindow is bound to. On a fresh
+    // workspace new_terminal_tab() land in this window (created on demand);
+    // restore_workspace() pins it to the focused window before tabs are rebuilt.
+    remin::core::WindowId current_window_;
+    RuntimeCaptureCallback runtime_capture_;
 
     remin::core::WorkspaceCore* core_;
     remin::core::Storage* storage_;

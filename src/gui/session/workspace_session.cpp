@@ -37,11 +37,10 @@ WorkspaceSession::WorkspaceSession() {
     controller_ = std::make_unique<SessionController>(core_.get(), storage_.get(), autosaver_.get());
 
     // Persistence policy (D-7 = D-2): WorkspaceCore mutations only mark dirty;
-    // the actual save is performed through the autosaver policy, never inline.
-    //  - any StateDirty event from Core -> reschedule a workspace save
-    //  - provider calls core->persist() at flush time (idle/debounce/shutdown)
-    autosaver_->set_workspace_provider(
-        [this] { if (core_) core_->persist(); });
+    // the actual save is performed through the autosaver, never inline. The
+    // workspace provider is configured by SessionController (atomic checkpoint,
+    // reason="autosave") and must NOT be overwritten here — a plain persist()
+    // would skip scrollback/note/snapshot writes and defeat the checkpoint path.
     core_->set_event_callback(
         [this](const remin::core::WorkspaceEvent& ev) {
             if (ev.type == remin::core::WorkspaceEvent::Type::StateDirty && autosaver_) {

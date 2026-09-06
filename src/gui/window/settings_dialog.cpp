@@ -159,6 +159,30 @@ void SettingsDialog::setup_behavior_page() {
     page->append(*panel_box);
     page->append(*panel_hint);
 
+    auto* win_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+    win_box->set_halign(Gtk::Align::START);
+    auto* win_label = Gtk::make_managed<Gtk::Label>("Remember open windows");
+    win_label->set_valign(Gtk::Align::CENTER);
+    win_box->append(*win_label);
+    persist_open_windows_switch_ = Gtk::make_managed<Gtk::Switch>();
+    persist_open_windows_switch_->set_active(controller_ ? controller_->persist_open_windows() : true);
+    persist_open_windows_switch_->set_valign(Gtk::Align::CENTER);
+    persist_open_windows_switch_->property_active().signal_changed().connect(
+        [this]() {
+            if (persist_open_windows_switch_ && controller_) {
+                controller_->set_persist_open_windows(persist_open_windows_switch_->get_active());
+            }
+        });
+    win_box->append(*persist_open_windows_switch_);
+    auto* win_hint = Gtk::make_managed<Gtk::Label>(
+        "Remin automatically saves and restores your open windows when the "
+        "application is restarted.");
+    win_hint->set_wrap(true);
+    win_hint->set_halign(Gtk::Align::START);
+    win_hint->add_css_class("dim-label");
+    page->append(*win_box);
+    page->append(*win_hint);
+
     auto* unsaved_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
     unsaved_box->set_halign(Gtk::Align::START);
     auto* unsaved_label = Gtk::make_managed<Gtk::Label>("When closing an unsaved note");

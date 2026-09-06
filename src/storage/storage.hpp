@@ -28,6 +28,12 @@ public:
     void store_scrollback(const remin::core::PaneId& pane, std::string content) override;
     std::string load_scrollback(const remin::core::PaneId& pane) override;
 
+    // Closed-window history
+    void store_closed_window(const remin::core::ClosedWindowSnapshot& snap) override;
+    std::vector<remin::core::ClosedWindowSnapshot> list_closed_windows(const remin::core::WorkspaceId& ws_id) override;
+    std::optional<remin::core::ClosedWindowSnapshot> load_closed_window(const remin::core::WorkspaceId& ws_id, const remin::core::SnapshotId& snap_id) override;
+    void delete_closed_window(const remin::core::WorkspaceId& ws_id, const remin::core::SnapshotId& snap_id) override;
+
     // Atomic checkpoint: workspace + scrollbacks + snapshot in one transaction.
     bool checkpoint(const remin::core::WorkspaceId& ws_id,
                     const remin::core::json& workspace_state,

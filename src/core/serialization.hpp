@@ -62,6 +62,25 @@ inline void from_json(const json& j, InterruptedCommand& c) {
     c.source = interrupted_source_from_string(j.value("source", "unknown"));
 }
 
+// -- CommandRecord --------------------------------------------------------
+// Older checkpoints stored `command_history` as a plain array of strings.
+// `from_json` accepts both the object form we write and the legacy string
+// form (timestamp is unknowable for migrated rows → 0), so reads never break
+// on pre-CommandRecord data.
+
+inline void to_json(json& j, const CommandRecord& r) {
+    j = json{{"command", r.command}, {"timestamp_us", r.timestamp_us}};
+}
+
+inline void from_json(const json& j, CommandRecord& r) {
+    if (j.is_string()) {
+        r = CommandRecord{j.get<std::string>(), 0};
+        return;
+    }
+    r.command = j.value("command", std::string{});
+    r.timestamp_us = j.value("timestamp_us", std::int64_t{0});
+}
+
 inline void to_json(json& j, const PaneState& s) {
     j = json{
         {"cwd", s.cwd},
@@ -159,7 +178,7 @@ inline void from_json(const json& j, Tab& t) {
 inline void to_json(json& j, const Window& w) {
     j = json{
         {"id", w.id.str()},
-        {"title", w.title},
+        {"label", w.label},
         {"x", w.x},
         {"y", w.y},
         {"width", w.width},
@@ -172,7 +191,10 @@ inline void to_json(json& j, const Window& w) {
 
 inline void from_json(const json& j, Window& w) {
     w.id = WindowId{j.value("id", std::string{})};
-    w.title = j.value("title", std::string{});
+    // "label" is the current key; old checkpoints stored it as "title".
+    if (j.contains("label")) w.label = j.at("label").get<std::string>();
+    else if (j.contains("title")) w.label = j.at("title").get<std::string>();
+    w.x = j.value("x", 0);
     w.x = j.value("x", 0);
     w.y = j.value("y", 0);
     w.width = j.value("width", 0u);
@@ -286,6 +308,27 @@ inline void migrate_workspace_json(json& j) {
     if (j.contains("windows")) {
         for (auto& win : j.at("windows")) migrate_window(win);
     }
+}
+
+inline void to_json(json& j, const ClosedWindowSnapshot& s) {
+    j = json{
+        {"id", s.id.str()},
+        {"workspace_id", ""},  // filled by storage layer
+        {"window_id", s.window_id.str()},
+        {"label", s.label},
+        {"closed_at", to_iso8601(s.closed_at)},
+        {"state_json", s.workspace_state_json},
+        {"generation", s.generation},
+    };
+}
+
+inline void from_json(const json& j, ClosedWindowSnapshot& s) {
+    s.id = SnapshotId{j.value("id", std::string{})};
+    s.window_id = WindowId{j.value("window_id", std::string{})};
+    s.label = j.value("label", std::string{});
+    s.closed_at = from_iso8601(j.value("closed_at", std::string{}));
+    s.workspace_state_json = j.value("state_json", std::string{});
+    s.generation = j.value("generation", std::uint64_t{0});
 }
 
 } // namespace remin::core

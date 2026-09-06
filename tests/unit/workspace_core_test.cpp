@@ -53,6 +53,12 @@ public:
     void store_scrollback(const PaneId&, std::string) override {}
     std::string load_scrollback(const PaneId&) override { return {}; }
 
+    // Closed-window history (stubs)
+    void store_closed_window(const ClosedWindowSnapshot&) override {}
+    std::vector<ClosedWindowSnapshot> list_closed_windows(const WorkspaceId&) override { return {}; }
+    std::optional<ClosedWindowSnapshot> load_closed_window(const WorkspaceId&, const SnapshotId&) override { return std::nullopt; }
+    void delete_closed_window(const WorkspaceId&, const SnapshotId&) override {}
+
     bool checkpoint(const WorkspaceId&, const json&, int, int64_t, const std::string&,
                     const std::vector<std::pair<PaneId, std::string>>&) override {
         return true;

@@ -1,5 +1,6 @@
 #include "gui/window/main_window.hpp"
 #include "gui/window/settings_dialog.hpp"
+#include "core/serialization.hpp"
 #include <adwaita.h>
 #include <terminal/shell/shell.hpp>
 
@@ -122,14 +123,30 @@ MainWindow::MainWindow(SessionController* controller,
         new_terminal_tab();
     }
 
+    // Runtime capture channel: this window is the only owner of the live
+    // surface widgets, so it registers the real capture. SessionController
+    // invokes it before every checkpoint so pane/note/directory/focus state is
+    // persisted atomically (P5 acceptance: capture must precede checkpoint).
+    if (controller_) {
+        controller_->set_runtime_capture_callback([this]() { capture_all_runtime_state(); });
+    }
+
     // Apply startup sidebar visibility from the persisted setting. Default is
     // closed; the toggle icon must match the actual (open/closed) state.
     apply_initial_sidebar_state();
 
     // Connect shutdown checkpoint: capture runtime state + atomic recovery checkpoint
     // when the window is about to close (X button, Alt+F4, etc.).
+    // If window history is enabled, also capture a ClosedWindowSnapshot for the
+    // History panel's Windows mode (distinct from Recovery).
     signal_close_request().connect(
         [this]() -> bool {
+            if (controller_ && controller_->window_history_enabled()) {
+                auto snap = capture_closed_window();
+                if (!snap.label.empty() && controller_->core() && controller_->core()->storage()) {
+                    controller_->core()->storage()->store_closed_window(snap);
+                }
+            }
             if (controller_) controller_->checkpoint_recovery();
             return false; // allow the window to close
         },
@@ -512,11 +529,43 @@ void MainWindow::setup_content_stack() {
 
 void MainWindow::restore_workspace() {
     if (!core_ || !core_->current_workspace()) return;
-    const auto* ws = core_->current_workspace();
+    auto* ws = core_->current_workspace();
+
+    // P5 contract §4: when window-session persistence is OFF the app starts
+    // fresh. Stored window state is cleared explicitly (cleanup semantics) so
+    // the database never accumulates stale Window entities; nothing is
+    // restored and the caller/constructor creates a fresh default window.
+    if (controller_ && !controller_->persist_open_windows()) {
+        ws->windows.clear();
+        ws->focus_window_id.reset();
+        window_id_ = {};
+        return;
+    }
+
     if (ws->windows.empty()) return;
 
-    // For V1, we only handle the first window (this MainWindow).
-    const auto& win = ws->windows.front();
+    // Bind this single V1 MainWindow to the most recently active window of the
+    // latest valid committed state (§5). focus_window_id is set whenever a
+    // window is created or focused, so it is exactly "the window last used at
+    // the last checkpoint" — NOT MAX(created_at) and never a fresh INSERT.
+    // Other open windows (e.g. W42 + W51 in the same workspace) are real Window
+    // entities and MUST survive the restart untouched — this V1 GUI only
+    // displays the active one; it never prunes or clones the rest.
+    remin::core::WindowId win_id = ws->focus_window_id.value_or(ws->windows.front().id);
+    bool found = false;
+    for (const auto& wnd : ws->windows) {
+        if (wnd.id == win_id) { found = true; break; }
+    }
+    if (!found) win_id = ws->windows.front().id;
+    window_id_ = win_id;
+    if (controller_) controller_->set_current_window(win_id);
+
+    const remin::core::Window* win_ptr = nullptr;
+    for (const auto& wnd : ws->windows) {
+        if (wnd.id == win_id) { win_ptr = &wnd; break; }
+    }
+    if (!win_ptr) return;
+    const auto& win = *win_ptr;
     if (win.tabs.empty()) return;
 
     // Restore window geometry
@@ -535,7 +584,7 @@ void MainWindow::restore_workspace() {
     for (const auto& tab : win.tabs) {
         if (tab.kind == remin::core::TabKind::Terminal) {
             // Terminal tab with pane tree
-            auto* view = new TerminalTabView(controller_, this, win.id, tab.id, remin::core::PaneId{});
+            auto* view = new TerminalTabView(controller_, this, win.id, tab.id);
             view->set_close_tab_request_callback([this, view]() {
                 for (size_t i = 0; i < tabs_.size(); ++i) {
                     if (tabs_[i].get() == view) {
@@ -556,6 +605,10 @@ void MainWindow::restore_workspace() {
                 std::string note_id = controller_->restore_note(*tab.note_state);
                 if (!note_id.empty()) {
                     auto* view = new NoteTabView(controller_, note_id);
+                    view->set_tab_ids(win.id, tab.id);
+                    if (!tab.note_state->title.empty()) {
+                        view->set_title(tab.note_state->title);
+                    }
                     view->set_close_tab_request_callback([this, view]() {
                         for (size_t i = 0; i < tabs_.size(); ++i) {
                             if (tabs_[i].get() == view) {
@@ -615,11 +668,16 @@ void MainWindow::restore_workspace() {
     update_status_bar();
 }
 
-// Capture runtime state (scrollback, cwd, cols/rows, interrupted_command)
-    // from all terminal panes and feed into core via apply_runtime_state().
-    // Call before any checkpoint (autosave, recovery, manual).
+// Capture runtime state (scrollback, cwd, cols/rows, interrupted_command,
+    // note bodies, directory tree, geometry, focus) from the live GUI and feed
+    // it into core. Called before any checkpoint (autosave, recovery, manual)
+    // so the persisted snapshot reflects what the user sees, not stale data.
     void MainWindow::capture_all_runtime_state() {
         if (!core_) return;
+        auto* ws = core_->current_workspace();
+        if (!ws) return;
+
+        // Terminal panes: runtime_capture() → canonical PaneState.
         for (auto* term_tab : term_tabs_) {
             const remin::core::TabId tab_id = term_tab->tab_id();
             for (const auto& [pane_id_str, pane] : term_tab->panes()) {
@@ -628,6 +686,93 @@ void MainWindow::restore_workspace() {
                 core_->apply_runtime_state(tab_id, pane_id, snap);
             }
         }
+
+        // Note tabs: capture editor state into each note tab's core NoteTabState.
+        for (auto* note : note_tabs_) {
+            const auto& w_id = note->window_id();
+            const auto& t_id = note->tab_id();
+            if (w_id.empty() || t_id.empty()) continue;
+            auto st = note->capture_state();
+            remin::core::NoteTabState nts;
+            nts.document_id = note->id();
+            nts.path = note->path();
+            nts.title = note->title();
+            nts.content = st.content;
+            nts.modified = note->is_modified();
+            nts.cursor = st.cursor_offset;
+            nts.scroll = st.scroll_fraction;
+            nts.preview_enabled = st.preview_enabled;
+            nts.split_ratio = st.split_ratio;
+            nts.sync_scroll = st.sync_scroll;
+            core_->set_tab_note_state(w_id, t_id, nts);
+            // Keep the core tab's title in sync (note title changes on open/save).
+            for (auto& wnd : ws->windows) {
+                if (wnd.id != w_id) continue;
+                for (auto& t : wnd.tabs) {
+                    if (t.id == t_id) t.title = note->title();
+                }
+            }
+        }
+
+        // Directory tree panel state.
+        if (directory_panel_) ws->ui.directory_tree = directory_panel_->capture_state();
+
+        // Focus + geometry of this window.
+        for (auto& wnd : ws->windows) {
+            if (wnd.id != window_id_) continue;
+            int ww = 0, wh = 0;
+            const int gw = get_width();
+            const int gh = get_height();
+            if (gw > 0) { ww = gw; }
+            if (gh > 0) { wh = gh; }
+            if (ww > 0) wnd.width = static_cast<std::uint32_t>(ww);
+            if (wh > 0) wnd.height = static_cast<std::uint32_t>(wh);
+            if (active_tab_ >= 0 && active_tab_ < static_cast<int>(tabs_.size())) {
+                if (auto* t = dynamic_cast<TerminalTabView*>(tabs_[active_tab_].get())) {
+                    wnd.focus_tab_id = t->tab_id();
+                    if (!t->focused_pane_id().empty()) wnd.focus_pane_id = t->focused_pane_id();
+                } else if (auto* n = dynamic_cast<NoteTabView*>(tabs_[active_tab_].get())) {
+                    wnd.focus_tab_id = n->tab_id();
+                }
+            }
+        }
+        ws->focus_window_id = window_id_;
+    }
+
+    // Capture the current window state as a ClosedWindowSnapshot for window history.
+    // Called when the user closes the window (with window_history_enabled = ON).
+    remin::core::ClosedWindowSnapshot MainWindow::capture_closed_window() {
+        remin::core::ClosedWindowSnapshot snap;
+        if (!core_) return snap;
+        auto* ws = core_->current_workspace();
+        if (!ws) return snap;
+
+        // Ensure runtime state is up to date.
+        capture_all_runtime_state();
+
+        // Find this window in the workspace.
+        remin::core::Window* target = nullptr;
+        for (auto& w : ws->windows) {
+            if (w.id == window_id_) {
+                target = &w;
+                break;
+            }
+        }
+        if (!target) return snap;
+
+        snap.id = remin::core::SnapshotId::generate();
+        snap.window_id = window_id_;
+        snap.label = target->label;
+        snap.closed_at = std::chrono::system_clock::now();
+        snap.generation = ws->generation;
+
+        // Serialize the full workspace but we only need this window's state.
+        // For simplicity, serialize the whole workspace (it's the same data checkpoint uses).
+        remin::core::json ws_json;
+        to_json(ws_json, *ws);
+        snap.workspace_state_json = ws_json.dump();
+
+        return snap;
     }
 
     void MainWindow::setup_sidebar() {
@@ -656,13 +801,130 @@ void MainWindow::restore_workspace() {
     sidebar_stack_->set_hexpand(false);
     sidebar_stack_->set_vexpand(true);
 
-    // History page.
+    // History page — sub-modes via dropdown (override frozen rule for this widget).
     history_scroller_ = Gtk::make_managed<Gtk::ScrolledWindow>();
     history_scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
     history_scroller_->set_vexpand(true);
-    history_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
-    history_scroller_->set_child(*history_list_);
-    sidebar_stack_->add(*history_scroller_, "history", "History");
+
+    // Sub-stack for the three history views.
+    history_sub_stack_ = Gtk::make_managed<Gtk::Stack>();
+    history_sub_stack_->set_hexpand(false);
+    history_sub_stack_->set_vexpand(true);
+
+    // Commands view (existing command history list).
+    history_commands_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    auto* commands_scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
+    commands_scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
+    commands_scroller->set_vexpand(true);
+    commands_scroller->set_child(*history_commands_list_);
+    history_sub_stack_->add(*commands_scroller, "commands", "Commands");
+
+    // Transcripts view — placeholder (blocked per D1).
+    history_transcripts_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 12);
+    history_transcripts_list_->set_margin_top(24);
+    history_transcripts_list_->set_margin_bottom(24);
+    history_transcripts_list_->set_margin_start(12);
+    history_transcripts_list_->set_margin_end(12);
+    auto* transcript_label = Gtk::make_managed<Gtk::Label>("Transcript recording is not available yet.\n\nRequires a safe PTY output tee point (see docs/design/transcript-recorder-architecture.md).");
+    transcript_label->set_wrap(true);
+    transcript_label->set_xalign(0.5);
+    transcript_label->set_yalign(0.5);
+    transcript_label->add_css_class("remin-placeholder-text");
+    history_transcripts_list_->append(*transcript_label);
+    auto* transcripts_scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
+    transcripts_scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
+    transcripts_scroller->set_vexpand(true);
+    transcripts_scroller->set_child(*history_transcripts_list_);
+    history_sub_stack_->add(*transcripts_scroller, "transcripts", "Transcripts");
+
+    // Windows view (closed windows history).
+    history_windows_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    auto* windows_scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
+    windows_scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
+    windows_scroller->set_vexpand(true);
+    windows_scroller->set_child(*history_windows_list_);
+    history_sub_stack_->add(*windows_scroller, "windows", "Windows");
+
+    // History sub-mode dropdown button (replaces 3 horizontal tabs per frozen-rule override).
+    // Use Gtk::Button + Popover (not MenuButton) for full label+icon control.
+    history_sub_mode_btn_ = Gtk::make_managed<Gtk::Button>();
+    history_sub_mode_btn_->set_has_frame(true);
+    history_sub_mode_btn_->add_css_class("remin-history-sub-mode-btn");
+    history_sub_mode_btn_->set_halign(Gtk::Align::FILL);
+    history_sub_mode_btn_->set_hexpand(true);
+
+    // HBox with label + arrow icon (full control, no GTK auto-layout).
+    auto btn_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 6);
+    btn_box->set_halign(Gtk::Align::CENTER);
+    
+    auto label = Gtk::make_managed<Gtk::Label>("Commands");
+    label->set_use_underline(false);
+    label->set_visible(true);
+    current_mode_label_ = label;
+    auto arrow_icon = Gtk::make_managed<Gtk::Image>();
+    arrow_icon->set_from_icon_name("pan-down-symbolic");
+    arrow_icon->set_icon_size(Gtk::IconSize::NORMAL);
+    
+    btn_box->append(*current_mode_label_);
+    btn_box->append(*arrow_icon);
+    history_sub_mode_btn_->set_child(*btn_box);
+
+    // Custom Popover with buttons (no MenuModel - full control).
+    auto popover = Gtk::make_managed<Gtk::Popover>();
+    popover->set_parent(*history_sub_mode_btn_); // anchor to button
+    auto popover_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    popover_box->set_margin(4);
+
+    auto btn_commands = Gtk::make_managed<Gtk::Button>("Commands");
+    btn_commands->set_has_frame(false);
+    btn_commands->set_halign(Gtk::Align::FILL);
+    btn_commands->signal_clicked().connect([this, popover]() {
+        set_history_sub_mode("commands");
+        popover->popdown();
+    });
+
+    auto btn_transcripts = Gtk::make_managed<Gtk::Button>("Transcripts");
+    btn_transcripts->set_has_frame(false);
+    btn_transcripts->set_halign(Gtk::Align::FILL);
+    btn_transcripts->signal_clicked().connect([this, popover]() {
+        set_history_sub_mode("transcripts");
+        popover->popdown();
+    });
+
+    auto btn_windows = Gtk::make_managed<Gtk::Button>("Windows");
+    btn_windows->set_has_frame(false);
+    btn_windows->set_halign(Gtk::Align::FILL);
+    btn_windows->signal_clicked().connect([this, popover]() {
+        set_history_sub_mode("windows");
+        popover->popdown();
+    });
+
+    popover_box->append(*btn_commands);
+    popover_box->append(*btn_transcripts);
+    popover_box->append(*btn_windows);
+    popover->set_child(*popover_box);
+
+    // Open popover on button click.
+    history_sub_mode_btn_->signal_clicked().connect([popover]() {
+        popover->popup();
+    });
+
+    // Sync label when stack changes.
+    if (history_sub_stack_) {
+        history_sub_stack_->property_visible_child_name().signal_changed().connect([this]() {
+            if (!current_mode_label_) return;
+            auto current = history_sub_stack_->get_visible_child_name();
+            if (current == "commands") current_mode_label_->set_text("Commands");
+            else if (current == "transcripts") current_mode_label_->set_text("Transcripts");
+            else if (current == "windows") current_mode_label_->set_text("Windows");
+        });
+    }
+
+    // History page wrapper: sub-mode dropdown + sub-stack.
+    auto* history_page = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 4);
+    history_page->append(*history_sub_mode_btn_);
+    history_page->append(*history_sub_stack_);
+    sidebar_stack_->add(*history_page, "history", "History");
 
     // Directory page — delegated to a focused DirectoryTreePanel.
     directory_panel_ = Gtk::make_managed<DirectoryTreePanel>(
@@ -684,6 +946,7 @@ void MainWindow::restore_workspace() {
     if (controller_) controller_->migrate_legacy_command_history();
     update_history_sidebar();
     set_sidebar_mode("history");
+    set_history_sub_mode("commands");
 }
 
 void MainWindow::set_sidebar_mode(const std::string& mode) {
@@ -709,9 +972,23 @@ void MainWindow::set_sidebar_mode(const std::string& mode) {
     }
 }
 
+void MainWindow::set_history_sub_mode(const std::string& mode) {
+    if (!history_sub_stack_) return;
+    if (mode == "commands") {
+        history_sub_stack_->set_visible_child("commands");
+        update_history_sidebar();
+    } else if (mode == "transcripts") {
+        history_sub_stack_->set_visible_child("transcripts");
+        // Transcripts is a static placeholder — nothing to refresh.
+    } else if (mode == "windows") {
+        history_sub_stack_->set_visible_child("windows");
+        update_history_windows_list();
+    }
+}
+
 void MainWindow::update_history_sidebar() {
-    if (!history_list_) return;
-    while (auto* child = history_list_->get_first_child()) history_list_->remove(*child);
+    if (!history_commands_list_) return;
+    while (auto* child = history_commands_list_->get_first_child()) history_commands_list_->remove(*child);
 
     // The sidebar is an aggregate QUERY of the workspace's per-pane canonical
     // history (design §6.3) — never a second local store.
@@ -729,7 +1006,7 @@ void MainWindow::update_history_sidebar() {
                 if (auto* p = t->focused_pane()) p->feed(cmd);
             }
         });
-        history_list_->append(*btn);
+        history_commands_list_->append(*btn);
     };
 
     const auto back = std::min<std::size_t>(history.size(), 500);
@@ -740,6 +1017,38 @@ void MainWindow::update_history_sidebar() {
     if (history_scroller_) {
         auto v = history_scroller_->get_vadjustment();
         if (v) v->set_value(v->get_upper());
+    }
+}
+
+void MainWindow::update_history_windows_list() {
+    if (!history_windows_list_ || !controller_ || !controller_->core()) return;
+    auto* core = controller_->core();
+    auto* ws = core->current_workspace();
+    if (!ws) return;
+    auto* storage = core->storage();
+    if (!storage) return;
+
+    while (auto* child = history_windows_list_->get_first_child()) history_windows_list_->remove(*child);
+
+    auto closed = storage->list_closed_windows(ws->id);
+    for (const auto& snap : closed) {
+        auto time_str = std::to_string(snap.closed_at.time_since_epoch().count());
+        auto* btn = Gtk::make_managed<Gtk::Button>(snap.label + "  (" + time_str + ")");
+        btn->add_css_class("remin-history-item");
+        btn->set_halign(Gtk::Align::FILL);
+        btn->signal_clicked().connect([this, snap_id = snap.id, ws_id = ws->id, label = snap.label]() {
+            // Restore closed window: not implemented in V1 (multi-window GUI is V2+).
+            // For now just show a placeholder message.
+            auto dialog = Gtk::make_managed<Gtk::MessageDialog>(
+                *this, "Window History",
+                false, Gtk::MessageType::INFO, Gtk::ButtonsType::OK, true);
+            dialog->set_secondary_text(
+                "Restoring closed windows will be implemented with multi-window GUI (V2+).\n"
+                "Window: " + label);
+            dialog->signal_response().connect([dialog](int) { dialog->close(); });
+            dialog->present();
+        });
+        history_windows_list_->append(*btn);
     }
 }
 
@@ -854,6 +1163,7 @@ void MainWindow::setup_find_bar() {
 void MainWindow::new_terminal_tab() {
     auto tab_info = controller_->new_terminal_tab("terminal");
     if (tab_info.tab.empty()) return;
+    window_id_ = tab_info.window;
 
     auto* view = new TerminalTabView(controller_, this, tab_info.window, tab_info.tab, tab_info.root_pane);
     view->set_color_request_callback([this]() { on_terminal_color_profile(); });
@@ -889,6 +1199,9 @@ void MainWindow::new_note_tab() {
     if (noteId.empty()) return;
 
     auto* view = new NoteTabView(controller_, noteId);
+    if (auto binding = controller_->note_tab_binding(noteId)) {
+        view->set_tab_ids(binding->first, binding->second);
+    }
     view->set_save_state_callback([this]() {
         update_tab_bar();
     });
@@ -1453,6 +1766,12 @@ bool MainWindow::on_find_key_pressed(guint keyval, guint, Gdk::ModifierType mods
         show_find_bar(false);
         return true;
     }
+    if (ctrl && shift && (keyval == GDK_KEY_h || keyval == GDK_KEY_H)) {
+        // History panel (spec §9). Must be checked BEFORE the plain Ctrl+H
+        // branch below — Ctrl+H alone keeps the find/replace bar in replace mode.
+        open_history_panel();
+        return true;
+    }
     if (ctrl && (keyval == GDK_KEY_h || keyval == GDK_KEY_H)) {
         show_find_bar(true);
         return true;
@@ -1660,6 +1979,13 @@ void MainWindow::toggle_history_sidebar() {
     }
 }
 
+void MainWindow::open_history_panel() {
+    if (!main_paned_) return;
+    if (!sidebar_visible_) toggle_history_sidebar();
+    // set_sidebar_mode("history") also refreshes the aggregate history list.
+    set_sidebar_mode("history");
+}
+
 void MainWindow::apply_initial_sidebar_state() {
     if (!main_paned_) return;
 
@@ -1716,6 +2042,9 @@ void MainWindow::open_note_from_path(const std::filesystem::path& path) {
     if (noteId.empty()) return;
 
     auto* view = new NoteTabView(controller_, noteId);
+    if (auto binding = controller_->note_tab_binding(noteId)) {
+        view->set_tab_ids(binding->first, binding->second);
+    }
     view->set_save_state_callback([this]() {
         update_tab_bar();
     });

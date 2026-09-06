@@ -33,6 +33,17 @@ CREATE TABLE IF NOT EXISTS scrollbacks (
     content TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS closed_windows (
+    id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    window_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    closed_at TEXT NOT NULL,
+    state_json TEXT NOT NULL,
+    generation INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (workspace_id, id)
+) WITHOUT ROWID;
 )SQL";
 
 // Migration: add schema_version, generation, reason to snapshots if missing.

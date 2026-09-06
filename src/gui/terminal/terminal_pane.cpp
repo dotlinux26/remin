@@ -11,8 +11,9 @@
 
 namespace remin::gui {
 
-TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd)
-    : shell_(shell), cwd_(cwd), title_("terminal") {
+TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd,
+                           const std::string& history_file)
+    : shell_(shell), cwd_(cwd), history_file_(history_file), title_("terminal") {
 
     // Container (gtkmm): a simple box that will own the native VTE widget.
     auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
@@ -68,6 +69,10 @@ TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd)
 }
 
 TerminalPane::~TerminalPane() {
+    if (envp_) {
+        g_strfreev(envp_);
+        envp_ = nullptr;
+    }
     if (widget_) {
         // Release the extra ref we took in the constructor.
         // If the widget is still parented (normal operation), the parent holds
@@ -85,13 +90,23 @@ Gtk::Widget& TerminalPane::widget() {
 void TerminalPane::spawn_shell(const std::string& cwd) {
     if (!vte_) return;
     const char* shell_argv[] = { shell_.c_str(), nullptr };
-    char** envp = nullptr;
+
+    // Build the spawn environment once: inherit the parent env, then point
+    // HISTFILE at this pane's dedicated file. Kept alive on the object because
+    // spawn is asynchronous and GLib does not copy envp.
+    if (!envp_) {
+        envp_ = g_get_environ();
+        if (!history_file_.empty()) {
+            envp_ = g_environ_setenv(envp_, "HISTFILE", history_file_.c_str(), TRUE);
+        }
+    }
+
     vte_terminal_spawn_async(
         vte_,
         VTE_PTY_DEFAULT,
         cwd.empty() ? nullptr : cwd.c_str(),
         const_cast<char**>(shell_argv),
-        envp,
+        envp_,
         G_SPAWN_SEARCH_PATH,
         nullptr, nullptr, nullptr, -1, nullptr,
         &TerminalPane::on_spawned_trampoline, this);
@@ -172,12 +187,15 @@ void TerminalPane::feed(std::string_view data) {
 
 std::string TerminalPane::capture_scrollback() const {
     if (!vte_) return {};
-    // Full range: negative start covers the entire scrollback buffer, end is
-    // just past the visible region (design §5.1).
+    // Full range: negative start rows reach back into the scrollback buffer,
+    // end is just past the visible region (design §5.1). Bound the start to the
+    // configured scrollback size — a huge negative start (e.g. -(1<<30)) makes
+    // VTE 0.76 hang when computing the text range.
+    constexpr glong kScrollbackLines = 10000;
     const glong rows = vte_terminal_get_row_count(vte_);
     gsize len = 0;
     char* text = vte_terminal_get_text_range_format(vte_, VTE_FORMAT_TEXT,
-                                                    -(1 << 30), 0, rows, 0, &len);
+                                                    -(rows + kScrollbackLines), 0, rows, 0, &len);
     std::string out = text ? text : "";
     if (text) g_free(text);
     return out;
@@ -274,7 +292,9 @@ void TerminalPane::on_commit_trampoline(GtkWidget*, const char* text, guint size
         }
         if (!line.empty()) {
             self->last_command_ = line;
-            if (self->on_command_) self->on_command_(line);
+            if (self->on_command_) {
+                self->on_command_(remin::core::CommandRecord{line, now_us});
+            }
         }
     }
 }

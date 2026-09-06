@@ -48,6 +48,12 @@ public:
     void store_scrollback(const PaneId&, std::string) override {}
     std::string load_scrollback(const PaneId&) override { return {}; }
 
+    // Closed-window history (stubs)
+    void store_closed_window(const ClosedWindowSnapshot&) override {}
+    std::vector<ClosedWindowSnapshot> list_closed_windows(const WorkspaceId&) override { return {}; }
+    std::optional<ClosedWindowSnapshot> load_closed_window(const WorkspaceId&, const SnapshotId&) override { return std::nullopt; }
+    void delete_closed_window(const WorkspaceId&, const SnapshotId&) override {}
+
     bool checkpoint(const WorkspaceId&, const json&, int, int64_t, const std::string&,
                     const std::vector<std::pair<PaneId, std::string>>&) override {
         return true;
@@ -67,37 +73,41 @@ int main() {
     auto pane2 = core.split_pane(tab_id, PaneTree::Kind::SplitVertical, 0.5);
 
     // -- add_command_to_pane appends to the correct pane only --
-    CHECK(core.add_command_to_pane(tab_id, pane1.id, "pwd"));
-    CHECK(core.add_command_to_pane(tab_id, pane1.id, "nmap -sV 10.0.0.1"));
-    CHECK(core.add_command_to_pane(tab_id, pane2, "ffuf -u http://10.0.0.1/FUZZ"));
+    CHECK(core.add_command_to_pane(tab_id, pane1.id, CommandRecord{"pwd", 1111}));
+    CHECK(core.add_command_to_pane(tab_id, pane1.id, CommandRecord{"nmap -sV 10.0.0.1", 2222}));
+    CHECK(core.add_command_to_pane(tab_id, pane2, CommandRecord{"ffuf -u http://10.0.0.1/FUZZ", 3333}));
 
     auto aggregate = aggregate_command_history(*core.current_workspace());
     CHECK(aggregate.size() == 3);
     if (aggregate.size() == 3) {
         CHECK(aggregate[0].tab == tab_id);
         CHECK(aggregate[0].pane == pane1.id);
-        CHECK(aggregate[0].command == "pwd");
-        CHECK(aggregate[1].command == "nmap -sV 10.0.0.1");
+        CHECK(aggregate[0].record.command == "pwd");
+        CHECK(aggregate[0].record.timestamp_us == 1111);
+        CHECK(aggregate[1].record.command == "nmap -sV 10.0.0.1");
         CHECK(aggregate[2].pane == pane2);
-        CHECK(aggregate[2].command == "ffuf -u http://10.0.0.1/FUZZ");
+        CHECK(aggregate[2].record.command == "ffuf -u http://10.0.0.1/FUZZ");
+        CHECK(aggregate[2].record.timestamp_us == 3333);
     }
 
-    // -- Adjacent dedupe: re-running Up+Enter (the last command) must not duplicate --
-    CHECK(core.add_command_to_pane(tab_id, pane1.id, "nmap -sV 10.0.0.1"));
+    // -- Adjacent dedupe: re-running Up+Enter (the last command) must not duplicate,
+    //    even with a fresh timestamp --
+    CHECK(core.add_command_to_pane(tab_id, pane1.id, CommandRecord{"nmap -sV 10.0.0.1", 4444}));
     CHECK(aggregate_command_history(*core.current_workspace()).size() == 3);
     // A repeat that is NOT adjacent is kept.
-    CHECK(core.add_command_to_pane(tab_id, pane1.id, "whoami"));
-    CHECK(core.add_command_to_pane(tab_id, pane1.id, "pwd"));
+    CHECK(core.add_command_to_pane(tab_id, pane1.id, CommandRecord{"whoami", 5555}));
+    CHECK(core.add_command_to_pane(tab_id, pane1.id, CommandRecord{"pwd", 6666}));
     CHECK(aggregate_command_history(*core.current_workspace()).size() == 5);
 
     // -- Empty commands and unknown ids are rejected --
-    CHECK(!core.add_command_to_pane(tab_id, pane1.id, ""));
-    CHECK(!core.add_command_to_pane(TabId{"nope"}, pane1.id, "ls"));
-    CHECK(!core.add_command_to_pane(tab_id, PaneId{"nope"}, "ls"));
+    CHECK(!core.add_command_to_pane(tab_id, pane1.id, CommandRecord{"", 0}));
+    CHECK(!core.add_command_to_pane(TabId{"nope"}, pane1.id, CommandRecord{"ls", 0}));
+    CHECK(!core.add_command_to_pane(tab_id, PaneId{"nope"}, CommandRecord{"ls", 0}));
 
     // -- Cap: only the newest kMaxCommandHistoryPerPane entries survive --
     for (std::size_t i = 1; i <= 1200; ++i) {
-        core.add_command_to_pane(tab_id, pane2, "cmd-" + std::to_string(i));
+        core.add_command_to_pane(tab_id, pane2, CommandRecord{"cmd-" + std::to_string(i),
+                                                              static_cast<std::int64_t>(i)});
     }
     {
         const Workspace* ws = core.current_workspace();
@@ -113,8 +123,11 @@ int main() {
             // 1200 pushes, cap 1000 → keeps the newest 1000 ("cmd-201".."cmd-1200").
             CHECK(p2->state.command_history.size() == 1000);
             if (!p2->state.command_history.empty()) {
-                CHECK(p2->state.command_history.front() == "cmd-201");
-                CHECK(p2->state.command_history.back() == "cmd-1200");
+                CHECK(p2->state.command_history.front().command == "cmd-201");
+                // Timestamps survive the cap alongside their command.
+                CHECK(p2->state.command_history.front().timestamp_us == 201);
+                CHECK(p2->state.command_history.back().command == "cmd-1200");
+                CHECK(p2->state.command_history.back().timestamp_us == 1200);
             }
             // pane1's own history is untouched by the cap on pane2.
             CHECK(p1->state.command_history.size() == 4);

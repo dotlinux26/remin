@@ -14,12 +14,14 @@ constexpr const char* kPathPrefix = "note-path:";
 constexpr const char* kAutosaveTempKey = "settings:autosave-temp";
 constexpr const char* kAutoReloadKey = "settings:autoreload";
 constexpr const char* kAutoShowPanelKey = "settings:autoshow-panel";
+constexpr const char* kPersistOpenWindowsKey = "settings:persist-open-windows";
 constexpr const char* kUnsavedCloseKey = "settings:unsaved-close";
 constexpr const char* kThemeDarkKey = "settings:theme-dark";
 constexpr const char* kColorProfileFgKey = "settings:color-profile-fg";
 constexpr const char* kColorProfileBgKey = "settings:color-profile-bg";
 constexpr const char* kTerminalFgKey = "settings:terminal-fg";
 constexpr const char* kTerminalBgKey = "settings:terminal-bg";
+constexpr const char* kWindowHistoryKey = "settings:window-history";
 // Reserved, prefixed ids in the shared blob store must be mutated safely; the
 // blob interface is keyed by PaneId, so we wrap metadata strings in PaneId.
 remin::core::PaneId meta_id(const std::string& key) {
@@ -36,8 +38,11 @@ SessionController::SessionController(remin::core::WorkspaceCore* core,
     if (autosaver_) {
         autosaver_->set_terminal_debounce(std::chrono::seconds(2));
         autosaver_->set_note_idle(std::chrono::seconds(10));
-        // Wire autosave flush to atomic checkpoint (reason="autosave")
+        // Wire autosave flush to atomic checkpoint (reason="autosave"). The
+        // GUI runtime capture (MainWindow) runs first, so the checkpoint
+        // persists live pane/note/directory/focus state, not stale data.
         autosaver_->set_workspace_provider([this]() {
+            if (runtime_capture_) runtime_capture_();
             if (core_) core_->checkpoint("autosave");
         });
     }
@@ -57,7 +62,50 @@ bool SessionController::rename_workspace(const std::string& name) {
 }
 
 remin::core::WindowId SessionController::add_window(const std::string& title) {
-    return core_ ? core_->add_window(title) : remin::core::WindowId{};
+    auto id = core_ ? core_->add_window(title) : remin::core::WindowId{};
+    if (!id.empty()) current_window_ = id;
+    return id;
+}
+
+// Resolve the single core window this MainWindow represents. Order: the window
+// pinned by restore_workspace (current_window_) → the workspace's focused
+// window → the first window → a freshly created window.
+remin::core::WindowId SessionController::ensure_window() {
+    if (!core_) return {};
+    auto* ws = core_->current_workspace();
+    if (!ws) return current_window_;
+
+    const auto find = [&](const remin::core::WindowId& id) -> bool {
+        for (const auto& w : ws->windows) if (w.id == id) return true;
+        return false;
+    };
+
+    if (!current_window_.empty() && find(current_window_)) return current_window_;
+    if (ws->focus_window_id && find(*ws->focus_window_id)) {
+        current_window_ = *ws->focus_window_id;
+        return current_window_;
+    }
+    if (!ws->windows.empty()) {
+        current_window_ = ws->windows.front().id;
+        return current_window_;
+    }
+    current_window_ = core_->add_window(default_window_label(ws));
+    return current_window_;
+}
+
+// Default user-facing window label ("My Window 1", "My Window 2", …) chosen so
+// a fresh window never collides with an existing label in the workspace.
+std::string SessionController::default_window_label(const remin::core::Workspace* ws) const {
+    int n = 1;
+    if (ws) {
+        auto taken = [&](const std::string& candidate) {
+            for (const auto& w : ws->windows)
+                if (w.label == candidate) return true;
+            return false;
+        };
+        while (taken("My Window " + std::to_string(n))) ++n;
+    }
+    return "My Window " + std::to_string(n);
 }
 
 bool SessionController::rename_window(const remin::core::WindowId& id,
@@ -68,7 +116,10 @@ bool SessionController::rename_window(const remin::core::WindowId& id,
 SessionController::TerminalTab SessionController::new_terminal_tab(const std::string& title) {
     TerminalTab out;
     if (!core_) return out;
-    out.window = core_->add_window("Window");
+    // V1 GUI is a single MainWindow → one core window. All terminal tabs land
+    // in that window (create it on first use); never one window per tab.
+    out.window = ensure_window();
+    if (out.window.empty()) return out;
     auto leaf = remin::core::PaneTree::leaf(
         remin::core::Pane{remin::core::PaneId::generate(), remin::core::PaneState{}});
     out.tab = core_->add_tab(out.window, title, std::move(leaf));
@@ -120,7 +171,32 @@ std::string SessionController::new_note() {
     if (!core_) return {};
     // Notes share the pane id space (globally unique ids); the body is stored
     // in the generic blob store keyed by this id.
-    return remin::core::PaneId::generate().str();
+    std::string noteId = remin::core::PaneId::generate().str();
+    const auto win = ensure_window();
+    if (win.empty()) return {};
+    // Register the note as a real tab (kind=Note) so it is restored like every
+    // other surface — not just a detached blob.
+    remin::core::NoteTabState st;
+    st.document_id = noteId;
+    st.title = noteId.empty() ? "note" : noteId;
+    core_->add_note_tab(win, st.title, st);
+    return noteId;
+}
+
+std::optional<std::pair<remin::core::WindowId, remin::core::TabId>>
+SessionController::note_tab_binding(const std::string& noteId) const {
+    if (!core_ || noteId.empty()) return std::nullopt;
+    auto* ws = core_->current_workspace();
+    if (!ws) return std::nullopt;
+    for (const auto& w : ws->windows) {
+        for (const auto& t : w.tabs) {
+            if (t.kind == remin::core::TabKind::Note && t.note_state &&
+                t.note_state->document_id == noteId) {
+                return std::make_pair(w.id, t.id);
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 // Create a note tab from existing NoteTabState (for restore).
@@ -219,6 +295,18 @@ void SessionController::set_auto_show_panel_enabled(bool enabled) {
     storage_->store_scrollback(meta_id(kAutoShowPanelKey), enabled ? "1" : "0");
 }
 
+bool SessionController::persist_open_windows() const {
+    if (!storage_) return true;
+    const std::string val = storage_->load_scrollback(meta_id(kPersistOpenWindowsKey));
+    // Missing setting → ON (window session persistence is the default).
+    return val.empty() || val == "1";
+}
+
+void SessionController::set_persist_open_windows(bool enabled) {
+    if (!storage_) return;
+    storage_->store_scrollback(meta_id(kPersistOpenWindowsKey), enabled ? "1" : "0");
+}
+
 SessionController::UnsavedClose SessionController::unsaved_close_behavior() const {
     if (!storage_) return UnsavedClose::Ask;
     const std::string val = storage_->load_scrollback(meta_id(kUnsavedCloseKey));
@@ -231,8 +319,19 @@ void SessionController::set_unsaved_close_behavior(UnsavedClose behavior) {
     if (!storage_) return;
     const char* val = behavior == UnsavedClose::Keep  ? "keep"
                       : behavior == UnsavedClose::Skip ? "skip"
-                                                       : "ask";
+                                                        : "ask";
     storage_->store_scrollback(meta_id(kUnsavedCloseKey), val);
+}
+
+bool SessionController::window_history_enabled() const {
+    if (!storage_) return true; // default ON
+    const std::string val = storage_->load_scrollback(meta_id(kWindowHistoryKey));
+    return val.empty() || val == "1";
+}
+
+void SessionController::set_window_history_enabled(bool enabled) {
+    if (!storage_) return;
+    storage_->store_scrollback(meta_id(kWindowHistoryKey), enabled ? "1" : "0");
 }
 
 bool SessionController::theme_dark() const {
@@ -282,8 +381,8 @@ void SessionController::set_terminal_colors(const std::string& fg, const std::st
 
 bool SessionController::add_command_to_pane(const remin::core::TabId& tab,
                                             const remin::core::PaneId& pane,
-                                            const std::string& command) {
-    return core_ && core_->add_command_to_pane(tab, pane, command);
+                                            const remin::core::CommandRecord& record) {
+    return core_ && core_->add_command_to_pane(tab, pane, record);
 }
 
 void SessionController::migrate_legacy_command_history() {
@@ -308,7 +407,11 @@ void SessionController::migrate_legacy_command_history() {
                 std::istringstream iss(existing);
                 std::string line;
                 while (std::getline(iss, line)) {
-                    if (!line.empty()) core_->add_command_to_pane(t.id, p->id, line);
+                    if (!line.empty()) {
+                        // Legacy rows carry no timestamp (unknowable now → 0).
+                        core_->add_command_to_pane(t.id, p->id,
+                                                   remin::core::CommandRecord{line, 0});
+                    }
                 }
                 storage_->store_scrollback(meta_id(kHistoryKey), "");
                 return;
@@ -323,7 +426,7 @@ std::vector<std::string> SessionController::get_command_history() const {
     const remin::core::Workspace* ws = core_->current_workspace();
     if (!ws) return result;
     for (const auto& e : remin::core::aggregate_command_history(*ws)) {
-        result.push_back(e.command);
+        result.push_back(e.record.command);
     }
     return result;
 }
@@ -335,18 +438,10 @@ bool SessionController::clear_command_history() {
 // -- Checkpoint / Persistence --
 
 void SessionController::capture_all_runtime_state() {
-    if (!core_) return;
-    remin::core::Workspace* ws = core_->current_workspace();
-    if (!ws) return;
-
-    // This method requires access to TerminalTabView instances to call
-    // runtime_capture() on each pane. Since SessionController doesn't own
-    // the GUI widgets, the actual capture is done by MainWindow which
-    // holds the TerminalTabView instances. MainWindow will call
-    // core_->apply_runtime_state() for each pane before checkpoint.
-    // This method is a placeholder for the orchestration layer.
-    // Actual capture is done by MainWindow::capture_all_runtime_state().
-    (void)ws; // suppress unused warning
+    // The GUI owns the capture (MainWindow registers it via
+    // set_runtime_capture_callback). This wrapper is invoked before every
+    // checkpoint; without a registered capture there is nothing to do.
+    if (runtime_capture_) runtime_capture_();
 }
 
 bool SessionController::checkpoint_recovery() {

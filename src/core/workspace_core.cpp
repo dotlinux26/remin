@@ -97,7 +97,7 @@ bool WorkspaceCore::rename_window(const WindowId& id, std::string title) {
     if (!ws_current_) return false;
     for (auto& w : ws_current_->windows) {
         if (w.id == id) {
-            w.title = std::move(title);
+            w.label = std::move(title);
             mark_dirty();
             emit(WorkspaceEvent::Type::WindowRenamed, ws_current_->id, id);
             return true;
@@ -135,6 +135,41 @@ TabId WorkspaceCore::add_tab(const WindowId& window, std::string title, PaneTree
         }
     }
     throw std::runtime_error("window not found");
+}
+
+TabId WorkspaceCore::add_note_tab(const WindowId& window, std::string title,
+                                  NoteTabState state) {
+    if (!ws_current_) throw std::runtime_error("no open workspace");
+    for (auto& w : ws_current_->windows) {
+        if (w.id == window) {
+            auto tab = Tab::create(title.empty() ? "note" : title);
+            const auto id = tab.id;
+            tab.kind = TabKind::Note;
+            tab.note_state = std::move(state);
+            w.tabs.push_back(std::move(tab));
+            w.focus_tab_id = id;
+            mark_dirty();
+            emit(WorkspaceEvent::Type::TabAdded, ws_current_->id, window, id);
+            return id;
+        }
+    }
+    throw std::runtime_error("window not found");
+}
+
+bool WorkspaceCore::set_tab_note_state(const WindowId& window, const TabId& tab,
+                                       const NoteTabState& state) {
+    if (!ws_current_) return false;
+    for (auto& w : ws_current_->windows) {
+        if (w.id != window) continue;
+        for (auto& t : w.tabs) {
+            if (t.id != tab) continue;
+            if (t.kind != TabKind::Note) return false;
+            t.note_state = state;
+            mark_dirty();
+            return true;
+        }
+    }
+    return false;
 }
 
 bool WorkspaceCore::remove_tab(const WindowId& window, const TabId& tab) {
@@ -330,8 +365,8 @@ bool WorkspaceCore::set_pane_ratio(const TabId& tab, const PaneId& pane, double 
 // -- Per-pane command history (canonical, design §6) --
 
 bool WorkspaceCore::add_command_to_pane(const TabId& tab, const PaneId& pane,
-                                        std::string command) {
-    if (!ws_current_ || command.empty()) return false;
+                                        CommandRecord record) {
+    if (!ws_current_ || record.command.empty()) return false;
     for (auto& w : ws_current_->windows) {
         for (auto& t : w.tabs) {
             if (t.id != tab) continue;
@@ -339,10 +374,10 @@ bool WorkspaceCore::add_command_to_pane(const TabId& tab, const PaneId& pane,
             if (!node || !node->pane()) return false;
             auto& hist = node->pane()->state.command_history;
             // Adjacent repeats collapse (pressing Up+Enter re-runs a command).
-            if (!hist.empty() && hist.back() == command) return true;
-            hist.push_back(std::move(command));
+            if (!hist.empty() && hist.back().command == record.command) return true;
+            hist.push_back(std::move(record));
             if (hist.size() > kMaxCommandHistoryPerPane) {
-                using Diff = std::vector<std::string>::difference_type;
+                using Diff = std::vector<CommandRecord>::difference_type;
                 const Diff drop = static_cast<Diff>(hist.size() - kMaxCommandHistoryPerPane);
                 hist.erase(hist.begin(), hist.begin() + drop);
             }

@@ -57,14 +57,24 @@ bool Autosaver::write_entry(const std::string& id, const Entry& e) {
 
 bool Autosaver::flush() {
     bool wrote = false;
+    bool workspace_due = false;
     std::vector<std::string> done;
     done.reserve(pending_.size());
     for (auto& kv : pending_) {
         if (due_entry(kv.second)) {
-            if (write_entry(kv.first, kv.second)) wrote = true;
+            if (kv.second.kind == Kind::Workspace) {
+                // Workspace entries are checkpointed whole (capture live runtime
+                // state + atomic txn) via the workspace provider at flush time —
+                // never written entry-by-entry.
+                workspace_due = true;
+                wrote = true;
+            } else if (write_entry(kv.first, kv.second)) {
+                wrote = true;
+            }
             done.push_back(kv.first);
         }
     }
+    if (workspace_due && workspace_provider_) workspace_provider_();
     for (const auto& k : done) pending_.erase(k);
     return wrote;
 }

@@ -32,6 +32,15 @@ public:
     bool focus_search() override;
     void clear_search() override;
 
+    // Bind this surface to its core window/tab ids (needed to write captured
+    // note state back to the core workspace at checkpoint time).
+    void set_tab_ids(remin::core::WindowId window, remin::core::TabId tab) {
+        window_ = std::move(window);
+        tab_ = std::move(tab);
+    }
+    [[nodiscard]] const remin::core::WindowId& window_id() const noexcept { return window_; }
+    [[nodiscard]] const remin::core::TabId& tab_id() const noexcept { return tab_; }
+
     // Toggle the markdown preview split (on by default on first split request).
     void toggle_preview();
 
@@ -120,6 +129,8 @@ private:
     SessionController* controller_;
     std::string note_id_;
     std::string title_;
+    remin::core::WindowId window_;
+    remin::core::TabId tab_;
     NoteEditor* editor_{nullptr};
     MarkdownPreview* preview_{nullptr};
     Gtk::Paned* content_split_{nullptr};

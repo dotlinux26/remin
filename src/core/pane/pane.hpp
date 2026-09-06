@@ -25,6 +25,14 @@ struct InterruptedCommand {
 // Per-pane command history cap (design §6.1: dedupe adjacent, cap ~1000).
 inline constexpr std::size_t kMaxCommandHistoryPerPane = 1000;
 
+// One command-history entry with a timestamp (design history-system §2).
+// Canonical storage is per-pane (`PaneState.command_history`); the aggregator
+// (`HistoryEntry`) adds window/tab/pane provenance on top.
+struct CommandRecord {
+    std::string command;
+    std::int64_t timestamp_us{0};
+};
+
 // Terminal state for a pane: what scrollback/command state we can re-create
 // on restore. This is a Remin model, NOT a VTE object snapshot.
 struct PaneState {
@@ -32,9 +40,9 @@ struct PaneState {
     std::string shell;
     std::uint32_t cols{0};
     std::uint32_t rows{0};
-    std::vector<std::string> environment;      // V1: NOT persisted (see design §3.2)
-    std::vector<std::string> command_history;  // per-pane history (canonical)
-    std::string scrollback;                    // captured buffer (text)
+    std::vector<std::string> environment;              // V1: NOT persisted (see design §3.2)
+    std::vector<CommandRecord> command_history;        // per-pane history (canonical)
+    std::string scrollback;                            // captured buffer (text)
     std::optional<InterruptedCommand> interrupted_command;
 };
 
@@ -52,7 +60,7 @@ struct TerminalRuntimeSnapshot {
     // Per-pane history. The VTE adapter has no notion of "a command"; the
     // builder overlays the core-canonical PaneState.command_history here at
     // checkpoint time (§6: source = this pane's commit stack, stored in core).
-    std::vector<std::string> command_history;
+    std::vector<CommandRecord> command_history;
     std::optional<InterruptedCommand> interrupted_command;
 };
 

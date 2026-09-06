@@ -17,7 +17,11 @@ namespace remin::gui {
 // Encapsulates PTY spawn, scrollback, and input detection.
 class TerminalPane {
 public:
-    TerminalPane(const std::string& shell, const std::string& cwd);
+    // `history_file` (optional): absolute path to this pane's dedicated shell
+    // history file. When set, the pane spawns its shell with HISTFILE pointed
+    // there so shell ↑/↓ recall only this pane's commands (§6.1 isolation).
+    TerminalPane(const std::string& shell, const std::string& cwd,
+                 const std::string& history_file = "");
     ~TerminalPane();
 
     // Access the widget for embedding in a container.
@@ -47,8 +51,9 @@ public:
     void set_input_callback(std::function<void()> cb) { on_input_ = std::move(cb); }
 
     // Called once per completed command line (VTE "commit" chunk ending in a
-    // newline), trimmed. The host uses this to build a command-history sidebar.
-    void set_command_callback(std::function<void(std::string)> cb) {
+    // newline), trimmed, with the observation timestamp. The host uses this to
+    // build the per-pane canonical command history.
+    void set_command_callback(std::function<void(remin::core::CommandRecord)> cb) {
         on_command_ = std::move(cb);
     }
 
@@ -95,6 +100,10 @@ private:
 
     std::string shell_;
     std::string cwd_;
+    // Dedicated HISTFILE for this pane (empty = inherit parent env).
+    std::string history_file_;
+    // Spawn envp (lives as long as the pane; freed in the destructor).
+    gchar** envp_{nullptr};
     // Last observed cwd; updated by runtime_capture() (const) so the §4
     // cached fallback survives repeated capture without a live OSC 7 shell.
     mutable std::string cached_cwd_;
@@ -103,7 +112,7 @@ private:
     VteTerminal* vte_{nullptr};
     Gtk::Widget* widget_{nullptr};
     std::function<void()> on_input_;
-    std::function<void(std::string)> on_command_;
+    std::function<void(remin::core::CommandRecord)> on_command_;
     std::string commit_buf_;
     std::string last_command_;
     std::optional<remin::core::InterruptedCommand> interrupted_;

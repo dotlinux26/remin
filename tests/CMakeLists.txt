@@ -10,6 +10,7 @@ set(REMIN_TEST_SOURCES
   unit/persistence_policy_test.cpp
   unit/history_test.cpp
   unit/terminal_cwd_test.cpp
+  unit/golden_history_test.cpp
 )
 
 foreach(test_src ${REMIN_TEST_SOURCES})
