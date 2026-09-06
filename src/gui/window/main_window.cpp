@@ -592,6 +592,9 @@ void MainWindow::restore_workspace() {
             view->set_history_callback([this]() {
                 update_history_sidebar();
             });
+            view->set_pane_focus_callback([this]() {
+                update_history_sidebar();
+            });
             view->set_close_tab_request_callback([this, view]() {
                 for (size_t i = 0; i < tabs_.size(); ++i) {
                     if (tabs_[i].get() == view) {
@@ -999,8 +1002,15 @@ void MainWindow::update_history_sidebar() {
 
     // The sidebar is an aggregate QUERY of the workspace's per-pane canonical
     // history (design §6.3) — never a second local store.
+    // Filter by focused pane when a terminal tab is active.
+    remin::core::PaneId focused_pane_id;
+    if (active_tab_ >= 0 && active_tab_ < (int)tabs_.size() &&
+        tabs_[active_tab_]->kind() == TabKind::Terminal) {
+        auto* t = static_cast<TerminalTabView*>(tabs_[active_tab_].get());
+        focused_pane_id = t->focused_pane_id();
+    }
     std::vector<std::string> history;
-    if (controller_) history = controller_->get_command_history();
+    if (controller_) history = controller_->get_command_history(focused_pane_id);
 
     auto const add = [this](const std::string& cmd) {
         auto* btn = Gtk::make_managed<Gtk::Button>(cmd);
@@ -1178,6 +1188,9 @@ void MainWindow::new_terminal_tab() {
         open_note_from_path(path);
     });
     view->set_history_callback([this]() {
+        update_history_sidebar();
+    });
+    view->set_pane_focus_callback([this]() {
         update_history_sidebar();
     });
     view->set_close_tab_request_callback([this, view]() {

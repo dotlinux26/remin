@@ -420,13 +420,16 @@ void SessionController::migrate_legacy_command_history() {
     }
 }
 
-std::vector<std::string> SessionController::get_command_history() const {
+std::vector<std::string> SessionController::get_command_history(
+    const remin::core::PaneId& pane_id) const {
     std::vector<std::string> result;
     if (!core_) return result;
     const remin::core::Workspace* ws = core_->current_workspace();
     if (!ws) return result;
     for (const auto& e : remin::core::aggregate_command_history(*ws)) {
-        result.push_back(e.record.command);
+        if (pane_id.empty() || e.pane == pane_id) {
+            result.push_back(e.record.command);
+        }
     }
     return result;
 }

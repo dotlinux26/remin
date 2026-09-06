@@ -324,6 +324,8 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
                     active_pane_ = wid;
                     // Record focus in core so split targets THIS pane.
                     controller_->focus_pane(tab_, wid);
+                    // Notify MainWindow to update history sidebar for the new focused pane
+                    if (on_pane_focus_) on_pane_focus_();
                     // Add active class to newly focused pane
                     if (auto* curr = pane(wid)) {
                         curr->widget().add_css_class("remin-pane-active");

@@ -98,6 +98,12 @@ TerminalTabView(SessionController* controller,
         on_history_ = std::move(cb);
     }
 
+    // Callback for pane focus change — MainWindow wires this to update
+    // the history sidebar when the focused pane changes.
+    void set_pane_focus_callback(std::function<void()> cb) {
+        on_pane_focus_ = std::move(cb);
+    }
+
     // Apply colors to all terminal panes in this tab
     void set_all_pane_colors(const Gdk::RGBA& fg, const Gdk::RGBA& bg) {
         for (auto& [id, pane] : panes_) {
@@ -138,6 +144,10 @@ private:
     std::function<void()> on_color_request_;
     std::function<void(const std::filesystem::path&)> on_open_file_;
     std::function<void()> on_history_;
+
+    // Callback for pane focus change — MainWindow wires this to update
+    // the history sidebar when the focused pane changes.
+    std::function<void()> on_pane_focus_;
 
     // Callback to request closing the entire tab (when last pane is closed)
     std::function<void()> on_close_tab_request_;

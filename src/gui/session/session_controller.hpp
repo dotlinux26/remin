@@ -165,8 +165,10 @@ public:
     // old key only to migrate).
     void migrate_legacy_command_history();
     // Aggregate view over all panes of the current workspace (provenance kept
-    // in core; this flattens to command text for the sidebar).
-    [[nodiscard]] std::vector<std::string> get_command_history() const;
+    // in core; this flattens to command text for the sidebar). If pane_id is
+    // non-empty, only returns history for that specific pane.
+    [[nodiscard]] std::vector<std::string> get_command_history(
+        const remin::core::PaneId& pane_id = remin::core::PaneId{}) const;
     // Persist a clear: empty every pane's canonical history.
     bool clear_command_history();
 
