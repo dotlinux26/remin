@@ -61,6 +61,8 @@ public:
     // store keyed by the returned id.
     std::string new_note();
     std::string load_note(const std::string& noteId);
+    // Create a note tab from existing NoteTabState (for restore).
+    std::string restore_note(const remin::core::NoteTabState& state);
 
     // Explicit file persistence for a note (Save / Save As / temp-file).
     // A note has an optional assigned file path; until it does, an explicit

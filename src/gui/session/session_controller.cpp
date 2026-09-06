@@ -123,6 +123,14 @@ std::string SessionController::new_note() {
     return remin::core::PaneId::generate().str();
 }
 
+// Create a note tab from existing NoteTabState (for restore).
+std::string SessionController::restore_note(const remin::core::NoteTabState& state) {
+    if (!core_) return {};
+    // The note body is loaded from storage via load_note().
+    // The note id comes from the state's document_id.
+    return state.document_id;
+}
+
 std::string SessionController::load_note(const std::string& noteId) {
     if (!storage_) return {};
     return storage_->load_scrollback(remin::core::PaneId(noteId));

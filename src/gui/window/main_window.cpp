@@ -519,23 +519,24 @@ void MainWindow::restore_workspace() {
     const auto& win = ws->windows.front();
     if (win.tabs.empty()) return;
 
+    // Restore window geometry
+    if (win.width > 0 && win.height > 0) {
+        set_default_size(win.width, win.height);
+    }
+    // Window position (x, y) is not restored in GTK4 as window positioning
+    // is handled by the window manager/compositor.
+
+    // Restore directory tree state
+    if (directory_panel_ && !ws->ui.directory_tree.current_dir.empty()) {
+        directory_panel_->apply_state(ws->ui.directory_tree);
+    }
+
     // Restore each tab from the core's workspace state
     for (const auto& tab : win.tabs) {
-        // Check if this is a terminal tab (has a Pane pane_tree with a valid pane)
-        bool is_terminal = false;
-        remin::core::PaneId root_pane;
-        if (tab.pane_tree.kind() == remin::core::PaneTree::Kind::Pane &&
-            tab.pane_tree.pane().has_value()) {
-            is_terminal = true;
-            root_pane = tab.pane_tree.pane()->id;
-        }
-
-        if (is_terminal) {
-            // Create TerminalTabView directly with the existing core IDs
-            // bypassing controller_->new_terminal_tab() which would create new core objects
-            auto* view = new TerminalTabView(controller_, this, win.id, tab.id, root_pane);
+        if (tab.kind == remin::core::TabKind::Terminal) {
+            // Terminal tab with pane tree
+            auto* view = new TerminalTabView(controller_, this, win.id, tab.id, remin::core::PaneId{});
             view->set_close_tab_request_callback([this, view]() {
-                // Find the current index of this view
                 for (size_t i = 0; i < tabs_.size(); ++i) {
                     if (tabs_[i].get() == view) {
                         close_tab(static_cast<int>(i));
@@ -545,11 +546,44 @@ void MainWindow::restore_workspace() {
             });
             tabs_.push_back(std::unique_ptr<TabView>(view));
             term_tabs_.push_back(view);
-
             content_stack_->add(*view, std::to_string(tabs_.size() - 1));
-            // Don't activate yet - we'll activate the focused one after all tabs are created
+
+            // Rebuild the pane tree with runtime_restore
+            view->restore_pane_tree(tab.pane_tree);
+        } else if (tab.kind == remin::core::TabKind::Note) {
+            // Note tab
+            if (tab.note_state) {
+                std::string note_id = controller_->restore_note(*tab.note_state);
+                if (!note_id.empty()) {
+                    auto* view = new NoteTabView(controller_, note_id);
+                    view->set_close_tab_request_callback([this, view]() {
+                        for (size_t i = 0; i < tabs_.size(); ++i) {
+                            if (tabs_[i].get() == view) {
+                                close_tab(static_cast<int>(i));
+                                break;
+                            }
+                        }
+                    });
+                    view->set_save_state_callback([this]() { update_tab_bar(); });
+                    view->set_file_saved_callback([this](const std::filesystem::path& p) {
+                        if (directory_panel_) directory_panel_->on_note_saved(p);
+                    });
+                    // Restore note state: convert core NoteTabState to NoteTabView::State
+                    NoteTabView::State note_view_state;
+                    note_view_state.content = tab.note_state->content;
+                    note_view_state.cursor_offset = tab.note_state->cursor;
+                    note_view_state.scroll_fraction = tab.note_state->scroll;
+                    note_view_state.preview_enabled = tab.note_state->preview_enabled;
+                    note_view_state.split_ratio = tab.note_state->split_ratio;
+                    note_view_state.sync_scroll = tab.note_state->sync_scroll;
+                    view->restore_state(note_view_state);
+
+                    tabs_.push_back(std::unique_ptr<TabView>(view));
+                    note_tabs_.push_back(view);
+                    content_stack_->add(*view, std::to_string(tabs_.size() - 1));
+                }
+            }
         }
-        // TODO: Handle note tabs - they need a different approach
     }
 
     // Activate the focused tab (or first tab if none focused)
@@ -566,6 +600,14 @@ void MainWindow::restore_workspace() {
         active_tab_ = focus_idx;
         content_stack_->set_visible_child(*tabs_[focus_idx]);
         tabs_[focus_idx]->activate();
+    }
+
+    // Restore focused pane in the active terminal tab
+    if (active_tab_ >= 0 && active_tab_ < static_cast<int>(term_tabs_.size())) {
+        auto* term_tab = term_tabs_[active_tab_];
+        if (win.focus_pane_id.has_value()) {
+            term_tab->activate_pane(win.focus_pane_id.value());
+        }
     }
 
     update_tab_bar();

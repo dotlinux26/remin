@@ -7,6 +7,8 @@
 #include <set>
 #include <string>
 
+#include "core/workspace/workspace.hpp"
+
 namespace remin::gui {
 
 // VS Code-style file tree panel shown in the "Files" sidebar page.
@@ -35,6 +37,12 @@ public:
     // Starts at $HOME (per audit issue #1: not the process cwd).
     void set_root(const std::filesystem::path& dir);
     [[nodiscard]] const std::filesystem::path& current_dir() const { return state_.current_dir; }
+
+    // --- Runtime state capture/restore (design §8) ---
+    // Capture current directory tree state for checkpoint persistence.
+    // Uses core::DirectoryTreeState for the state model.
+    [[nodiscard]] remin::core::DirectoryTreeState capture_state() const;
+    void apply_state(const remin::core::DirectoryTreeState& state);
 
     void refresh();
     void focus_search();

@@ -24,11 +24,16 @@ class MainWindow;
 // SessionController; the widget tree is only a projection of core state.
 class TerminalTabView : public TabView {
 public:
+TerminalTabView(SessionController* controller,
+                  MainWindow* main_window,
+                  remin::core::WindowId window,
+                  remin::core::TabId tab,
+                  remin::core::PaneId root_pane);
+    // Restore constructor (root_pane empty; pane tree restored via restore_pane_tree)
     TerminalTabView(SessionController* controller,
                     MainWindow* main_window,
                     remin::core::WindowId window,
-                    remin::core::TabId tab,
-                    remin::core::PaneId root_pane);
+                    remin::core::TabId tab);
     ~TerminalTabView() override;
 
     TabKind kind() const override { return TabKind::Terminal; }
@@ -55,6 +60,12 @@ public:
 
     // The currently focused pane (navigable / target of focused actions).
     TerminalPane* focused_pane();
+
+    // Restore the pane tree from a persisted PaneTree (with runtime_restore per pane).
+    void restore_pane_tree(const remin::core::PaneTree& tree);
+
+    // Activate a specific pane by ID (for restore focus).
+    void activate_pane(const remin::core::PaneId& pane);
 
     // Const access to panes map for runtime capture iteration.
     const std::map<std::string, std::unique_ptr<TerminalPane>>& panes() const noexcept { return panes_; }
@@ -101,7 +112,6 @@ private:
     void rebuild();
     void sync_ratio(Gtk::Paned& paned, const std::string& first_child_pane);
     Gtk::Widget& build_node(const remin::core::PaneTree& node);
-    void activate_pane(const remin::core::PaneId& pane);
     void show_pane_menu(Gtk::Widget& pane_widget, double x, double y);
     void load_and_apply_saved_colors();
 

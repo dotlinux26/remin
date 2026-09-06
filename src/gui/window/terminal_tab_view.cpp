@@ -47,10 +47,10 @@ void walk_restore(Gtk::Widget& widget) {
 namespace remin::gui {
 
 TerminalTabView::TerminalTabView(SessionController* controller,
-                                 MainWindow* main_window,
-                                 remin::core::WindowId window,
-                                 remin::core::TabId tab,
-                                 remin::core::PaneId root_pane)
+                                  MainWindow* main_window,
+                                  remin::core::WindowId window,
+                                  remin::core::TabId tab,
+                                  remin::core::PaneId root_pane)
     : controller_(controller),
       main_window_(main_window),
       window_(std::move(window)),
@@ -70,6 +70,32 @@ TerminalTabView::TerminalTabView(SessionController* controller,
     // Wire command history from this tab to the controller
     rebuild();
     // Apply saved terminal colors to all panes
+    load_and_apply_saved_colors();
+}
+
+// Restore constructor: used when restoring a terminal tab from persisted state.
+// root_pane is empty; the pane tree will be restored via restore_pane_tree().
+TerminalTabView::TerminalTabView(SessionController* controller,
+                                  MainWindow* main_window,
+                                  remin::core::WindowId window,
+                                  remin::core::TabId tab)
+    : controller_(controller),
+      main_window_(main_window),
+      window_(std::move(window)),
+      tab_(std::move(tab)),
+      root_pane_{},
+      title_("terminal") {
+    shell_ = remin::terminal::detect_default_shell();
+    set_hexpand(true);
+    set_vexpand(true);
+
+    // Terminal pane tree fills the entire tab (sidebar is now at MainWindow level)
+    tree_host_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    tree_host_->set_hexpand(true);
+    tree_host_->set_vexpand(true);
+    append(*tree_host_);
+
+    // Don't call rebuild() here; the pane tree will be restored via restore_pane_tree()
     load_and_apply_saved_colors();
 }
 
@@ -403,6 +429,138 @@ void TerminalTabView::rebuild() {
     // Once the newly-built tree has been sized by the layout engine, restore
     // each paned's divider to its stored ratio so sibling panes keep their
     // sizes after a split/rebuild instead of being reset.
+    Glib::signal_idle().connect_once([this]() { walk_restore(*tree_host_); });
+}
+
+// Restore the pane tree from a persisted PaneTree.
+// Creates TerminalPane for each leaf pane, calls runtime_restore with the
+// pane's persisted state, and rebuilds the widget tree.
+void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
+    // Clear existing panes and tree host
+    panes_.clear();
+    pane_controllers_added_.clear();
+    active_pane_ = {};
+    if (tree_host_) {
+        while (auto* child = tree_host_->get_first_child()) {
+            tree_host_->remove(*child);
+        }
+    }
+
+    // Recursively build the pane tree with runtime_restore
+    std::function<Gtk::Widget&(const remin::core::PaneTree&)> build_and_restore =
+        [&](const remin::core::PaneTree& node) -> Gtk::Widget& {
+        switch (node.kind()) {
+            case remin::core::PaneTree::Kind::Pane: {
+                if (!node.pane()) break;
+                const auto& pid = node.pane()->id;
+                const auto& state = node.pane()->state;
+                // Create terminal pane with the persisted state
+                auto p = std::make_unique<TerminalPane>(shell_, state.cwd);
+                auto* raw = p.get();
+                if (controller_->autosaver()) {
+                    auto cid = pid;
+                    raw->set_input_callback([this, cid]() {
+                        controller_->autosaver()->note_terminal_activity(cid);
+                    });
+                }
+                raw->set_command_callback([this, pid](std::string cmd) {
+                    add_history(pid, std::move(cmd));
+                });
+                // Restore the terminal state (scrollback, cwd, cols/rows, etc.)
+                raw->runtime_restore(state);
+                panes_.emplace(pid.str(), std::move(p));
+                auto it = panes_.find(pid.str());
+
+                // Track focused pane on click
+                auto wid = pid;
+                auto pane_key = wid.str();
+                if (pane_controllers_added_.find(pane_key) == pane_controllers_added_.end()) {
+                    auto click = Gtk::GestureClick::create();
+                    click->set_button(0);
+                    click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+                    click->signal_pressed().connect([this, wid](int, double, double) {
+                        if (!active_pane_.empty()) {
+                            if (auto* prev = pane(active_pane_)) {
+                                prev->widget().remove_css_class("remin-pane-active");
+                            }
+                        }
+                        active_pane_ = wid;
+                        controller_->focus_pane(tab_, wid);
+                        if (auto* curr = pane(wid)) {
+                            curr->widget().add_css_class("remin-pane-active");
+                        }
+                    });
+                    auto right_click = Gtk::GestureClick::create();
+                    right_click->set_button(3);
+                    right_click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+                    right_click->signal_pressed().connect([this, wid](int, double x, double y) {
+                        if (auto* p = pane(wid)) {
+                            show_pane_menu(p->widget(), x, y);
+                        }
+                    });
+                    it->second->widget().add_controller(click);
+                    it->second->widget().add_controller(right_click);
+                    pane_controllers_added_.insert(pane_key);
+                }
+                // Set initial active state for the first/root pane
+                if (active_pane_.empty() && pid == root_pane_) {
+                    it->second->widget().add_css_class("remin-pane-active");
+                }
+                auto& w = it->second->widget();
+                if (auto* parent = w.get_parent()) {
+                    if (auto* box = dynamic_cast<Gtk::Box*>(parent)) box->remove(w);
+                    else if (auto* paned = dynamic_cast<Gtk::Paned*>(parent)) {
+                        if (paned->get_start_child() == &w) paned->set_start_child(*Gtk::make_managed<Gtk::Box>());
+                        else if (paned->get_end_child() == &w) paned->set_end_child(*Gtk::make_managed<Gtk::Box>());
+                    }
+                }
+                return w;
+            }
+            case remin::core::PaneTree::Kind::SplitHorizontal:
+            case remin::core::PaneTree::Kind::SplitVertical: {
+                auto* paned = Gtk::make_managed<Gtk::Paned>();
+                paned->set_orientation(node.kind() == remin::core::PaneTree::Kind::SplitHorizontal
+                                           ? Gtk::Orientation::VERTICAL
+                                           : Gtk::Orientation::HORIZONTAL);
+                paned->set_hexpand(true);
+                paned->set_vexpand(true);
+                auto& start_child = build_and_restore(*node.first());
+                auto& end_child = build_and_restore(*node.second());
+                auto unparent = [](Gtk::Widget& child) {
+                    if (auto* parent = child.get_parent()) {
+                        if (auto* box = dynamic_cast<Gtk::Box*>(parent)) box->remove(child);
+                        else if (auto* paned = dynamic_cast<Gtk::Paned*>(parent)) {
+                            if (paned->get_start_child() == &child) paned->set_start_child(*Gtk::make_managed<Gtk::Box>());
+                            else if (paned->get_end_child() == &child) paned->set_end_child(*Gtk::make_managed<Gtk::Box>());
+                        }
+                    }
+                };
+                unparent(start_child);
+                unparent(end_child);
+                paned->set_start_child(start_child);
+                paned->set_end_child(end_child);
+                set_paned_ratio(paned, node.ratio());
+                std::string first_child_pane;
+                const auto* leaf = node.first();
+                while (leaf && leaf->kind() != remin::core::PaneTree::Kind::Pane) {
+                    leaf = leaf->first();
+                }
+                if (leaf && leaf->pane()) first_child_pane = leaf->pane()->id.str();
+                paned->property_position().signal_changed().connect(
+                    [this, paned, first_child_pane]() {
+                        sync_ratio(*paned, first_child_pane);
+                    });
+                return *paned;
+            }
+        }
+        // Fallback
+        auto* fallback = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+        fallback->set_hexpand(true);
+        fallback->set_vexpand(true);
+        return *fallback;
+    };
+
+    tree_host_->append(build_and_restore(tree));
     Glib::signal_idle().connect_once([this]() { walk_restore(*tree_host_); });
 }
 

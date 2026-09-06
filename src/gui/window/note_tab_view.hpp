@@ -51,6 +51,9 @@ public:
     // Set the note's title shown on its tab / window.
     void set_title(const std::string& title) override { title_ = title; }
 
+    // Callback for tab close request (from TerminalTabView for consistency).
+    void set_close_tab_request_callback(std::function<void()> cb) { on_close_tab_request_ = std::move(cb); }
+
     // Show find/replace bar, optionally with replace UI visible. Clears entries.
     void show_find_replace(bool show_replace);
 
@@ -85,6 +88,20 @@ public:
     // The saved file path lets the host reconcile only the affected directory.
     void set_file_saved_callback(std::function<void(const std::filesystem::path&)> cb) { on_file_saved_ = std::move(cb); }
 
+    // --- Runtime state capture/restore (design §7) ---
+    // Capture current note state for checkpoint persistence.
+    struct State {
+        std::string content;
+        int cursor_offset;        // buffer offset of cursor
+        double scroll_fraction;   // vertical scroll fraction [0,1]
+        bool preview_enabled;
+        double split_ratio;       // preview split ratio [0,1]
+        bool sync_scroll;
+    };
+    [[nodiscard]] State capture_state() const;
+    // Restore note state from checkpoint.
+    void restore_state(const State& state);
+
     // Load a file into this note tab
     void load_file(const std::filesystem::path& path);
 
@@ -112,6 +129,9 @@ private:
 
     bool sync_scroll_{false};
     bool syncing_{false};
+
+    // Callback for tab close request
+    std::function<void()> on_close_tab_request_;
 
     std::string watched_path_;
     std::filesystem::file_time_type last_mtime_;

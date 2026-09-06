@@ -470,4 +470,76 @@ void NoteTabView::notify_save_state() {
     if (on_save_state_) on_save_state_();
 }
 
+// --- Runtime state capture/restore (design §7) ---
+
+NoteTabView::State NoteTabView::capture_state() const {
+    State s;
+    s.content = editor_ ? editor_->text() : std::string();
+    if (editor_) {
+        auto buf = editor_->buffer();
+        if (buf) {
+            auto iter = buf->get_insert()->get_iter();
+            s.cursor_offset = iter.get_offset();
+        }
+        if (auto adj = editor_->vadjustment()) {
+            double upper = adj->get_upper() - adj->get_page_size();
+            if (upper > 0.0) {
+                s.scroll_fraction = adj->get_value() / upper;
+            }
+        }
+    }
+    s.preview_enabled = preview_ != nullptr;
+    if (content_split_) {
+        int total = content_split_->get_width();
+        if (total > 0) {
+            s.split_ratio = static_cast<double>(content_split_->get_position()) / total;
+        }
+    }
+    s.sync_scroll = sync_scroll_;
+    return s;
+}
+
+void NoteTabView::restore_state(const State& state) {
+    if (!editor_) return;
+    editor_->set_text(state.content);
+    editor_->set_modified(false);
+
+    // Restore cursor position
+    if (state.cursor_offset >= 0) {
+        auto buf = editor_->buffer();
+        if (buf) {
+            auto iter = buf->get_iter_at_offset(std::min(state.cursor_offset, static_cast<int>(buf->get_char_count())));
+            buf->place_cursor(iter);
+        }
+    }
+
+    // Restore scroll position
+    if (state.scroll_fraction >= 0.0 && state.scroll_fraction <= 1.0) {
+        if (auto adj = editor_->vadjustment()) {
+            double upper = adj->get_upper() - adj->get_page_size();
+            if (upper > 0.0) {
+                adj->set_value(state.scroll_fraction * upper);
+            }
+        }
+    }
+
+    // Restore preview state
+    bool want_preview = state.preview_enabled;
+    bool have_preview = preview_ != nullptr;
+    if (want_preview != have_preview) {
+        toggle_preview();
+    }
+    if (preview_ && content_split_) {
+        int total = content_split_->get_width();
+        if (total > 0) {
+            content_split_->set_position(static_cast<int>(state.split_ratio * total));
+        }
+    }
+    sync_scroll_ = state.sync_scroll;
+    if (sync_scroll_ && preview_) {
+        // Immediately sync scroll from editor to preview
+        on_editor_scroll();
+    }
+}
+
 } // namespace remin::gui

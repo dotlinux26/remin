@@ -868,4 +868,28 @@ void DirectoryTreePanel::reveal_path(const std::filesystem::path& path,
     });
 }
 
+// --- Runtime state capture/restore (design §8) ---
+
+remin::core::DirectoryTreeState DirectoryTreePanel::capture_state() const {
+    remin::core::DirectoryTreeState s;
+    s.current_dir = state_.current_dir;
+    s.filter = state_.filter;
+    s.expanded = std::vector<std::filesystem::path>(state_.expanded.begin(), state_.expanded.end());
+    s.selected = state_.selected;
+    s.scroll_anchor = state_.anchor;
+    s.anchor_offset = state_.anchor_offset;
+    return s;
+}
+
+void DirectoryTreePanel::apply_state(const remin::core::DirectoryTreeState& state) {
+    state_.current_dir = state.current_dir;
+    state_.filter = state.filter;
+    state_.expanded = std::set<std::filesystem::path>(state.expanded.begin(), state.expanded.end());
+    state_.selected = state.selected;
+    state_.anchor = state.scroll_anchor;
+    state_.anchor_offset = state.anchor_offset;
+    // The tree will be rebuilt from the state on the next refresh().
+    refresh();
+}
+
 } // namespace remin::gui
