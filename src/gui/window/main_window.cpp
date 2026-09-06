@@ -585,6 +585,13 @@ void MainWindow::restore_workspace() {
         if (tab.kind == remin::core::TabKind::Terminal) {
             // Terminal tab with pane tree
             auto* view = new TerminalTabView(controller_, this, win.id, tab.id);
+            view->set_color_request_callback([this]() { on_terminal_color_profile(); });
+            view->set_open_file_callback([this](const std::filesystem::path& path) {
+                open_note_from_path(path);
+            });
+            view->set_history_callback([this]() {
+                update_history_sidebar();
+            });
             view->set_close_tab_request_callback([this, view]() {
                 for (size_t i = 0; i < tabs_.size(); ++i) {
                     if (tabs_[i].get() == view) {

@@ -34,6 +34,25 @@ bool WorkspaceCore::open_workspace(const WorkspaceId& id) {
     auto loaded = storage_->load_workspace(id);
     if (!loaded) return false;
     ws_current_ = std::move(*loaded);
+    
+    // Load scrollbacks from database into pane states
+    if (ws_current_) {
+        for (auto& w : ws_current_->windows) {
+            for (auto& t : w.tabs) {
+                std::vector<Pane*> panes;
+                t.pane_tree.collect_panes(panes);
+                for (auto* p : panes) {
+                    if (p) {
+                        std::string scrollback = storage_->load_scrollback(p->id);
+                        if (!scrollback.empty()) {
+                            p->state.scrollback = std::move(scrollback);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     emit(WorkspaceEvent::Type::WorkspaceOpened, ws_current_->id);
     return true;
 }
