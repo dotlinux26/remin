@@ -151,6 +151,14 @@ private:
     bool last_modified_{false};
     sigc::connection watcher_timer_;
     sigc::connection dirty_debounce_;  // coalesces keystrokes → live unsaved dot
+    sigc::connection buffer_modified_connection_;
+    sigc::connection buffer_changed_connection_;
+
+    // Preview toggle callbacks (for proper cleanup)
+    sigc::connection sync_toggle_connection_;
+    sigc::connection editor_scroll_connection_;
+    sigc::connection preview_scroll_connection_;
+    sigc::connection idle_callback_connection_;
 };
 
 } // namespace remin::gui

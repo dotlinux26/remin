@@ -12,10 +12,12 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     set_vexpand(true);
 
     // GtkSourceView with built-in line numbers, current-line highlight, word wrap.
+    // Create our own buffer so we fully own its lifecycle.
     source_view_ = GTK_SOURCE_VIEW(gtk_source_view_new());
-    source_buffer_ = gtk_source_buffer_new(nullptr);
+    source_buffer_ = GTK_SOURCE_BUFFER(gtk_source_buffer_new(nullptr));
     gtk_text_view_set_buffer(GTK_TEXT_VIEW(source_view_), GTK_TEXT_BUFFER(source_buffer_));
-    g_object_unref(source_buffer_); // the view now owns the buffer reference
+    // The view now references our buffer; we own the buffer reference.
+    // No need for g_object_ref - gtk_text_view_set_buffer adds a reference.
 
     gtk_source_view_set_show_line_numbers(source_view_, TRUE);
     gtk_source_view_set_highlight_current_line(source_view_, TRUE);
@@ -26,8 +28,7 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     gtk_text_view_set_right_margin(GTK_TEXT_VIEW(source_view_), 8);
 
     // Change tracking (activity signal -> autosaver + live preview debounce).
-    source_buffer_ = GTK_SOURCE_BUFFER(gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view_)));
-    g_signal_connect(source_buffer_, "changed", G_CALLBACK(+[](GtkTextBuffer*, gpointer self) {
+    buffer_changed_signal_id_ = g_signal_connect(source_buffer_, "changed", G_CALLBACK(+[](GtkTextBuffer*, gpointer self) {
         static_cast<NoteEditor*>(self)->on_buffer_changed();
     }), this);
 
@@ -50,7 +51,7 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     // Theme-aware color scheme (GtkSourceView does not follow the GTK theme
     // by default, so the editor would stay light in dark mode).
     set_theme(adw_style_manager_get_dark(adw_style_manager_get_default()));
-    g_signal_connect(adw_style_manager_get_default(), "notify::color-scheme",
+    color_scheme_signal_id_ = g_signal_connect(adw_style_manager_get_default(), "notify::color-scheme",
                      G_CALLBACK(+[](GObject*, GParamSpec*, gpointer self) {
                          static_cast<NoteEditor*>(self)->set_theme(
                              adw_style_manager_get_dark(
@@ -72,7 +73,63 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     }
 }
 
+NoteEditor::~NoteEditor() {
+    // Mark as dead first to prevent any new operations
+    alive_ = false;
+
+    // Disconnect all timers first to prevent callbacks after destruction
+    if (highlight_timer_.connected()) highlight_timer_.disconnect();
+    if (preview_timer_.connected()) preview_timer_.disconnect();
+    if (scroll_timer_.connected()) scroll_timer_.disconnect();
+
+    // Disconnect the "changed" signal on the buffer first
+    if (source_buffer_ && buffer_changed_signal_id_ != 0) {
+        g_signal_handler_disconnect(source_buffer_, buffer_changed_signal_id_);
+        buffer_changed_signal_id_ = 0;
+    }
+
+    // Disconnect the color-scheme signal on the style manager
+    if (color_scheme_signal_id_ != 0) {
+        g_signal_handler_disconnect(adw_style_manager_get_default(), color_scheme_signal_id_);
+        color_scheme_signal_id_ = 0;
+    }
+
+    // Release our reference on the buffer FIRST, before unrefing search_context.
+    // The search_context holds a reference to the buffer; if we unref it first,
+    // it might trigger cleanup that accesses the buffer while the buffer is
+    // being destroyed by the view.
+    if (source_buffer_) {
+        if (source_view_ && GTK_IS_WIDGET(source_view_)) {
+            // View is still alive - it will unref the buffer when it finalizes.
+            // Just clear our pointer without unrefing.
+        } else {
+            // View already dead - we must unref to avoid leak.
+            g_object_unref(source_buffer_);
+        }
+    }
+
+    // NOW unref search context (holds a reference to the buffer).
+    // Do this AFTER buffer handling so the search context's cleanup doesn't
+    // race with buffer finalization.
+    if (search_context_) {
+        g_object_unref(search_context_);
+        search_context_ = nullptr;
+    }
+
+    // Search tags are owned by the buffer's tag table (created with
+    // gtk_text_buffer_create_tag), so we do NOT unref them here.
+    // Just clear our pointers.
+    search_match_tag_ = nullptr;
+    search_current_tag_ = nullptr;
+
+    // Clear raw pointers to prevent use-after-free
+    source_buffer_ = nullptr;
+    source_view_ = nullptr;
+    scroller_ = nullptr;
+}
+
 std::string NoteEditor::text() const {
+    if (!alive_ || !source_buffer_ || !GTK_IS_TEXT_BUFFER(source_buffer_)) return {};
     GtkTextIter start, end;
     GtkTextBuffer* buffer = GTK_TEXT_BUFFER(source_buffer_);
     gtk_text_buffer_get_bounds(buffer, &start, &end);
@@ -83,6 +140,7 @@ std::string NoteEditor::text() const {
 }
 
 void NoteEditor::set_text(const std::string& content) {
+    if (!alive_ || !source_buffer_ || !GTK_IS_TEXT_BUFFER(source_buffer_)) return;
     gtk_text_buffer_set_text(GTK_TEXT_BUFFER(source_buffer_),
                              content.c_str(), static_cast<int>(content.length()));
     preview_pending_ = false;
@@ -543,6 +601,8 @@ void NoteEditor::do_replace_all() {
 }
 
 bool NoteEditor::is_modified() const {
+    if (!alive_ || !source_buffer_ || !GTK_IS_TEXT_BUFFER(source_buffer_))
+        return false;
     return gtk_text_buffer_get_modified(GTK_TEXT_BUFFER(source_buffer_));
 }
 
@@ -555,6 +615,9 @@ GtkSourceBuffer* NoteEditor::source_buffer() const {
 }
 
 Glib::RefPtr<Gtk::TextBuffer> NoteEditor::buffer() const {
+    if (!alive_ || !source_buffer_) return {};
+    // Check if the buffer is still a valid GtkTextBuffer
+    if (!GTK_IS_TEXT_BUFFER(source_buffer_)) return {};
     return Glib::wrap(GTK_TEXT_BUFFER(source_buffer_));
 }
 

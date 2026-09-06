@@ -14,9 +14,6 @@ NoteTabView::NoteTabView(SessionController* controller, const std::string& noteI
             if (controller_ && controller_->autosaver())
                 controller_->autosaver()->note_note_activity(note_id_);
         });
-    // Hold an extra ref on the editor so it survives being reparented between
-    // content_host_ and content_split_ during preview toggles.
-    g_object_ref(editor_->gobj());
     set_hexpand(true);
     set_vexpand(true);
 
@@ -46,12 +43,13 @@ NoteTabView::~NoteTabView() {
     // a use-after-free. Disconnect both explicitly before touching any state.
     watcher_timer_.disconnect();
     dirty_debounce_.disconnect();
-    // Release the extra ref we took on the editor in the constructor.
-    if (editor_) {
-        auto* g = editor_->gobj();
-        editor_ = nullptr;
-        g_object_unref(g);
-    }
+
+    // Disconnect buffer signal connections to prevent callbacks after destruction
+    if (buffer_modified_connection_.connected()) buffer_modified_connection_.disconnect();
+    if (buffer_changed_connection_.connected()) buffer_changed_connection_.disconnect();
+
+    // editor_ is managed by Gtk::make_managed, no manual ref/unref needed
+    editor_ = nullptr;
 }
 
 void NoteTabView::connect_editor() {
@@ -70,7 +68,7 @@ void NoteTabView::connect_editor() {
     if (editor_) {
         auto buf = editor_->buffer();
         if (buf) {
-            buf->signal_modified_changed().connect([this]() {
+            buffer_modified_connection_ = buf->signal_modified_changed().connect([this]() {
                 bool now = editor_ && editor_->is_modified();
                 if (now != last_modified_) {
                     last_modified_ = now;
@@ -80,7 +78,7 @@ void NoteTabView::connect_editor() {
             // Belt & suspenders: also watch plain content changes with a short
             // debounce so the unsaved dot appears live WHILE typing (some
             // buffers only flip the modified flag together with a user action).
-            buf->signal_changed().connect([this]() {
+            buffer_changed_connection_ = buf->signal_changed().connect([this]() {
                 if (dirty_debounce_.connected()) dirty_debounce_.disconnect();
                 dirty_debounce_ = Glib::signal_timeout().connect(
                     [this]() {
@@ -201,6 +199,12 @@ void NoteTabView::toggle_preview() {
         content_split_ = nullptr;
         preview_ = nullptr;
         set_content(*editor_);
+
+        // Disconnect preview-related signals
+        if (sync_toggle_connection_.connected()) sync_toggle_connection_.disconnect();
+        if (editor_scroll_connection_.connected()) editor_scroll_connection_.disconnect();
+        if (preview_scroll_connection_.connected()) preview_scroll_connection_.disconnect();
+        if (idle_callback_connection_.connected()) idle_callback_connection_.disconnect();
         return;
     }
     // Split horizontally: editor | preview inside the content host.
@@ -217,7 +221,7 @@ void NoteTabView::toggle_preview() {
     auto* sync = Gtk::make_managed<Gtk::ToggleButton>("Sync Scroll");
     sync->add_css_class("remin-preview-toggle");
     sync->set_active(sync_scroll_);
-    sync->signal_toggled().connect([this, sync]() {
+    sync_toggle_connection_ = sync->signal_toggled().connect([this, sync]() {
         sync_scroll_ = sync->get_active();
         if (sync_scroll_) {
             // Immediately sync from editor to preview.
@@ -237,11 +241,11 @@ void NoteTabView::toggle_preview() {
 
     // Wire scroll sync (guarded against feedback loops).
     if (auto adj = editor_->vadjustment()) {
-        adj->signal_value_changed().connect(
+        editor_scroll_connection_ = adj->signal_value_changed().connect(
             [this]() { on_editor_scroll(); });
     }
     if (auto adj = preview_->vadjustment()) {
-        adj->signal_value_changed().connect(
+        preview_scroll_connection_ = adj->signal_value_changed().connect(
             [this]() { on_preview_scroll(); });
     }
 
@@ -487,6 +491,10 @@ NoteTabView::State NoteTabView::capture_state() const {
                 s.scroll_fraction = adj->get_value() / upper;
             }
         }
+    } else {
+        // Editor is null or invalid, use defaults
+        s.cursor_offset = 0;
+        s.scroll_fraction = 0.0;
     }
     s.preview_enabled = preview_ != nullptr;
     if (content_split_) {

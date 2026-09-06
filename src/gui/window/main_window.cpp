@@ -1287,11 +1287,24 @@ void MainWindow::prompt_close_note(NoteTabView* note, int index) {
     (void)keep_btn; (void)skip_btn;
     dialog->set_default_response(Gtk::ResponseType::CANCEL);
     dialog->set_modal(true);
-    dialog->signal_response().connect([this, note, index, dialog](int response) {
+    dialog->signal_response().connect([this, note, dialog](int response) {
+        // Find the note's current index at response time (tabs may have shifted)
+        int current_index = -1;
+        for (size_t i = 0; i < tabs_.size(); ++i) {
+            if (tabs_[i].get() == note) {
+                current_index = static_cast<int>(i);
+                break;
+            }
+        }
+        if (current_index < 0) {
+            // Note already gone
+            dialog->close();
+            return;
+        }
         if (response == Gtk::ResponseType::OK) {
-            close_keep_note(note, index);
+            close_keep_note(note, current_index);
         } else {
-            finish_close_tab(index);  // Skip (ESC/cancel) = close w/o saving
+            finish_close_tab(current_index);  // Skip (ESC/cancel) = close w/o saving
         }
         dialog->close();
     });
@@ -1302,6 +1315,19 @@ void MainWindow::finish_close_tab(int index) {
     if (index < 0 || index >= (int)tabs_.size()) return;  // stale-index guard
 
     auto kind = tabs_[index]->kind();
+    remin::core::WindowId window_id;
+    remin::core::TabId tab_id;
+
+    if (kind == TabKind::Terminal) {
+        auto* term = static_cast<TerminalTabView*>(tabs_[index].get());
+        window_id = term->window_id();
+        tab_id = term->tab_id();
+    } else if (kind == TabKind::Note) {
+        auto* note = static_cast<NoteTabView*>(tabs_[index].get());
+        window_id = note->window_id();
+        tab_id = note->tab_id();
+    }
+
     // Detach the widget from the stack BEFORE destroying it (tabs_ holds ownership).
     Gtk::Widget* child = content_stack_->get_child_by_name(std::to_string(index));
     if (child) content_stack_->remove(*child);
@@ -1317,6 +1343,11 @@ void MainWindow::finish_close_tab(int index) {
         if (it != note_tabs_.end()) note_tabs_.erase(it);
     }
 
+    // Remove from persisted workspace state
+    if (core_ && !window_id.empty() && !tab_id.empty()) {
+        core_->remove_tab(window_id, tab_id);
+    }
+
     // Fix the active index BEFORE removal so all later numbering is consistent:
     // tabs after the closed one shift down. If we closed the active tab itself,
     // -1 means "recompute below" (fall back to the last remaining tab).
@@ -1327,6 +1358,7 @@ void MainWindow::finish_close_tab(int index) {
     }
 
     tabs_.erase(tabs_.begin() + index);
+
     // Rebuild the stack children with fresh index names so they stay in sync
     // with tabs_ indices. Removing each child just detaches it (tabs_ owns the
     // TabView), then we re-add at their new positions.

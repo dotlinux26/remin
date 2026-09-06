@@ -21,6 +21,8 @@ public:
     // on_change is called after every buffer edit (activity signal).
     explicit NoteEditor(std::function<void()> on_change = {});
 
+    virtual ~NoteEditor();
+
     [[nodiscard]] std::string text() const;
     void set_text(const std::string& text);
 
@@ -133,6 +135,16 @@ private:
 
     sigc::connection preview_timer_;
     bool preview_pending_{false};
+
+    // Signal connection for buffer "changed" signal - stored for cleanup
+    gulong buffer_changed_signal_id_{0};
+
+    // Signal connection for adw_style_manager "notify::color-scheme" signal
+    gulong color_scheme_signal_id_{0};
+
+    // Validity flag to detect use-after-free
+    bool alive_{true};
+
     int line_spacing_{2}; // pixels above AND below each line
 };
 
