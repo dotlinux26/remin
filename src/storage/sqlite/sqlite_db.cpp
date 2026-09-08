@@ -34,6 +34,13 @@ CREATE TABLE IF NOT EXISTS scrollbacks (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS terminal_snapshots (
+    pane_id TEXT PRIMARY KEY,
+    content BLOB NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS closed_windows (
     id TEXT NOT NULL,
     workspace_id TEXT NOT NULL,
@@ -47,6 +54,10 @@ CREATE TABLE IF NOT EXISTS closed_windows (
 )SQL";
 
 // Migration: add schema_version, generation, reason to snapshots if missing.
+// The `scrollbacks` table doubles as a generic TEXT key-value blob store for
+// note bodies + settings (see SessionController); it is intentionally kept.
+// `terminal_snapshots` (added v0.0.5) is authoritative for binary terminal
+// state only.
 constexpr const char* kMigrations[] = {
     "ALTER TABLE snapshots ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;",
     "ALTER TABLE snapshots ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;",

@@ -8,6 +8,7 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 #include <optional>
 #include <functional>
 
@@ -33,9 +34,14 @@ public:
     virtual void save_snapshot(const WorkspaceId& id, const Snapshot& snap, const json& state) = 0;
     virtual void delete_snapshot(const WorkspaceId& id, const SnapshotId& snap) = 0;
 
-    // Scrollback blobs (large binary/text, stored separately from metadata)
+    // Generic TEXT key-value blob store (note bodies, settings). Keyed by an
+    // arbitrary blob id string (SessionController builds prefixed ids).
     virtual void store_scrollback(const PaneId& pane, std::string content) = 0;
     virtual std::string load_scrollback(const PaneId& pane) = 0;
+
+    // Terminal snapshots (binary, opaque VTE blobs — NOT text scrollback)
+    virtual void store_snapshot(const PaneId& pane, const std::vector<std::uint8_t>& data) = 0;
+    virtual std::vector<std::uint8_t> load_snapshot(const PaneId& pane) = 0;
 
     // Closed-window history (Window History, distinct from Recovery snapshots)
     virtual void store_closed_window(const ClosedWindowSnapshot& snap) = 0;
@@ -43,7 +49,7 @@ public:
     virtual std::optional<ClosedWindowSnapshot> load_closed_window(const WorkspaceId& ws_id, const SnapshotId& snap_id) = 0;
     virtual void delete_closed_window(const WorkspaceId& ws_id, const SnapshotId& snap_id) = 0;
 
-    // Atomic checkpoint: writes workspace JSON, all scrollback blobs, and a
+    // Atomic checkpoint: writes workspace JSON, all terminal snapshots, and a
     // snapshot row in a single transaction. Returns true on success.
     // `generation` is the new generation number (monotonically increasing).
     // `reason` is one of: "recovery", "autosave", "window_history", "manual".
@@ -52,7 +58,7 @@ public:
                            int schema_version,
                            int64_t generation,
                            const std::string& reason,
-                           const std::vector<std::pair<PaneId, std::string>>& scrollbacks) = 0;
+                           const std::vector<std::pair<PaneId, std::vector<std::uint8_t>>>& snapshots) = 0;
 };
 
 // Callback sink for events emitted by WorkspaceCore. GUI/CLI/IPC subscribe.

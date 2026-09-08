@@ -1,0 +1,16 @@
+diff --git a/src/vteinternal.hh b/src/vteinternal.hh
+index ed57ad1..6fe211b 100644
+--- a/src/vteinternal.hh
++++ b/src/vteinternal.hh
+@@ -1695,6 +1695,11 @@ public:
+ #undef _VTE_CMD_HANDLER
+ #undef _VTE_CMD_HANDLER_NOP
+ #undef _VTE_CMD_HANDLER_R
++        /* Snapshot API for terminal state persistence */
++        gboolean snapshot_capture(GBytes **snapshot_data);
++        gboolean snapshot_restore(GBytes *snapshot_data);
++        gboolean snapshot_has_pending_data(VteTerminal *terminal);
++        std::string snapshot_debug();
+ };
+ 
+ } // namespace terminal

@@ -1,0 +1,83 @@
+diff --git a/src/vtegtk.cc b/src/vtegtk.cc
+index 92eb688..d66b53a 100644
+--- a/src/vtegtk.cc
++++ b/src/vtegtk.cc
+@@ -7301,3 +7301,78 @@ catch (...)
+ }
+ 
+ #endif /* VTE_GTK */
++
++/* Snapshot API for terminal state persistence */
++
++/**
++ * vte_terminal_snapshot_capture:
++ * @terminal: a #VteTerminal
++ * @snapshot_data: (out) (transfer full): a #GBytes to store the snapshot data
++ *
++ * Captures the current visual state of @terminal including scrollback,
++ * viewport, cursor position, and terminal modes into a serialized @GBytes.
++ *
++ * The returned bytes can be passed to vte_terminal_snapshot_restore() to
++ * restore the terminal's visual state, for example after a restart.
++ */
++void
++vte_terminal_snapshot_capture(VteTerminal *terminal,
++                              GBytes **snapshot_data) noexcept
++try
++{
++        g_return_if_fail(VTE_IS_TERMINAL(terminal));
++        g_return_if_fail(snapshot_data != nullptr);
++
++        (void)IMPL(terminal)->snapshot_capture(snapshot_data);
++}
++catch (...)
++{
++}
++
++/**
++ * vte_terminal_snapshot_restore:
++ * @terminal: a #VteTerminal
++ * @snapshot_data: a #GBytes containing snapshot data from
++ *   vte_terminal_snapshot_capture()
++ *
++ * Restores the terminal visual state from a previously captured snapshot.
++ *
++ * Returns: %TRUE on success, %FALSE on failure
++ */
++gboolean
++vte_terminal_snapshot_restore(VteTerminal *terminal,
++                              GBytes *snapshot_data) noexcept
++try
++{
++        g_return_val_if_fail(VTE_IS_TERMINAL(terminal), false);
++        g_return_val_if_fail(snapshot_data != nullptr, false);
++
++        return IMPL(terminal)->snapshot_restore(snapshot_data);
++}
++catch (...)
++{
++        return vte::glib::set_error_from_exception(nullptr);
++}
++
++/**
++ * vte_terminal_snapshot_has_pending_data:
++ * @terminal: a #VteTerminal
++ *
++ * Returns whether the terminal has pending uncommitted state changes since
++ * the last snapshot was captured.
++ *
++ * Returns: %TRUE if there is pending data, %FALSE otherwise
++ */
++gboolean
++vte_terminal_snapshot_has_pending_data(VteTerminal *terminal) noexcept
++try
++{
++        g_return_val_if_fail(VTE_IS_TERMINAL(terminal), false);
++
++        return IMPL(terminal)->snapshot_has_pending_data(terminal);
++}
++catch (...)
++{
++        return false;
++}
++

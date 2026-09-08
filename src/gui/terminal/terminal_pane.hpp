@@ -20,9 +20,20 @@ public:
     // `history_file` (optional): absolute path to this pane's dedicated shell
     // history file. When set, the pane spawns its shell with HISTFILE pointed
     // there so shell ↑/↓ recall only this pane's commands (§6.1 isolation).
+    // If `defer_spawn` is true, the shell is NOT spawned in the constructor.
+    // The caller must call either `initialize_fresh()` or `runtime_restore()`
+    // to spawn the shell exactly once.
     TerminalPane(const std::string& shell, const std::string& cwd,
-                 const std::string& history_file = "");
+                 const std::string& history_file = "",
+                 bool defer_spawn = false);
     ~TerminalPane();
+
+    // Initialize a fresh terminal (used for new tabs). Spawns the shell.
+    void initialize_fresh();
+
+    // Restore terminal state from a persisted PaneState (used for restore).
+    // Restores the binary VTE snapshot then spawns shell exactly once.
+    void runtime_restore(const remin::core::PaneState& state);
 
     // Access the widget for embedding in a container.
     Gtk::Widget& widget();
@@ -30,18 +41,15 @@ public:
     // Feed input from the host side (e.g. copied text).
     void feed(std::string_view data);
 
-    // Read the full scrollback buffer text (scrollback + visible region).
-    std::string capture_scrollback() const;
-
     // -- Runtime persistence adapters (design §3.1/§5/§4) --
     // Capture the VTE's current runtime state as pure data. The host routes
     // this through the SessionController into canonical PaneState.
     // command_history is intentionally left empty here (see its comment in
     // TerminalRuntimeSnapshot): canonical history lives in core.
     [[nodiscard]] remin::core::TerminalRuntimeSnapshot runtime_capture() const;
-    // Deterministic restore: resize → feed captured text → spawn the shell in
-    // the captured cwd (design §5.2). Feed runs BEFORE spawn, no sleeps.
-    void runtime_restore(const remin::core::PaneState& state);
+    // Deterministic restore: resize → restore binary snapshot → spawn the
+    // shell in the captured cwd (design §5.2). Snapshot restore runs BEFORE
+    // spawn. (Declaration above as runtime_restore)
 
     // The short title shown in the tab strip.
     [[nodiscard]] const char* title() const { return title_.c_str(); }

@@ -1,0 +1,23 @@
+diff --git a/src/vte/vteterminal.h b/src/vte/vteterminal.h
+index a9e1e49..5adb595 100644
+--- a/src/vte/vteterminal.h
++++ b/src/vte/vteterminal.h
+@@ -656,6 +656,18 @@ gboolean vte_event_context_get_coordinates(VteEventContext const* context,
+ 
+ #endif /* VTE_GTK */
+ 
++/* Snapshot API for terminal state persistence */
++_VTE_PUBLIC
++void vte_terminal_snapshot_capture(VteTerminal *terminal,
++                                   GBytes **snapshot_data) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1);
++
++_VTE_PUBLIC
++gboolean vte_terminal_snapshot_restore(VteTerminal *terminal,
++                                       GBytes *snapshot_data) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1);
++
++_VTE_PUBLIC
++gboolean vte_terminal_snapshot_has_pending_data(VteTerminal *terminal) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1);
++
+ G_DEFINE_AUTOPTR_CLEANUP_FUNC(VteTerminal, g_object_unref)
+ 
+ G_END_DECLS

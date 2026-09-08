@@ -1,0 +1,32 @@
+# VTE dependency manifest for Remin
+#
+# Remin requires the Remin snapshot patch applied to a specific VTE release.
+# This manifest pins the exact upstream source + patch series so builds do NOT
+# depend on whatever /usr/lib libvte happens to be installed (which may or may
+# not carry the snapshot API). Reproduce with: scripts/build-vte.sh
+#
+# The artifact Remin must link/runtime-load is produced by the script and is NOT
+# the system vte-2.91-gtk4.
+
+vte_version = 0.76.0
+
+# Patch series shipped in patches/vte-0.76.0/ (order 0001..0004).
+patch_series_version = 1
+patch_series_dir     = patches/vte-0.76.0
+
+# SHA-256 pins
+patch_0001_sha256 = 9a076ac42b844ea0eec78b41c351824fe7550b2ade14e83241bbf2caf383bb19
+patch_0002_sha256 = 9b9ce3b8c0a6ae630c253e555f19f922fe2a8997c7ba48bf2cb83cebaed51308
+patch_0003_sha256 = dc9683823bbc3919e140c2e2de42a0653e25984054ca4e8eb385525be1a8720c
+patch_0004_sha256 = c84be9f6d196c77e5af5f3c385862663228b8f1eb802d2d7a9c7e8f9d93f659c
+source_sha256     = 2275d5958d89ca1a93488e066ee33987557db36f560a5dfd4101b1a2d4f150a4   # pristine vte-0.76.0.tar.gz
+
+# Clean-room build (out of tree; never installed to the system):
+#   ./scripts/build-vte.sh
+# Source tarball (provenance, checked out of tree): third_party/vte/vte-0.76.0.tar.gz
+# Produces (gitignored, reproducible):
+#   patched_tree      = vte-0.76.0-patched/
+#   lib               = vte-0.76.0-patched/build/src/libvte-2.91-gtk4.so.0
+# Consumption (override the system package):
+#   PKG_CONFIG_PATH  = vte-0.76.0-patched/build/meson-uninstalled
+#   LD_LIBRARY_PATH  = vte-0.76.0-patched/build/src

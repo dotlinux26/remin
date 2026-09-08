@@ -23,6 +23,9 @@ public:
     void store_scrollback(const PaneId& p, std::string c) override { scrollback[p] = std::move(c); }
     std::string load_scrollback(const PaneId&) override { return {}; }
 
+    void store_snapshot(const PaneId&, const std::vector<std::uint8_t>&) override {}
+    std::vector<std::uint8_t> load_snapshot(const PaneId&) override { return {}; }
+
     // Closed-window history (stubs)
     void store_closed_window(const ClosedWindowSnapshot&) override {}
     std::vector<ClosedWindowSnapshot> list_closed_windows(const WorkspaceId&) override { return {}; }
@@ -30,7 +33,7 @@ public:
     void delete_closed_window(const WorkspaceId&, const SnapshotId&) override {}
 
     bool checkpoint(const WorkspaceId&, const json&, int, int64_t, const std::string&,
-                    const std::vector<std::pair<PaneId, std::string>>&) override {
+                    const std::vector<std::pair<PaneId, std::vector<std::uint8_t>>>&) override {
         return true;
     }
 };

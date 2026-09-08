@@ -1,0 +1,4 @@
+9a076ac42b844ea0eec78b41c351824fe7550b2ade14e83241bbf2caf383bb19  0001-vte-0.76.0-public-snapshot-api.patch
+9b9ce3b8c0a6ae630c253e555f19f922fe2a8997c7ba48bf2cb83cebaed51308  0002-vte-0.76.0-internal-snapshot-declarations.patch
+dc9683823bbc3919e140c2e2de42a0653e25984054ca4e8eb385525be1a8720c  0003-vte-0.76.0-snapshot-serialization-and-restore.patch
+c84be9f6d196c77e5af5f3c385862663228b8f1eb802d2d7a9c7e8f9d93f659c  0004-vte-0.76.0-public-snapshot-wrappers.patch

@@ -12,7 +12,8 @@
 namespace remin::gui {
 
 TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd,
-                           const std::string& history_file)
+                            const std::string& history_file,
+                            bool defer_spawn)
     : shell_(shell), cwd_(cwd), history_file_(history_file), title_("terminal") {
 
     // Container (gtkmm): a simple box that will own the native VTE widget.
@@ -28,10 +29,6 @@ TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd,
         if (const char* home = std::getenv("HOME")) cwd_ = home;
     }
     cached_cwd_ = cwd_;
-
-    // Spawn the shell into the terminal's PTY (records the shell PID so the
-    // §4 /proc/<pid>/cwd cwd fallback can read it).
-    spawn_shell(cwd_);
 
     // Terminal profile: transparent background, semantic colors come from CSS.
     vte_terminal_set_scrollback_lines(vte_, 10000);
@@ -66,6 +63,12 @@ TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd,
     // rebuilds. Without this, removing the widget from its parent drops the
     // ref to 0 and GTK frees it, leaving widget_ dangling.
     g_object_ref(widget_->gobj());
+
+    // Spawn shell unless deferred (used for restore path where runtime_restore
+    // will handle feed-then-spawn).
+    if (!defer_spawn) {
+        spawn_shell(cwd_);
+    }
 }
 
 TerminalPane::~TerminalPane() {
@@ -142,34 +145,77 @@ remin::core::TerminalRuntimeSnapshot TerminalPane::runtime_capture() const {
     snap.cols = static_cast<std::uint32_t>(vte_terminal_get_column_count(vte_));
     snap.rows = static_cast<std::uint32_t>(vte_terminal_get_row_count(vte_));
     snap.shell = shell_;
-    snap.scrollback = capture_scrollback();
+    // Capture the full terminal state (scrollback + visible + cursor) as an
+    // opaque binary blob via the VTE snapshot API. Remin only carries the
+    // GBytes; it never interprets the contents.
+    GBytes* blob = nullptr;
+    vte_terminal_snapshot_capture(vte_, &blob);
+    if (blob) {
+        gsize n = 0;
+        const void* data = g_bytes_get_data(blob, &n);
+        if (data && n > 0) {
+            const auto* p = static_cast<const std::uint8_t*>(data);
+            snap.snapshot_data.assign(p, p + n);
+        }
+        g_bytes_unref(blob);
+    }
     snap.cwd = resolve_capture_cwd();
     if (!snap.cwd.empty()) cached_cwd_ = snap.cwd;
     snap.interrupted_command = interrupted_;
     return snap;
 }
 
+// Initialize a fresh terminal (used for new tabs). Spawns the shell.
+void TerminalPane::initialize_fresh() {
+    if (!vte_) return;
+    // Already configured in constructor, just spawn the shell.
+    if (cwd_.empty()) {
+        if (const char* home = std::getenv("HOME")) cwd_ = home;
+    }
+    spawn_shell(cwd_);
+}
+
+// Restore terminal state from a persisted PaneState (used for restore).
+// Restores the binary VTE snapshot then spawns shell exactly once.
 void TerminalPane::runtime_restore(const remin::core::PaneState& state) {
     if (!vte_) return;
 
-    // Empty VTE → first build is a fresh shell (nothing to restore).
-    if (state.scrollback.empty() && state.cols == 0 && state.rows == 0 &&
+    // Empty PaneState → first build is a fresh shell (nothing to restore).
+    if (state.snapshot_data.empty() && state.cols == 0 && state.rows == 0 &&
         state.cwd.empty() && state.shell.empty()) {
+        // Nothing to restore, but we still need a shell if this is a fresh pane.
+        // However, if we got here via restore_pane_tree(), the constructor was
+        // called with defer_spawn=true, so we need to spawn.
+        initialize_fresh();
         return;
     }
 
-    // 1. Grid size first (design §5.2): the captured scrollback wraps to the
-    //    captured dimensions.
+    // 1. Grid size first (design §5.2): the snapshot wraps to the captured
+    //    dimensions. Widget must be configured before restore.
     if (state.cols > 0 && state.rows > 0) {
         vte_terminal_set_size(vte_, static_cast<glong>(state.cols),
                               static_cast<glong>(state.rows));
     }
 
-    // 2. Feed-before-spawn: rebuild the scrollback from the raw text buffer so
-    //    the shell prompt lands below exactly the restored content.
-    if (!state.scrollback.empty()) {
-        vte_terminal_feed(vte_, state.scrollback.data(),
-                          static_cast<gssize>(state.scrollback.size()));
+    // 2. Restore the binary snapshot BEFORE spawning the shell. The captured
+    //    VTE state is fully re-created (scrollback, visible region, cursor);
+    //    the shell is spawned fresh afterwards so it lands "below" the content.
+    if (!state.snapshot_data.empty()) {
+        GBytes* blob = g_bytes_new(state.snapshot_data.data(),
+                                   static_cast<gsize>(state.snapshot_data.size()));
+        const bool ok = vte_terminal_snapshot_restore(vte_, blob);
+        g_bytes_unref(blob);
+        if (!ok) {
+            g_printerr("REMIN: snapshot restore failed for pane\n");
+        } else {
+            // The restored screen's last line holds the old shell's prompt and
+            // the cursor sits right after it. The freshly spawned shell will
+            // print its own prompt at the cursor position, gluing two prompts
+            // together. Move the cursor to a clean CR-LF line (display-only,
+            // NOT fed to the child) so the new prompt lands on its own row.
+            const char nl[] = "\r\n";
+            vte_terminal_feed(vte_, nl, sizeof(nl) - 1);
+        }
     }
 
     // 3. Spawn a fresh shell (env inherits the default environment, §3.2) in
@@ -183,22 +229,6 @@ void TerminalPane::feed(std::string_view data) {
     if (vte_) {
         vte_terminal_feed(vte_, data.data(), static_cast<gssize>(data.size()));
     }
-}
-
-std::string TerminalPane::capture_scrollback() const {
-    if (!vte_) return {};
-    // Full range: negative start rows reach back into the scrollback buffer,
-    // end is just past the visible region (design §5.1). Bound the start to the
-    // configured scrollback size — a huge negative start (e.g. -(1<<30)) makes
-    // VTE 0.76 hang when computing the text range.
-    constexpr glong kScrollbackLines = 10000;
-    const glong rows = vte_terminal_get_row_count(vte_);
-    gsize len = 0;
-    char* text = vte_terminal_get_text_range_format(vte_, VTE_FORMAT_TEXT,
-                                                    -(rows + kScrollbackLines), 0, rows, 0, &len);
-    std::string out = text ? text : "";
-    if (text) g_free(text);
-    return out;
 }
 
 void TerminalPane::set_search_text(const std::string& text) {

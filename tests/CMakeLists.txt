@@ -31,4 +31,40 @@ if(REMIN_BUILD_GUI)
   remin_enable_warnings(fidelity_gate_test)
   remin_enable_sanitizers(fidelity_gate_test)
   add_test(NAME fidelity_gate_test COMMAND fidelity_gate_test)
+
+  # VTE snapshot round-trip test: uses vte_terminal_snapshot_capture/restore
+  # from the minimal VTE 0.76 patch (remin-vte-extension Phase 0).
+  add_executable(vte_snapshot_roundtrip_test unit/vte_snapshot_roundtrip_test.cpp)
+  target_include_directories(vte_snapshot_roundtrip_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(vte_snapshot_roundtrip_test PRIVATE PkgConfig::GTKMM PkgConfig::VTE)
+  remin_enable_warnings(vte_snapshot_roundtrip_test)
+  remin_enable_sanitizers(vte_snapshot_roundtrip_test)
+  add_test(NAME vte_snapshot_roundtrip_test COMMAND vte_snapshot_roundtrip_test)
+
+  # VTE Phase-0E Critical Validation: comprehensive behavioral equivalence tests
+  add_executable(vte_critical_validation_test unit/vte_critical_validation_test.cpp)
+  target_include_directories(vte_critical_validation_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(vte_critical_validation_test PRIVATE PkgConfig::GTKMM PkgConfig::VTE)
+  remin_enable_warnings(vte_critical_validation_test)
+  remin_enable_sanitizers(vte_critical_validation_test)
+  add_test(NAME vte_critical_validation_test COMMAND vte_critical_validation_test)
+
+  # VTE P0-G external-consumer test: snapshot API consumed from outside the VTE
+  # source tree (public API only). Requires a patched VTE build at runtime.
+  add_executable(vte_snapshot_consumer_test unit/vte_snapshot_consumer_test.cpp)
+  target_include_directories(vte_snapshot_consumer_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(vte_snapshot_consumer_test PRIVATE PkgConfig::GTKMM PkgConfig::VTE)
+  remin_enable_warnings(vte_snapshot_consumer_test)
+  remin_enable_sanitizers(vte_snapshot_consumer_test)
+  add_test(NAME vte_snapshot_consumer_test COMMAND vte_snapshot_consumer_test)
+
+  # VTE P0-H1/H2 DB integration test: binary snapshot stored as a SQLite BLOB
+  # through the real SqliteStorage and restored into a fresh VTE — the automated
+  # analogue of the real-restart acceptance at the storage boundary.
+  add_executable(vte_snapshot_db_roundtrip_test unit/vte_snapshot_db_roundtrip_test.cpp)
+  target_include_directories(vte_snapshot_db_roundtrip_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(vte_snapshot_db_roundtrip_test PRIVATE PkgConfig::GTKMM PkgConfig::VTE remin_storage remin_core)
+  remin_enable_warnings(vte_snapshot_db_roundtrip_test)
+  remin_enable_sanitizers(vte_snapshot_db_roundtrip_test)
+  add_test(NAME vte_snapshot_db_roundtrip_test COMMAND vte_snapshot_db_roundtrip_test)
 endif()

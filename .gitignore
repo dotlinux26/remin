@@ -19,3 +19,8 @@ CMakeFiles/
 cmake_install.cmake
 CTestTestfile.cmake
 Testing/
+
+# VTE local reproduction trees (reproducible via scripts/build-vte.sh;
+# patch series + VTE_MANIFEST in-repo are the source of truth)
+vte-0.76.0-pristine/
+vte-0.76.0-patched/

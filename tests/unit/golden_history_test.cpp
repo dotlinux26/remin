@@ -56,6 +56,9 @@ public:
     void store_scrollback(const PaneId& p, std::string c) override { scrollbacks[p] = std::move(c); }
     std::string load_scrollback(const PaneId&) override { return {}; }
 
+    void store_snapshot(const PaneId&, const std::vector<std::uint8_t>&) override {}
+    std::vector<std::uint8_t> load_snapshot(const PaneId&) override { return {}; }
+
     // Closed-window history
     void store_closed_window(const ClosedWindowSnapshot& snap) override { closed_windows.push_back(snap); }
     std::vector<ClosedWindowSnapshot> list_closed_windows(const WorkspaceId& ws_id) override {
@@ -72,7 +75,7 @@ public:
     void delete_closed_window(const WorkspaceId&, const SnapshotId&) override {}
 
     bool checkpoint(const WorkspaceId& ws_id, const json& workspace_state, int, int64_t, const std::string&,
-                    const std::vector<std::pair<PaneId, std::string>>&) override {
+                    const std::vector<std::pair<PaneId, std::vector<std::uint8_t>>>&) override {
         // Save workspace for open_workspace to find
         auto it = std::find_if(workspaces.begin(), workspaces.end(),
                               [&](const Workspace& w) { return w.id == ws_id; });

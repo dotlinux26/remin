@@ -25,8 +25,13 @@ public:
                        const remin::core::json& state) override;
     void delete_snapshot(const remin::core::WorkspaceId& id, const remin::core::SnapshotId& snap) override;
 
+    // Generic TEXT key-value blob store (note bodies, settings).
     void store_scrollback(const remin::core::PaneId& pane, std::string content) override;
     std::string load_scrollback(const remin::core::PaneId& pane) override;
+
+    // Terminal snapshots (binary, opaque VTE blobs).
+    void store_snapshot(const remin::core::PaneId& pane, const std::vector<std::uint8_t>& data) override;
+    std::vector<std::uint8_t> load_snapshot(const remin::core::PaneId& pane) override;
 
     // Closed-window history
     void store_closed_window(const remin::core::ClosedWindowSnapshot& snap) override;
@@ -34,13 +39,13 @@ public:
     std::optional<remin::core::ClosedWindowSnapshot> load_closed_window(const remin::core::WorkspaceId& ws_id, const remin::core::SnapshotId& snap_id) override;
     void delete_closed_window(const remin::core::WorkspaceId& ws_id, const remin::core::SnapshotId& snap_id) override;
 
-    // Atomic checkpoint: workspace + scrollbacks + snapshot in one transaction.
+    // Atomic checkpoint: workspace + terminal snapshots + snapshot in one transaction.
     bool checkpoint(const remin::core::WorkspaceId& ws_id,
                     const remin::core::json& workspace_state,
                     int schema_version,
                     int64_t generation,
                     const std::string& reason,
-                    const std::vector<std::pair<remin::core::PaneId, std::string>>& scrollbacks);
+                    const std::vector<std::pair<remin::core::PaneId, std::vector<std::uint8_t>>>& snapshots);
 
     [[nodiscard]] bool ok() const { return ok_; }
     [[nodiscard]] std::string error() const { return err_; }

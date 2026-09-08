@@ -194,9 +194,11 @@ void TerminalTabView::show_pane_menu(Gtk::Widget& pane_widget, double x, double 
 }
 
 std::optional<std::string> TerminalTabView::capture(const remin::core::PaneId& pane) const {
-    auto it = panes_.find(pane.str());
-    if (it == panes_.end()) return std::nullopt;
-    return it->second.get()->capture_scrollback();
+    (void)pane;
+    // Legacy text-scrollback capture is replaced by the binary VTE snapshot
+    // path (runtime_capture → checkpoint). The autosave scrollback provider
+    // (Kind::Terminal) no longer stores a payload, so nothing to return here.
+    return std::nullopt;
 }
 
 void TerminalTabView::activate_pane(const remin::core::PaneId& pane) {
@@ -211,6 +213,7 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
     auto shell = shell_;
     auto pane = std::make_unique<TerminalPane>(shell, "", pane_history_file(new_pane));
     auto* raw = pane.get();
+    raw->initialize_fresh();  // Spawn shell for fresh pane
     if (controller_->autosaver()) {
         auto pid = new_pane;
         raw->set_input_callback([this, pid]() {
@@ -293,6 +296,7 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
                 // Lazy-create a terminal for a pane we don't have yet.
                 auto p = std::make_unique<TerminalPane>(shell_, "", pane_history_file(pid));
                 auto* raw = p.get();
+                raw->initialize_fresh();  // Spawn shell for fresh pane
                 if (controller_->autosaver()) {
                     auto cid = pid;
                     raw->set_input_callback([this, cid]() {
@@ -464,8 +468,9 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                 // commands THIS pane ran (§6.1 isolation).
                 const std::string hist_file = pane_history_file(pid);
                 seed_shell_history(hist_file, state.command_history);
-                // Create terminal pane with the persisted state
-                auto p = std::make_unique<TerminalPane>(shell_, state.cwd, hist_file);
+                // Create terminal pane with the persisted state (defer shell spawn
+                // because runtime_restore will handle snapshot-restore-then-spawn).
+                auto p = std::make_unique<TerminalPane>(shell_, state.cwd, hist_file, true);
                 auto* raw = p.get();
                 if (controller_->autosaver()) {
                     auto cid = pid;

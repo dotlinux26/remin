@@ -281,6 +281,44 @@ Design: `docs/design/workspace-persistence-pipeline.md` (đã gate). Không Wind
   Model: CommandRecord / TranscriptChunk / ClosedWindowSnapshot riêng biệt.
   Implementation order A–G; acceptance yêu cầu đủ 7 thứ đồng thời.
   `implement-note-1.md` đã superseded bởi semantics + spec này.
+- `patches/vte-0.76.0/` + `docs/vte-patch-packaging-report.md` — **P0-F VTE PATCH
+  PACKAGING (chốt 2026-09-08, `PATCH_PACKAGE = READY`)**: 4 patch
+  (public API / internal decls / vte.cc impl / gtk wrappers); invariant
+  `pristine 0.76.0 + patch == exactly working patched VTE` verified byte-for-byte;
+  clean-room build 171 targets + tests 0C OK + 0E 14/14 PASS; pristine rebuild →
+  `undefined symbol` (negative prove); revert→reapply→rebuild→rerun PASS. Non-blocking:
+  uninitialized `magic`/`pal_count` in g_printerr error path, STUB
+  `snapshot_has_pending_data`, dead `get_bytes()`, non-transactional restore,
+  no upper-bounds on rows/cols, cwd/file-uri/title chưa trong format (v4). KHÔNG
+  tích hợp vào Remin trong phase này.
+- `scripts/build-vte.sh` + `VTE_MANIFEST` + `docs/vte-p0g-reproducibility.md` —
+  **P0-G REPRODUCIBILITY & EXTERNAL-CONSUMER (chốt 2026-09-08,
+  `READY_FOR_INTEGRATION`)**: full pipeline tái tạo (pristine→apply→build→verify→test);
+  `scripts/build-vte.sh` reproduces 7 gates end-to-end; `VTE_MANIFEST` pins
+  vte_version=0.76.0 + patch_series=1 + 6 SHA256 hashes. External consumer test
+  `tests/unit/vte_snapshot_consumer_test.cpp` PASS (`<vte/vte.h>` public API only,
+  no internal headers). **Phát hiện quan trọng**: system `/usr/lib` libvte đã có
+  snapshot symbols (trials trước) trong khi system header thiếu decls → Remin
+  PHẢI dùng `PKG_CONFIG_PATH=vte-0.76.0-patched/build/meson-uninstalled` +
+  `LD_LIBRARY_PATH=vte-0.76.0-patched/build/src`, KHÔNG link system lib.
+  Sẵn sàng cho P0-H (TerminalPane integration).
+- **P0-H1/H2 WIRE BINARY SNAPSHOT + DB BLOB (chốt 2026-09-08, code + tests done)**: 
+  `TerminalPane` capture/restore thay HTML text scrollback bằng `vte_terminal_snapshot_capture()`
+  → `GBytes` → `std::vector<uint8_t> snapshot_data` → `vte_terminal_snapshot_restore()`. 
+  Restore order: configure size → `snapshot_restore()` → **CR-LF display feed**
+  (`vte_terminal_feed("\r\n")`, display-only KHÔNG gửi cho child) → spawn shell once.
+  CR-LF feed để prompt shell mới xuống dòng riêng, tránh 2 prompt dính nhau
+  (restore hiển thị dòng prompt cũ + shell mới in prompt mới → gluing). DB schema: thêm
+  `terminal_snapshots(pane_id, content BLOB, version=1, updated_at)`; `checkpoint()`/load
+  dùng BLOB (`sqlite3_bind_blob`). Giữ `scrollbacks` TEXT làm generic key-value blob store
+  (note bodies + settings qua `SessionController`) — KHÔNG drop. JSON workspace state lưu
+  `snapshot_data` base64 inline (DB BLOB là authoritative). Test mới
+  `vte_snapshot_db_roundtrip_test` (14/14 ctest PASS): VTE A → capture → SqliteStorage
+  BLOB store/load → restore VTE B → recapture byte-for-byte == A (5706 bytes). Remin build
+  phải dùng patched VTE: `PKG_CONFIG_PATH`+`LD_LIBRARY_PATH` (đã reconfigure `build/`).
+  **Artifact chốt**: `patches/vte-0.76.0/` (0001-0004 + SERIES.md + SHA256SUMS) — verify
+  `pristine + series == working patched tree` byte-for-byte, SHA256SUMS khớp. Restore thực tế
+  trên GUI đã xác nhận OK (2026-09-08).
 - `docs/problem-terminal-transcript-capture.md` — **P0-B CAPTURE FIDELITY FAILING**:
   blob scrollback tồn tại (~10KB) nhưng nội dung gần như blank + prompt, thiếu
   output thật. PHẢI chứng minh capture chứa marker deterministic
@@ -447,4 +485,4 @@ resources/styles/
 
 ---
 
-*Last updated: 2026-09-06*
+*Last updated: 2026-09-08 (v0.0.5lts — P0-H snapshot + DB BLOB + real-restart chốt)*

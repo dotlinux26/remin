@@ -7,10 +7,74 @@
 #include <nlohmann/json.hpp>
 #include <chrono>
 #include <string>
+#include <vector>
+#include <cstdint>
 
 namespace remin::core {
 
 using json = nlohmann::json;
+
+// -- Base64 ----------------------------------------------------------------
+// Minimal RFC 4648 base64 encode/decode for binary snapshot blobs.
+
+namespace detail {
+
+inline const char kBase64Table[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+inline std::string base64_encode(const std::vector<std::uint8_t>& data) {
+    std::string out;
+    out.reserve(((data.size() + 2) / 3) * 4);
+    for (std::size_t i = 0; i < data.size(); i += 3) {
+        std::uint32_t n = static_cast<std::uint32_t>(data[i]) << 16;
+        if (i + 1 < data.size()) n |= static_cast<std::uint32_t>(data[i + 1]) << 8;
+        if (i + 2 < data.size()) n |= static_cast<std::uint32_t>(data[i + 2]);
+        out += kBase64Table[(n >> 18) & 0x3F];
+        out += kBase64Table[(n >> 12) & 0x3F];
+        out += (i + 1 < data.size()) ? kBase64Table[(n >> 6) & 0x3F] : '=';
+        out += (i + 2 < data.size()) ? kBase64Table[n & 0x3F] : '=';
+    }
+    return out;
+}
+
+inline std::vector<std::uint8_t> base64_decode(const std::string& s) {
+    static const std::uint8_t kDecode[256] = {
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,62 ,255,255,255,63 ,
+        52 ,53 ,54 ,55 ,56 ,57 ,58 ,59 ,60 ,61 ,255,255,255,255,255,255,
+        255,0  ,1  ,2  ,3  ,4  ,5  ,6  ,7  ,8  ,9  ,10 ,11 ,12 ,13 ,14 ,
+        15 ,16 ,17 ,18 ,19 ,20 ,21 ,22 ,23 ,24 ,25 ,255,255,255,255,255,
+        255,26 ,27 ,28 ,29 ,30 ,31 ,32 ,33 ,34 ,35 ,36 ,37 ,38 ,39 ,40 ,
+        41 ,42 ,43 ,44 ,45 ,46 ,47 ,48 ,49 ,50 ,51 ,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+        255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    };
+    std::vector<std::uint8_t> out;
+    if (s.empty()) return out;
+    out.reserve(s.size() * 3 / 4);
+    for (std::size_t i = 0; i < s.size(); i += 4) {
+        std::uint32_t n = 0;
+        for (std::size_t j = 0; j < 4 && i + j < s.size(); ++j) {
+            char c = s[i + j];
+            // Shift even on padding so trailing bits land in the right slots.
+            n <<= 6;
+            if (c != '=') n |= kDecode[static_cast<std::uint8_t>(c)];
+        }
+        out.push_back(static_cast<std::uint8_t>((n >> 16) & 0xFF));
+        if (i + 2 < s.size() && s[i + 2] != '=') out.push_back(static_cast<std::uint8_t>((n >> 8) & 0xFF));
+        if (i + 3 < s.size() && s[i + 3] != '=') out.push_back(static_cast<std::uint8_t>(n & 0xFF));
+    }
+    return out;
+}
+
+} // namespace detail
 
 // Human-readable JSON serialization of the Remin workspace model.
 // This is the interchange/export/debug format. Canonical storage is SQLite;
@@ -88,7 +152,7 @@ inline void to_json(json& j, const PaneState& s) {
         {"cols", s.cols},
         {"rows", s.rows},
         {"command_history", s.command_history},
-        {"scrollback", s.scrollback},
+        {"snapshot_data", detail::base64_encode(s.snapshot_data)},
     };
     // V1 design decision: environment is intentionally NOT persisted.
     if (s.interrupted_command) j["interrupted_command"] = *s.interrupted_command;
@@ -100,7 +164,15 @@ inline void from_json(const json& j, PaneState& s) {
     s.cols = j.value("cols", 0u);
     s.rows = j.value("rows", 0u);
     if (j.contains("command_history")) j.at("command_history").get_to(s.command_history);
-    s.scrollback = j.value("scrollback", std::string{});
+    // Migration: old checkpoints stored "scrollback" (text); new ones store
+    // "snapshot_data" (base64-encoded binary). Prefer snapshot_data.
+    if (j.contains("snapshot_data")) {
+        auto b64 = j.value("snapshot_data", std::string{});
+        s.snapshot_data = detail::base64_decode(b64);
+    } else if (j.contains("scrollback")) {
+        // Legacy: discard old text scrollback — binary snapshot replaces it.
+        s.snapshot_data.clear();
+    }
     if (j.contains("interrupted_command")) {
         const auto& ic = j.at("interrupted_command");
         if (ic.is_string()) {

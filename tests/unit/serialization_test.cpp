@@ -66,7 +66,8 @@ int main() {
     p.state.rows = 36;
     p.state.command_history = {
         {"pwd", 1000}, {"nmap -sV 10.10.10.5", 2000}, {"ffuf -u http://10.10.10.5/FUZZ", 3000}};
-    p.state.scrollback = "user@host:~$ pwd\n/home/user/research/gitlab\n";
+    const std::vector<std::uint8_t> expected_snapshot = {0x1, 0x2, 0x3, 0xFE, 0xFF, 0x00, 0x40, 0x80};
+    p.state.snapshot_data = expected_snapshot;
     p.state.interrupted_command =
         InterruptedCommand{"ffuf -u http://10.10.10.5/FUZZ", 1234567,
                            InterruptedCommand::Source::CtrlC};
@@ -128,7 +129,11 @@ int main() {
     CHECK(ps.command_history[0].timestamp_us == 1000);
     CHECK(ps.command_history[2].command == "ffuf -u http://10.10.10.5/FUZZ");
     CHECK(ps.command_history[2].timestamp_us == 3000);
-    CHECK(ps.scrollback.rfind("user@host:~$ pwd", 0) == 0);
+    // Binary snapshot survives a JSON round-trip (base64-encoded inline).
+    CHECK(ps.snapshot_data.size() == 8);
+    if (ps.snapshot_data.size() == 8) {
+        CHECK(ps.snapshot_data == expected_snapshot);
+    }
     CHECK(ps.interrupted_command.has_value());
     CHECK(ps.interrupted_command->source == InterruptedCommand::Source::CtrlC);
     CHECK(ps.interrupted_command->timestamp_us == 1234567);

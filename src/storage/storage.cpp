@@ -5,6 +5,9 @@
 #include <memory>
 #include <chrono>
 #include <string>
+#include <vector>
+#include <cstdint>
+#include <iostream>
 
 namespace remin::storage {
 
@@ -27,7 +30,7 @@ bool SqliteStorage::checkpoint(const remin::core::WorkspaceId& ws_id,
                                int schema_version,
                                int64_t generation,
                                const std::string& reason,
-                               const std::vector<std::pair<remin::core::PaneId, std::string>>& scrollbacks) {
+                               const std::vector<std::pair<remin::core::PaneId, std::vector<std::uint8_t>>>& snapshots) {
     if (!ok_) return false;
 
     SqliteDb::Transaction tx = db_->begin_transaction();
@@ -72,15 +75,15 @@ bool SqliteStorage::checkpoint(const remin::core::WorkspaceId& ws_id,
     }
     sqlite3_finalize(stmt);
 
-    // 2. Write all scrollbacks
-    for (const auto& [pane, content] : scrollbacks) {
+    // 2. Write all terminal snapshots (binary blobs)
+    for (const auto& [pane, data] : snapshots) {
         stmt = nullptr;
-        const char* sb_sql = R"SQL(
-            INSERT INTO scrollbacks (pane_id, content, updated_at)
-            VALUES (?1, ?2, ?3)
-            ON CONFLICT(pane_id) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at;
+        const char* snap_sql = R"SQL(
+            INSERT INTO terminal_snapshots (pane_id, content, version, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(pane_id) DO UPDATE SET content=excluded.content, version=excluded.version, updated_at=excluded.updated_at;
         )SQL";
-        if (sqlite3_prepare_v2(db_->raw(), sb_sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        if (sqlite3_prepare_v2(db_->raw(), snap_sql, -1, &stmt, nullptr) != SQLITE_OK) {
             err_ = sqlite3_errmsg(db_->raw());
             tx.rollback();
             return false;
@@ -88,8 +91,13 @@ bool SqliteStorage::checkpoint(const remin::core::WorkspaceId& ws_id,
         const std::string pane_str = pane.str();
         const std::string ts = now_iso();
         sqlite3_bind_text(stmt, 1, pane_str.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, content.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 3, ts.c_str(), -1, SQLITE_TRANSIENT);
+        if (data.empty()) {
+            sqlite3_bind_blob(stmt, 2, nullptr, 0, SQLITE_TRANSIENT);
+        } else {
+            sqlite3_bind_blob(stmt, 2, data.data(), static_cast<int>(data.size()), SQLITE_TRANSIENT);
+        }
+        sqlite3_bind_int(stmt, 3, 1);
+        sqlite3_bind_text(stmt, 4, ts.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(stmt) != SQLITE_DONE) {
             err_ = sqlite3_errmsg(db_->raw());
             sqlite3_finalize(stmt);
@@ -301,6 +309,7 @@ void SqliteStorage::delete_snapshot(const remin::core::WorkspaceId& id, const re
     sqlite3_finalize(stmt);
 }
 
+// Generic TEXT key-value blob store (note bodies, settings).
 void SqliteStorage::store_scrollback(const remin::core::PaneId& pane, std::string content) {
     std::lock_guard<std::recursive_mutex> lk(db_->mutex());
     sqlite3_stmt* stmt = nullptr;
@@ -325,6 +334,44 @@ std::string SqliteStorage::load_scrollback(const remin::core::PaneId& pane) {
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         const unsigned char* txt = sqlite3_column_text(stmt, 0);
         if (txt) out.assign(reinterpret_cast<const char*>(txt));
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
+// Terminal snapshots: binary VTE blobs in a dedicated BLOB table.
+void SqliteStorage::store_snapshot(const remin::core::PaneId& pane, const std::vector<std::uint8_t>& data) {
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_->raw(),
+                       "INSERT INTO terminal_snapshots (pane_id, content, version, updated_at) VALUES (?1,?2,?3,?4) "
+                       "ON CONFLICT(pane_id) DO UPDATE SET content=excluded.content, version=excluded.version, updated_at=excluded.updated_at;",
+                       -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, pane.str().c_str(), -1, SQLITE_TRANSIENT);
+    if (data.empty()) {
+        sqlite3_bind_blob(stmt, 2, nullptr, 0, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_blob(stmt, 2, data.data(), static_cast<int>(data.size()), SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_int(stmt, 3, 1);
+    const auto ts = now_iso();
+    sqlite3_bind_text(stmt, 4, ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+std::vector<std::uint8_t> SqliteStorage::load_snapshot(const remin::core::PaneId& pane) {
+    std::vector<std::uint8_t> out;
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_->raw(), "SELECT content FROM terminal_snapshots WHERE pane_id=?1;", -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, pane.str().c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const void* blob = sqlite3_column_blob(stmt, 0);
+        const int n = sqlite3_column_bytes(stmt, 0);
+        if (blob && n > 0) {
+            out.assign(static_cast<const std::uint8_t*>(blob), static_cast<const std::uint8_t*>(blob) + n);
+        }
     }
     sqlite3_finalize(stmt);
     return out;

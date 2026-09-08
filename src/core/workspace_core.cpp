@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <iostream>
 
 namespace remin::core {
 
@@ -35,7 +36,7 @@ bool WorkspaceCore::open_workspace(const WorkspaceId& id) {
     if (!loaded) return false;
     ws_current_ = std::move(*loaded);
     
-    // Load scrollbacks from database into pane states
+    // Load terminal snapshots from database into pane states
     if (ws_current_) {
         for (auto& w : ws_current_->windows) {
             for (auto& t : w.tabs) {
@@ -43,9 +44,9 @@ bool WorkspaceCore::open_workspace(const WorkspaceId& id) {
                 t.pane_tree.collect_panes(panes);
                 for (auto* p : panes) {
                     if (p) {
-                        std::string scrollback = storage_->load_scrollback(p->id);
-                        if (!scrollback.empty()) {
-                            p->state.scrollback = std::move(scrollback);
+                        auto snap = storage_->load_snapshot(p->id);
+                        if (!snap.empty()) {
+                            p->state.snapshot_data = std::move(snap);
                         }
                     }
                 }
@@ -437,7 +438,7 @@ void WorkspaceCore::apply_runtime_state(const TabId& tab, const PaneId& pane,
             st.shell = snap.shell;
             st.cols = snap.cols;
             st.rows = snap.rows;
-            st.scrollback = snap.scrollback;
+            st.snapshot_data = snap.snapshot_data;
             st.interrupted_command = snap.interrupted_command;
             // command_history is already canonical (stored in core via add_command_to_pane)
             // but the runtime snapshot may carry a fresh copy; overlay it:
@@ -462,15 +463,15 @@ bool WorkspaceCore::checkpoint(const std::string& reason) {
     remin::core::json ws_json;
     to_json(ws_json, *ws_current_);
 
-    // Collect all pane scrollbacks from current workspace
-    std::vector<std::pair<PaneId, std::string>> scrollbacks;
+    // Collect all pane terminal snapshots from current workspace
+    std::vector<std::pair<PaneId, std::vector<std::uint8_t>>> snapshots;
     for (const auto& w : ws_current_->windows) {
         for (const auto& t : w.tabs) {
             std::vector<const Pane*> panes;
             t.pane_tree.collect_panes(panes);
             for (const auto* p : panes) {
-                if (p && !p->state.scrollback.empty()) {
-                    scrollbacks.emplace_back(p->id, p->state.scrollback);
+                if (p && !p->state.snapshot_data.empty()) {
+                    snapshots.emplace_back(p->id, p->state.snapshot_data);
                 }
             }
         }
@@ -480,7 +481,7 @@ bool WorkspaceCore::checkpoint(const std::string& reason) {
     const int schema_version = ws_current_->schema_version;
     const int64_t generation = ws_current_->generation;
     bool ok = storage_->checkpoint(ws_current_->id, ws_json, schema_version,
-                                   generation, reason, scrollbacks);
+                                   generation, reason, snapshots);
     if (ok) {
         ws_dirty_ = false;
         // Add snapshot id to workspace's snapshot list
