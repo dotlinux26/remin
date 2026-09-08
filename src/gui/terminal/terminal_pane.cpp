@@ -161,6 +161,13 @@ remin::core::TerminalRuntimeSnapshot TerminalPane::runtime_capture() const {
     }
     snap.cwd = resolve_capture_cwd();
     if (!snap.cwd.empty()) cached_cwd_ = snap.cwd;
+    // Session metadata (P0-H4): VTE-native props not carried in the snapshot
+    // blob (title / dir uri / file uri). Getter returns nullptr when unset.
+    if (const char* t = vte_terminal_get_window_title(vte_)) snap.window_title = t;
+    if (const char* u = vte_terminal_get_current_directory_uri(vte_))
+        snap.current_directory_uri = u;
+    if (const char* u = vte_terminal_get_current_file_uri(vte_))
+        snap.current_file_uri = u;
     snap.interrupted_command = interrupted_;
     return snap;
 }
@@ -182,7 +189,8 @@ void TerminalPane::runtime_restore(const remin::core::PaneState& state) {
 
     // Empty PaneState → first build is a fresh shell (nothing to restore).
     if (state.snapshot_data.empty() && state.cols == 0 && state.rows == 0 &&
-        state.cwd.empty() && state.shell.empty()) {
+        state.cwd.empty() && state.shell.empty() && state.window_title.empty() &&
+        state.current_directory_uri.empty() && state.current_file_uri.empty()) {
         // Nothing to restore, but we still need a shell if this is a fresh pane.
         // However, if we got here via restore_pane_tree(), the constructor was
         // called with defer_spawn=true, so we need to spawn.
@@ -218,11 +226,36 @@ void TerminalPane::runtime_restore(const remin::core::PaneState& state) {
         }
     }
 
+    // 2.5 Session metadata (P0-H4): re-apply VTE-native title/dir/file URI as
+    //     OSC sequences (display-only feeds — parsed by VTE, NOT sent to the
+    //     child). OSC 2 = window title, OSC 7 = current dir URI, OSC 6 =
+    //     current file URI. The snapshot blob does NOT carry these.
+    restore_session_metadata(state);
+
     // 3. Spawn a fresh shell (env inherits the default environment, §3.2) in
     //    the captured cwd if it still exists.
     if (!state.shell.empty()) shell_ = state.shell;
     cached_cwd_ = state.cwd;
     spawn_shell(resolve_restore_cwd(state.cwd));
+}
+
+void TerminalPane::restore_session_metadata(const remin::core::PaneState& state) {
+    if (!vte_) return;
+    const auto feed_osc = [this](std::string_view osc) {
+        vte_terminal_feed(vte_, osc.data(), static_cast<gssize>(osc.size()));
+    };
+    if (!state.window_title.empty()) {
+        const std::string osc = "\033]2;" + state.window_title + "\a";
+        feed_osc(osc);
+    }
+    if (!state.current_directory_uri.empty()) {
+        const std::string osc = "\033]7;" + state.current_directory_uri + "\a";
+        feed_osc(osc);
+    }
+    if (!state.current_file_uri.empty()) {
+        const std::string osc = "\033]6;" + state.current_file_uri + "\a";
+        feed_osc(osc);
+    }
 }
 
 void TerminalPane::feed(std::string_view data) {

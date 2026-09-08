@@ -71,6 +71,9 @@ int main() {
     p.state.interrupted_command =
         InterruptedCommand{"ffuf -u http://10.10.10.5/FUZZ", 1234567,
                            InterruptedCommand::Source::CtrlC};
+    p.state.window_title = "Recon";
+    p.state.current_directory_uri = "file:///home/user/research/gitlab";
+    p.state.current_file_uri = "file:///home/user/research/gitlab/gitlab/audit.md";
     tterm.pane_tree = PaneTree::leaf(std::move(p));
 
     // Note tab with full note state.
@@ -137,6 +140,10 @@ int main() {
     CHECK(ps.interrupted_command.has_value());
     CHECK(ps.interrupted_command->source == InterruptedCommand::Source::CtrlC);
     CHECK(ps.interrupted_command->timestamp_us == 1234567);
+    // Session metadata (P0-H4) survives the JSON round-trip.
+    CHECK(ps.window_title == "Recon");
+    CHECK(ps.current_directory_uri == "file:///home/user/research/gitlab");
+    CHECK(ps.current_file_uri == "file:///home/user/research/gitlab/gitlab/audit.md");
     // Environment must NOT be serialized (design §3.2).
     CHECK(!j.at("windows")[0].at("tabs")[0].at("pane_tree").at("pane").at("state").contains("environment"));
 

@@ -105,6 +105,9 @@ private:
     // Restore-side decision: spawn where the captured dir still exists, else
     // $HOME (design §4.2).
     static std::string resolve_restore_cwd(const std::string& captured);
+    // Re-apply VTE-native session props (title / dir uri / file uri) as OSC
+    // feeds on the display before the fresh shell spawns (P0-H4).
+    void restore_session_metadata(const remin::core::PaneState& state);
 
     std::string shell_;
     std::string cwd_;

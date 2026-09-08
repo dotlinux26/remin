@@ -319,6 +319,14 @@ Design: `docs/design/workspace-persistence-pipeline.md` (đã gate). Không Wind
   **Artifact chốt**: `patches/vte-0.76.0/` (0001-0004 + SERIES.md + SHA256SUMS) — verify
   `pristine + series == working patched tree` byte-for-byte, SHA256SUMS khớp. Restore thực tế
   trên GUI đã xác nhận OK (2026-09-08).
+- **P0-H4 SESSION METADATA (chốt 2026-09-08, code + tests done)**: `TerminalRuntimeSnapshot`
+  + `PaneState` thêm 3 field session metadata VTE-native — `window_title`, `current_directory_uri`,
+  `current_file_uri` (CWD=OSC 7 osc7 VTECWD, CWF=OSC 6 VTECWF, title=OSC 2). Capture qua
+  `vte_terminal_get_window_title/get_current_directory_uri/get_current_file_uri` (public API);
+  restore qua `vte_terminal_feed` OSC sequences (display-only, KHÔNG gửi cho child) TRƯỚC khi
+  spawn shell. Snapshot blob KHÔNG chứa 3 field này (đã chứng minh: `vte_critical_validation_test`
+  TEST 12 — title/cwd feed qua snapshot restore vẫn byte-identical). JSON round-trip mới 3 key;
+  migration: missing → empty. 14/14 ctest PASS (serialization_test phủ 3 field).
 - `docs/problem-terminal-transcript-capture.md` — **P0-B CAPTURE FIDELITY FAILING**:
   blob scrollback tồn tại (~10KB) nhưng nội dung gần như blank + prompt, thiếu
   output thật. PHẢI chứng minh capture chứa marker deterministic

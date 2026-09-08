@@ -45,6 +45,12 @@ struct PaneState {
     std::vector<CommandRecord> command_history;        // per-pane history (canonical)
     std::vector<std::uint8_t> snapshot_data;           // binary VTE snapshot (opaque to Remin)
     std::optional<InterruptedCommand> interrupted_command;
+    // Session metadata (P0-H4): VTE-native properties NOT carried in the
+    // snapshot blob; captured via the public getters and re-fed as OSC
+    // sequences on restore (OSC 2 title, OSC 7 dir uri, OSC 6 file uri).
+    std::string window_title;
+    std::string current_directory_uri;
+    std::string current_file_uri;
 };
 
 // Pure-data snapshot of one terminal pane's *runtime* state, produced by the
@@ -63,6 +69,10 @@ struct TerminalRuntimeSnapshot {
     // checkpoint time (§6: source = this pane's commit stack, stored in core).
     std::vector<CommandRecord> command_history;
     std::optional<InterruptedCommand> interrupted_command;
+    // Session metadata (P0-H4), same semantics as PaneState.
+    std::string window_title;
+    std::string current_directory_uri;
+    std::string current_file_uri;
 };
 
 // A leaf pane within a tab. Holds the terminal state for that pane.

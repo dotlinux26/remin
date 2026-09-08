@@ -153,6 +153,9 @@ inline void to_json(json& j, const PaneState& s) {
         {"rows", s.rows},
         {"command_history", s.command_history},
         {"snapshot_data", detail::base64_encode(s.snapshot_data)},
+        {"window_title", s.window_title},
+        {"current_directory_uri", s.current_directory_uri},
+        {"current_file_uri", s.current_file_uri},
     };
     // V1 design decision: environment is intentionally NOT persisted.
     if (s.interrupted_command) j["interrupted_command"] = *s.interrupted_command;
@@ -185,6 +188,10 @@ inline void from_json(const json& j, PaneState& s) {
             ic.get_to(*s.interrupted_command);
         }
     }
+    // Session metadata (P0-H4); missing keys on old checkpoints → empty.
+    s.window_title = j.value("window_title", std::string{});
+    s.current_directory_uri = j.value("current_directory_uri", std::string{});
+    s.current_file_uri = j.value("current_file_uri", std::string{});
 }
 
 inline void to_json(json& j, const Pane& p) {

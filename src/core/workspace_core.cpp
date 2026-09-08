@@ -440,6 +440,9 @@ void WorkspaceCore::apply_runtime_state(const TabId& tab, const PaneId& pane,
             st.rows = snap.rows;
             st.snapshot_data = snap.snapshot_data;
             st.interrupted_command = snap.interrupted_command;
+            st.window_title = snap.window_title;
+            st.current_directory_uri = snap.current_directory_uri;
+            st.current_file_uri = snap.current_file_uri;
             // command_history is already canonical (stored in core via add_command_to_pane)
             // but the runtime snapshot may carry a fresh copy; overlay it:
             if (!snap.command_history.empty()) st.command_history = snap.command_history;
