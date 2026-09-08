@@ -243,6 +243,20 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
     auto shell = shell_;
     auto pane = std::make_unique<TerminalPane>(shell, "", pane_history_file(new_pane));
     auto* raw = pane.get();
+    
+    // Connect history change callback BEFORE initialize_fresh so initial_load fires it
+    raw->set_history_changed_callback([this, pane_id = new_pane.str()]() {
+        // Load and apply DB annotations for this pane
+        if (controller_ && controller_->core() && controller_->core()->storage()) {
+            auto annotations = controller_->core()->storage()->list_history_annotations(
+                controller_->core()->current_workspace()->id, pane_id);
+            if (auto* tracker = history_tracker(remin::core::PaneId{pane_id})) {
+                tracker->apply_annotations(annotations);
+            }
+        }
+        if (on_history_changed_) on_history_changed_();
+    });
+    
     raw->initialize_fresh();  // Spawn shell for fresh pane
     if (controller_->autosaver()) {
         auto pid = new_pane;
@@ -527,17 +541,9 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                         controller_->autosaver()->note_terminal_activity(cid);
                     });
                 }
-                // Restore the terminal state (scrollback, cwd, cols/rows, etc.)
-                raw->runtime_restore(state);
-                auto it = panes_.emplace(pid.str(), std::move(p));
-
-                // Register with filesystem watcher
-                if (history_watcher_) {
-                    history_watcher_->register_pane(pid.str(), pane_history_file(pid));
-                }
-
-                // Connect history change callback to notify MainWindow
-                it.first->second->set_history_changed_callback([this, pane_id = pid.str()]() {
+                
+                // Connect history change callback BEFORE runtime_restore so initial_load fires it
+                raw->set_history_changed_callback([this, pane_id = pid.str()]() {
                     // Load and apply DB annotations for this pane
                     if (controller_ && controller_->core() && controller_->core()->storage()) {
                         auto annotations = controller_->core()->storage()->list_history_annotations(
@@ -548,6 +554,15 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                     }
                     if (on_history_changed_) on_history_changed_();
                 });
+                
+                // Restore the terminal state (scrollback, cwd, cols/rows, etc.)
+                raw->runtime_restore(state);
+                auto it = panes_.emplace(pid.str(), std::move(p));
+
+                // Register with filesystem watcher
+                if (history_watcher_) {
+                    history_watcher_->register_pane(pid.str(), pane_history_file(pid));
+                }
 
                 // Track focused pane on click
                 auto wid = pid;
