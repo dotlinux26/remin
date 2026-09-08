@@ -8,7 +8,10 @@ add_library(remin_gui STATIC
   window/note_tab_view.cpp
   window/directory_tree_panel.cpp
   window/settings_dialog.cpp
+  window/commands_page.cpp
   terminal/terminal_pane.cpp
+  terminal/pane_history_tracker.cpp
+  terminal/history_file_watcher.cpp
   note/note_editor.cpp
   note/markdown_preview.cpp
 )

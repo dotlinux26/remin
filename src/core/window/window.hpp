@@ -55,6 +55,9 @@ struct Window {
     std::uint32_t width{0};
     std::uint32_t height{0};
 
+    std::chrono::system_clock::time_point created_at;
+    std::chrono::system_clock::time_point last_active;
+
     std::vector<Tab> tabs;
     std::optional<TabId> focus_tab_id;
     std::optional<PaneId> focus_pane_id;
@@ -64,6 +67,9 @@ struct Window {
         Window w;
         w.id = std::move(id);
         w.label = std::move(title);
+        auto now = std::chrono::system_clock::now();
+        w.created_at = now;
+        w.last_active = now;
         return w;
     }
 };

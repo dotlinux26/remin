@@ -70,6 +70,15 @@ TerminalTabView::TerminalTabView(SessionController* controller,
     tree_host_->set_vexpand(true);
     append(*tree_host_);
 
+    // Initialize history directory and watcher
+    history_dir_ = remin::gui::WorkspaceSession::data_dir() + "/history";
+    history_watcher_ = std::make_unique<HistoryFileWatcher>();
+    history_watcher_->start(history_dir_, [this](const std::string& pane_id) {
+        if (auto* p = pane(remin::core::PaneId{pane_id})) {
+            p->sync_history();
+        }
+    });
+
     // Wire command history from this tab to the controller
     rebuild();
     // Apply saved terminal colors to all panes
@@ -98,11 +107,24 @@ TerminalTabView::TerminalTabView(SessionController* controller,
     tree_host_->set_vexpand(true);
     append(*tree_host_);
 
+    // Initialize history directory and watcher
+    history_dir_ = remin::gui::WorkspaceSession::data_dir() + "/history";
+    history_watcher_ = std::make_unique<HistoryFileWatcher>();
+    history_watcher_->start(history_dir_, [this](const std::string& pane_id) {
+        if (auto* p = pane(remin::core::PaneId{pane_id})) {
+            p->sync_history();
+        }
+    });
+
     // Don't call rebuild() here; the pane tree will be restored via restore_pane_tree()
     load_and_apply_saved_colors();
 }
 
-TerminalTabView::~TerminalTabView() = default;
+TerminalTabView::~TerminalTabView() {
+    if (history_watcher_) {
+        history_watcher_->stop();
+    }
+}
 
 void TerminalTabView::activate() {
     if (active_pane_.empty()) return;
@@ -132,6 +154,13 @@ TerminalPane* TerminalTabView::pane(const remin::core::PaneId& id) {
 TerminalPane* TerminalTabView::focused_pane() {
     auto id = active_pane_.empty() ? root_pane_ : active_pane_;
     return pane(id);
+}
+
+PaneHistoryTracker* TerminalTabView::history_tracker(const remin::core::PaneId& id) {
+    if (auto* p = pane(id)) {
+        return p->history_tracker();
+    }
+    return nullptr;
 }
 
 void TerminalTabView::add_history(const remin::core::PaneId& pane,
@@ -220,10 +249,17 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
             controller_->autosaver()->note_terminal_activity(pid);
         });
     }
-    raw->set_command_callback([this, new_pane](remin::core::CommandRecord rec) {
-        add_history(new_pane, std::move(rec));
-    });
     panes_.emplace(new_pane.str(), std::move(pane));
+
+    // Register with filesystem watcher
+    if (history_watcher_) {
+        history_watcher_->register_pane(new_pane.str(), pane_history_file(new_pane));
+    }
+
+    // Connect history change callback to notify MainWindow
+    panes_[new_pane.str()]->set_history_changed_callback([this]() {
+        if (on_history_changed_) on_history_changed_();
+    });
 
     // Apply saved terminal colors to the new pane immediately
     if (controller_) {
@@ -239,6 +275,7 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
     // The split takes focus on the newly-created pane.
     active_pane_ = new_pane;
     rebuild();
+    if (on_pane_focus_) on_pane_focus_();
     return new_pane;
 }
 
@@ -264,6 +301,12 @@ bool TerminalTabView::close_focused_pane() {
 
     auto target = active_pane_.empty() ? root_pane_ : active_pane_;
     if (!controller_->remove_pane(tab_, target)) return false;
+
+    // Unregister from filesystem watcher
+    if (history_watcher_) {
+        history_watcher_->unregister_pane(target.str());
+    }
+
     panes_.erase(target.str());
     active_pane_ = root_pane_;
     if (!panes_.count(root_pane_.str())) {
@@ -303,9 +346,6 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
                         controller_->autosaver()->note_terminal_activity(cid);
                     });
                 }
-                raw->set_command_callback([this, pid](remin::core::CommandRecord rec) {
-                    add_history(pid, std::move(rec));
-                });
                 panes_.emplace(pid.str(), std::move(p));
                 it = panes_.find(pid.str());
             }
@@ -375,9 +415,9 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
             auto unparent = [](Gtk::Widget& child) {
                 if (auto* parent = child.get_parent()) {
                     if (auto* box = dynamic_cast<Gtk::Box*>(parent)) box->remove(child);
-                    else if (auto* paned = dynamic_cast<Gtk::Paned*>(parent)) {
-                        if (paned->get_start_child() == &child) paned->set_start_child(*Gtk::make_managed<Gtk::Box>());
-                        else if (paned->get_end_child() == &child) paned->set_end_child(*Gtk::make_managed<Gtk::Box>());
+                    else if (auto* paned_parent = dynamic_cast<Gtk::Paned*>(parent)) {
+                        if (paned_parent->get_start_child() == &child) paned_parent->set_start_child(*Gtk::make_managed<Gtk::Box>());
+                        else if (paned_parent->get_end_child() == &child) paned_parent->set_end_child(*Gtk::make_managed<Gtk::Box>());
                     }
                 }
             };
@@ -478,13 +518,19 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                         controller_->autosaver()->note_terminal_activity(cid);
                     });
                 }
-                raw->set_command_callback([this, pid](remin::core::CommandRecord rec) {
-                    add_history(pid, std::move(rec));
-                });
                 // Restore the terminal state (scrollback, cwd, cols/rows, etc.)
                 raw->runtime_restore(state);
-                panes_.emplace(pid.str(), std::move(p));
-                auto it = panes_.find(pid.str());
+                auto it = panes_.emplace(pid.str(), std::move(p));
+
+                // Register with filesystem watcher
+                if (history_watcher_) {
+                    history_watcher_->register_pane(pid.str(), pane_history_file(pid));
+                }
+
+                // Connect history change callback to notify MainWindow
+                it.first->second->set_history_changed_callback([this]() {
+                    if (on_history_changed_) on_history_changed_();
+                });
 
                 // Track focused pane on click
                 auto wid = pid;
@@ -504,24 +550,27 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                         if (auto* curr = pane(wid)) {
                             curr->widget().add_css_class("remin-pane-active");
                         }
+                        if (on_pane_focus_) on_pane_focus_();
                     });
                     auto right_click = Gtk::GestureClick::create();
                     right_click->set_button(3);
                     right_click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
                     right_click->signal_pressed().connect([this, wid](int, double x, double y) {
-                        if (auto* p = pane(wid)) {
-                            show_pane_menu(p->widget(), x, y);
+                        if (auto* found_pane = pane(wid)) {
+                            show_pane_menu(found_pane->widget(), x, y);
                         }
                     });
-                    it->second->widget().add_controller(click);
-                    it->second->widget().add_controller(right_click);
+                    it.first->second->widget().add_controller(click);
+                    it.first->second->widget().add_controller(right_click);
                     pane_controllers_added_.insert(pane_key);
                 }
                 // Set initial active state for the first/root pane
                 if (active_pane_.empty() && pid == root_pane_) {
-                    it->second->widget().add_css_class("remin-pane-active");
+                    it.first->second->widget().add_css_class("remin-pane-active");
+                    active_pane_ = pid;
+                    if (on_pane_focus_) on_pane_focus_();
                 }
-                auto& w = it->second->widget();
+                auto& w = it.first->second->widget();
                 if (auto* parent = w.get_parent()) {
                     if (auto* box = dynamic_cast<Gtk::Box*>(parent)) box->remove(w);
                     else if (auto* paned = dynamic_cast<Gtk::Paned*>(parent)) {
@@ -544,9 +593,9 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                 auto unparent = [](Gtk::Widget& child) {
                     if (auto* parent = child.get_parent()) {
                         if (auto* box = dynamic_cast<Gtk::Box*>(parent)) box->remove(child);
-                        else if (auto* paned = dynamic_cast<Gtk::Paned*>(parent)) {
-                            if (paned->get_start_child() == &child) paned->set_start_child(*Gtk::make_managed<Gtk::Box>());
-                            else if (paned->get_end_child() == &child) paned->set_end_child(*Gtk::make_managed<Gtk::Box>());
+                        else if (auto* paned_parent = dynamic_cast<Gtk::Paned*>(parent)) {
+                            if (paned_parent->get_start_child() == &child) paned_parent->set_start_child(*Gtk::make_managed<Gtk::Box>());
+                            else if (paned_parent->get_end_child() == &child) paned_parent->set_end_child(*Gtk::make_managed<Gtk::Box>());
                         }
                     }
                 };

@@ -7,6 +7,7 @@
 #include "gui/window/note_tab_view.hpp"
 #include "gui/window/tab_view.hpp"
 #include "gui/window/terminal_tab_view.hpp"
+#include "gui/window/commands_page.hpp"
 
 #include <gtkmm.h>
 #include <memory>
@@ -100,7 +101,13 @@ private:
     // History sub-mode switcher (Commands / Transcripts / Windows).
     void set_history_sub_mode(const std::string& mode);
     void update_history_sidebar();
-    void update_history_windows_list();
+    void update_history_windows_list();  // schedules rebuild
+    void do_update_history_windows_list();  // actual implementation
+    void schedule_windows_list_rebuild();
+    void show_window_context_menu(Gtk::Button* anchor, double x, double y,
+                                   const remin::core::WindowId& window_id,
+                                   bool is_closed_window,
+                                   const remin::core::SnapshotId& snap_id = remin::core::SnapshotId{});
 
     void restore_workspace();
 
@@ -185,9 +192,11 @@ private:
     Gtk::Button* history_sub_mode_btn_{nullptr};
     Gtk::Label* current_mode_label_{nullptr};
     Gtk::Stack* history_sub_stack_{nullptr};
-    Gtk::Box* history_commands_list_{nullptr};   // current history_list_
+    CommandsPage* commands_page_{nullptr};   // Commands page with search, truncation, context menu
     Gtk::Box* history_transcripts_list_{nullptr}; // placeholder
-    Gtk::Box* history_windows_list_{nullptr};     // closed windows
+    Gtk::Box* history_windows_list_{nullptr};     // windows (open + closed)
+    Gtk::SearchEntry* windows_search_entry_{nullptr};
+    bool windows_list_rebuild_scheduled_ = false;
     DirectoryTreePanel* directory_panel_{nullptr};
     bool first_directory_show_{true};  // first Files tab open → scroll to top
     Gtk::Button* sidebar_mode_tabs_[2]{nullptr, nullptr};

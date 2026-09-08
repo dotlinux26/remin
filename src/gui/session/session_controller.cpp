@@ -434,6 +434,36 @@ std::vector<std::string> SessionController::get_command_history(
     return result;
 }
 
+std::vector<remin::core::CommandRecord> SessionController::get_command_history_records(
+    const remin::core::PaneId& pane_id) const {
+    std::vector<remin::core::CommandRecord> result;
+    if (!core_) return result;
+    const remin::core::Workspace* ws = core_->current_workspace();
+    if (!ws) return result;
+    for (const auto& e : remin::core::aggregate_command_history(*ws)) {
+        if (pane_id.empty() || e.pane == pane_id) {
+            result.push_back(e.record);
+        }
+    }
+    // Newest first (Command panel ordering; canonical order is oldest→newest).
+    std::reverse(result.begin(), result.end());
+    return result;
+}
+
+bool SessionController::set_command_pinned(const remin::core::PaneId& pane,
+                                           const std::string& command, bool pinned) {
+    if (!core_ || pane.empty() || command.empty()) return false;
+    const remin::core::Workspace* ws = core_->current_workspace();
+    if (!ws) return false;
+    // Resolve the tab that owns this pane (set_command_pinned is keyed by tab).
+    for (const auto& e : remin::core::aggregate_command_history(*ws)) {
+        if (e.pane == pane && e.record.command == command) {
+            return core_->set_command_pinned(e.tab, e.pane, command, pinned);
+        }
+    }
+    return false;
+}
+
 bool SessionController::clear_command_history() {
     return core_ && core_->clear_command_history();
 }

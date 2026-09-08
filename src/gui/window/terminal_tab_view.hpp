@@ -2,6 +2,7 @@
 
 #include "core/workspace_core.hpp"
 #include "gui/terminal/terminal_pane.hpp"
+#include "gui/terminal/history_file_watcher.hpp"
 #include "gui/window/tab_view.hpp"
 
 #include <filesystem>
@@ -18,6 +19,7 @@ namespace remin::gui {
 
 class SessionController;
 class MainWindow;
+class PaneHistoryTracker;
 
 // A terminal tab: mirrors the core PaneTree into a tree of Gtk::Paned widgets,
 // each leaf holding a TerminalPane (VTE). Split/resize/remove go through the
@@ -61,6 +63,9 @@ TerminalTabView(SessionController* controller,
     // The currently focused pane (navigable / target of focused actions).
     TerminalPane* focused_pane();
 
+    // Access the HISTFILE-backed history tracker for a pane (for Commands UI).
+    PaneHistoryTracker* history_tracker(const remin::core::PaneId& pane);
+
     // Restore the pane tree from a persisted PaneTree (with runtime_restore per pane).
     void restore_pane_tree(const remin::core::PaneTree& tree);
 
@@ -96,6 +101,12 @@ TerminalTabView(SessionController* controller,
     // re-reads canonical history from the controller on each call.
     void set_history_callback(std::function<void()> cb) {
         on_history_ = std::move(cb);
+    }
+
+    // Callback for history change from a specific pane — MainWindow wires this
+    // to update_history_sidebar() when the focused pane's history changes.
+    void set_history_changed_callback(std::function<void()> cb) {
+        on_history_changed_ = std::move(cb);
     }
 
     // Callback for pane focus change — MainWindow wires this to update
@@ -144,6 +155,7 @@ private:
     std::function<void()> on_color_request_;
     std::function<void(const std::filesystem::path&)> on_open_file_;
     std::function<void()> on_history_;
+    std::function<void()> on_history_changed_;
 
     // Callback for pane focus change — MainWindow wires this to update
     // the history sidebar when the focused pane changes.
@@ -154,6 +166,10 @@ private:
 
     Gtk::Box* tree_host_{nullptr};
     Gtk::Popover* pane_menu_{nullptr};
+
+    // Filesystem watcher for HISTFILE changes (inotify-based, no polling)
+    std::unique_ptr<HistoryFileWatcher> history_watcher_;
+    std::string history_dir_;
 };
 
 } // namespace remin::gui

@@ -11,6 +11,7 @@ set(REMIN_TEST_SOURCES
   unit/history_test.cpp
   unit/terminal_cwd_test.cpp
   unit/golden_history_test.cpp
+  unit/history_parser_test.cpp
 )
 
 foreach(test_src ${REMIN_TEST_SOURCES})
@@ -67,4 +68,12 @@ if(REMIN_BUILD_GUI)
   remin_enable_warnings(vte_snapshot_db_roundtrip_test)
   remin_enable_sanitizers(vte_snapshot_db_roundtrip_test)
   add_test(NAME vte_snapshot_db_roundtrip_test COMMAND vte_snapshot_db_roundtrip_test)
+
+  # Pane history tracker test
+  add_executable(pane_history_tracker_test unit/pane_history_tracker_test.cpp)
+  target_include_directories(pane_history_tracker_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(pane_history_tracker_test PRIVATE remin_gui remin_core remin_storage remin_json)
+  remin_enable_warnings(pane_history_tracker_test)
+  remin_enable_sanitizers(pane_history_tracker_test)
+  add_test(NAME pane_history_tracker_test COMMAND pane_history_tracker_test)
 endif()

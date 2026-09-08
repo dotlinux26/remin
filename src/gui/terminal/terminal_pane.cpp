@@ -1,4 +1,5 @@
 #include "gui/terminal/terminal_pane.hpp"
+#include "gui/terminal/pane_history_tracker.hpp"
 
 #include <vte/vte.h>
 #include <vte/vteregex.h>
@@ -49,6 +50,7 @@ TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd,
     gtk_box_append(GTK_BOX(box->gobj()), GTK_WIDGET(vte_));
 
     // Connect the commit signal for input detection (edge-triggered autosave).
+    // Also used to trigger history sync.
     g_signal_connect(GTK_WIDGET(vte_), "commit",
                      G_CALLBACK(on_commit_trampoline), this);
 
@@ -56,6 +58,14 @@ TerminalPane::TerminalPane(const std::string& shell, const std::string& cwd,
     GtkEventController* copy_ctrl = gtk_event_controller_key_new();
     g_signal_connect(copy_ctrl, "key-pressed", G_CALLBACK(on_key_pressed), this);
     gtk_widget_add_controller(GTK_WIDGET(vte_), copy_ctrl);
+
+    // Create history tracker if we have a history file.
+    if (!history_file_.empty()) {
+        tracker_ = std::make_unique<PaneHistoryTracker>(history_file_, "");
+        tracker_->set_history_changed_callback([this]() {
+            if (on_history_changed_) on_history_changed_();
+        });
+    }
 
     // Store a pointer to the managed box as our widget.
     widget_ = box;
@@ -101,6 +111,15 @@ void TerminalPane::spawn_shell(const std::string& cwd) {
         envp_ = g_get_environ();
         if (!history_file_.empty()) {
             envp_ = g_environ_setenv(envp_, "HISTFILE", history_file_.c_str(), TRUE);
+            // Ensure recent commands are flushed to HISTFILE promptly.
+            // Compose with existing PROMPT_COMMAND instead of overwriting.
+            const char* existing_prompt = std::getenv("PROMPT_COMMAND");
+            std::string prompt_cmd = "history -a";
+            if (existing_prompt && *existing_prompt) {
+                prompt_cmd += "; ";
+                prompt_cmd += existing_prompt;
+            }
+            envp_ = g_environ_setenv(envp_, "PROMPT_COMMAND", prompt_cmd.c_str(), TRUE);
         }
     }
 
@@ -173,6 +192,8 @@ void TerminalPane::initialize_fresh() {
         if (const char* home = std::getenv("HOME")) cwd_ = home;
     }
     spawn_shell(cwd_);
+    // Initial history load after shell spawn (HISTFILE will be read by bash on start).
+    if (tracker_) tracker_->initial_load();
 }
 
 // Restore terminal state from a persisted PaneState (used for restore).
@@ -223,11 +244,25 @@ void TerminalPane::runtime_restore(const remin::core::PaneState& state) {
     if (!state.shell.empty()) shell_ = state.shell;
     cached_cwd_ = state.cwd;
     spawn_shell(resolve_restore_cwd(state.cwd));
+    // History tracker will pick up the existing HISTFILE (already populated by bash on start).
+    if (tracker_) tracker_->initial_load();
 }
 
 void TerminalPane::feed(std::string_view data) {
     if (vte_) {
         vte_terminal_feed(vte_, data.data(), static_cast<gssize>(data.size()));
+    }
+}
+
+void TerminalPane::feed_child(std::string_view data) {
+    if (vte_) {
+        vte_terminal_feed_child(vte_, data.data(), static_cast<gssize>(data.size()));
+    }
+}
+
+void TerminalPane::sync_history() {
+    if (tracker_ && tracker_->sync()) {
+        if (on_history_changed_) on_history_changed_();
     }
 }
 
@@ -296,34 +331,23 @@ void TerminalPane::on_commit_trampoline(GtkWidget*, const char* text, guint size
     if (self->on_input_) self->on_input_();
     if (!text || size == 0) return;
 
+    // Trigger history sync on commit (bash may have flushed via PROMPT_COMMAND).
+    // Only call the callback if new entries were actually added.
+    self->sync_history();
+
     // Interrupted command (design §6.2): a literal \x03 in a commit right after
     // a completed line is evidence the user pressed Ctrl+C on that command.
     // Only here do we ever claim source = CtrlC — never guessed otherwise.
+    // Use the most recent command from the history tracker instead of parsing output.
     const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::system_clock::now().time_since_epoch())
                             .count();
-    if (std::memchr(text, 0x03, static_cast<std::size_t>(size)) &&
-        !self->last_command_.empty()) {
-        self->interrupted_ = remin::core::InterruptedCommand{
-            self->last_command_, now_us, remin::core::InterruptedCommand::Source::CtrlC};
-    }
-
-    // Accumulate committed text and emit each completed line as a command.
-    self->commit_buf_.append(text, size);
-    std::size_t pos = 0;
-    while ((pos = self->commit_buf_.find('\n')) != std::string::npos) {
-        std::string line = self->commit_buf_.substr(0, pos);
-        self->commit_buf_.erase(0, pos + 1);
-        // Trim surrounding whitespace.
-        auto b = line.find_first_not_of(" \t\r");
-        auto e = line.find_last_not_of(" \t\r");
-        if (b != std::string::npos && e != std::string::npos) {
-            line = line.substr(b, e - b + 1);
-        }
-        if (!line.empty()) {
-            self->last_command_ = line;
-            if (self->on_command_) {
-                self->on_command_(remin::core::CommandRecord{line, now_us});
+    if (std::memchr(text, 0x03, static_cast<std::size_t>(size))) {
+        if (self->tracker_) {
+            auto cmds = self->tracker_->commands_desc();
+            if (!cmds.empty()) {
+                self->interrupted_ = remin::core::InterruptedCommand{
+                    cmds[0].command, now_us, remin::core::InterruptedCommand::Source::CtrlC};
             }
         }
     }

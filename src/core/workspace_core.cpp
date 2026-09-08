@@ -241,6 +241,15 @@ PaneTree* find_pane(PaneTree* tree, const PaneId& id) {
     return find_pane(tree->second(), id);
 }
 
+const PaneTree* find_pane(const PaneTree* tree, const PaneId& id) {
+    if (!tree) return nullptr;
+    if (tree->kind() == PaneTree::Kind::Pane) {
+        return (tree->pane() && tree->pane()->id == id) ? tree : nullptr;
+    }
+    if (auto* f = find_pane(tree->first(), id)) return f;
+    return find_pane(tree->second(), id);
+}
+
 // Remove a leaf pane. If a split node ends up with a single surviving child,
 // that child replaces the split (so we never keep one-sided splits).
 // Returns true if id was found and the tree was modified.
@@ -421,6 +430,43 @@ bool WorkspaceCore::clear_command_history() {
     }
     mark_dirty();
     return true;
+}
+
+std::vector<CommandRecord>
+WorkspaceCore::get_pane_command_history(const TabId& tab, const PaneId& pane) const {
+    if (!ws_current_) return {};
+    for (const auto& w : ws_current_->windows) {
+        for (const auto& t : w.tabs) {
+            if (t.id != tab) continue;
+            const PaneTree* node = find_pane(&t.pane_tree, pane);
+            if (!node || !node->pane()) return {};
+            return node->pane()->state.command_history;
+        }
+    }
+    return {};
+}
+
+bool WorkspaceCore::set_command_pinned(const TabId& tab, const PaneId& pane,
+                                       const std::string& command, bool pinned) {
+    if (!ws_current_ || command.empty()) return false;
+    for (auto& w : ws_current_->windows) {
+        for (auto& t : w.tabs) {
+            if (t.id != tab) continue;
+            PaneTree* node = find_pane(&t.pane_tree, pane);
+            if (!node || !node->pane()) return false;
+            auto& hist = node->pane()->state.command_history;
+            // Pin the most recent match (search from the newest end).
+            for (auto it = hist.rbegin(); it != hist.rend(); ++it) {
+                if (it->command == command) {
+                    it->pinned = pinned;
+                    mark_dirty();
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+    return false;
 }
 
 // -- Per-pane runtime state ingestion --

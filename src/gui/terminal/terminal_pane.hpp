@@ -7,11 +7,14 @@
 #include <string>
 #include <functional>
 #include <optional>
+#include <memory>
 
 struct _VteTerminal;
 typedef struct _VteTerminal VteTerminal;
 
 namespace remin::gui {
+
+class PaneHistoryTracker;
 
 // Lightweight wrapper around a VTE GTK4 terminal widget.
 // Encapsulates PTY spawn, scrollback, and input detection.
@@ -38,14 +41,18 @@ public:
     // Access the widget for embedding in a container.
     Gtk::Widget& widget();
 
-    // Feed input from the host side (e.g. copied text).
+    // Feed input from the host side (e.g. copied text) — display only.
     void feed(std::string_view data);
+
+    // Feed input directly to the child process (for command replay).
+    // Uses vte_terminal_feed_child() so the shell's readline sees the input.
+    void feed_child(std::string_view data);
 
     // -- Runtime persistence adapters (design §3.1/§5/§4) --
     // Capture the VTE's current runtime state as pure data. The host routes
     // this through the SessionController into canonical PaneState.
     // command_history is intentionally left empty here (see its comment in
-    // TerminalRuntimeSnapshot): canonical history lives in core.
+    // TerminalRuntimeSnapshot): canonical history lives in HISTFILE.
     [[nodiscard]] remin::core::TerminalRuntimeSnapshot runtime_capture() const;
     // Deterministic restore: resize → restore binary snapshot → spawn the
     // shell in the captured cwd (design §5.2). Snapshot restore runs BEFORE
@@ -58,12 +65,15 @@ public:
     // autosave's note_activity.
     void set_input_callback(std::function<void()> cb) { on_input_ = std::move(cb); }
 
-    // Called once per completed command line (VTE "commit" chunk ending in a
-    // newline), trimmed, with the observation timestamp. The host uses this to
-    // build the per-pane canonical command history.
-    void set_command_callback(std::function<void(remin::core::CommandRecord)> cb) {
-        on_command_ = std::move(cb);
-    }
+    // Synchronize command history from HISTFILE (call on pane focus, commit, etc.)
+    void sync_history();
+
+    // Callback when history changes (new commands added).
+    using HistoryChangedCallback = std::function<void()>;
+    void set_history_changed_callback(HistoryChangedCallback cb) { on_history_changed_ = std::move(cb); }
+
+    // Access the history tracker for this pane (for Commands panel UI).
+    [[nodiscard]] PaneHistoryTracker* history_tracker() const { return tracker_.get(); }
 
     // -- Find (VTE regex search over the terminal contents) --
     void set_search_text(const std::string& text);
@@ -120,7 +130,8 @@ private:
     VteTerminal* vte_{nullptr};
     Gtk::Widget* widget_{nullptr};
     std::function<void()> on_input_;
-    std::function<void(remin::core::CommandRecord)> on_command_;
+    std::function<void()> on_history_changed_;
+    std::unique_ptr<PaneHistoryTracker> tracker_;
     std::string commit_buf_;
     std::string last_command_;
     std::optional<remin::core::InterruptedCommand> interrupted_;

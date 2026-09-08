@@ -3,6 +3,7 @@ add_library(remin_core STATIC
   pane/pane.cpp
   persistence_policy.cpp
   serialization.cpp
+  terminal/history_parser.cpp
   workspace_core.cpp
   workspace_lock.cpp
 )

@@ -32,6 +32,8 @@ inline constexpr std::size_t kMaxCommandHistoryPerPane = 1000;
 struct CommandRecord {
     std::string command;
     std::int64_t timestamp_us{0};
+    bool pinned{false};   // user-pinned (Command panel). Adjacent-dedupe keeps the
+                          // pinned record when the same command is re-run.
 };
 
 // Terminal state for a pane: what snapshot/command state we can re-create

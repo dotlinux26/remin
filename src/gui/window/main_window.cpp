@@ -1,5 +1,6 @@
 #include "gui/window/main_window.hpp"
 #include "gui/window/settings_dialog.hpp"
+#include "gui/terminal/pane_history_tracker.hpp"
 #include "core/serialization.hpp"
 #include <adwaita.h>
 #include <terminal/shell/shell.hpp>
@@ -595,6 +596,9 @@ void MainWindow::restore_workspace() {
             view->set_pane_focus_callback([this]() {
                 update_history_sidebar();
             });
+            view->set_history_changed_callback([this]() {
+                update_history_sidebar();
+            });
             view->set_close_tab_request_callback([this, view]() {
                 for (size_t i = 0; i < tabs_.size(); ++i) {
                     if (tabs_[i].get() == view) {
@@ -745,6 +749,8 @@ void MainWindow::restore_workspace() {
                     wnd.focus_tab_id = n->tab_id();
                 }
             }
+            // Update last_active timestamp when this window is focused.
+            wnd.last_active = std::chrono::system_clock::now();
         }
         ws->focus_window_id = window_id_;
     }
@@ -821,13 +827,9 @@ void MainWindow::restore_workspace() {
     history_sub_stack_->set_hexpand(false);
     history_sub_stack_->set_vexpand(true);
 
-    // Commands view (existing command history list).
-    history_commands_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
-    auto* commands_scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
-    commands_scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
-    commands_scroller->set_vexpand(true);
-    commands_scroller->set_child(*history_commands_list_);
-    history_sub_stack_->add(*commands_scroller, "commands", "Commands");
+    // Commands view (new CommandsPage with search, truncation, tooltips, context menu).
+    commands_page_ = Gtk::make_managed<CommandsPage>();
+    history_sub_stack_->add(*commands_page_, "commands", "Commands");
 
     // Transcripts view — placeholder (blocked per D1).
     history_transcripts_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 12);
@@ -847,8 +849,19 @@ void MainWindow::restore_workspace() {
     transcripts_scroller->set_child(*history_transcripts_list_);
     history_sub_stack_->add(*transcripts_scroller, "transcripts", "Transcripts");
 
-    // Windows view (closed windows history).
+    // Windows view (current workspace windows + closed windows history).
     history_windows_list_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+    
+    // Search entry for windows list
+    windows_search_entry_ = Gtk::make_managed<Gtk::SearchEntry>();
+    windows_search_entry_->set_placeholder_text("Search windows...");
+    windows_search_entry_->add_css_class("remin-commands-search");
+    windows_search_entry_->set_hexpand(true);
+    windows_search_entry_->signal_changed().connect([this]() {
+        schedule_windows_list_rebuild();
+    });
+    history_windows_list_->append(*windows_search_entry_);
+    
     auto* windows_scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
     windows_scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
     windows_scroller->set_vexpand(true);
@@ -992,52 +1005,49 @@ void MainWindow::set_history_sub_mode(const std::string& mode) {
         // Transcripts is a static placeholder — nothing to refresh.
     } else if (mode == "windows") {
         history_sub_stack_->set_visible_child("windows");
-        update_history_windows_list();
+        schedule_windows_list_rebuild();
     }
 }
 
 void MainWindow::update_history_sidebar() {
-    if (!history_commands_list_) return;
-    while (auto* child = history_commands_list_->get_first_child()) history_commands_list_->remove(*child);
+    if (!commands_page_) return;
 
-    // The sidebar is an aggregate QUERY of the workspace's per-pane canonical
-    // history (design §6.3) — never a second local store.
-    // Filter by focused pane when a terminal tab is active.
-    remin::core::PaneId focused_pane_id;
     if (active_tab_ >= 0 && active_tab_ < (int)tabs_.size() &&
         tabs_[active_tab_]->kind() == TabKind::Terminal) {
         auto* t = static_cast<TerminalTabView*>(tabs_[active_tab_].get());
-        focused_pane_id = t->focused_pane_id();
-    }
-    std::vector<std::string> history;
-    if (controller_) history = controller_->get_command_history(focused_pane_id);
+        auto focused_pane_id = t->focused_pane_id();
 
-    auto const add = [this](const std::string& cmd) {
-        auto* btn = Gtk::make_managed<Gtk::Button>(cmd);
-        btn->add_css_class("remin-history-item");
-        btn->set_halign(Gtk::Align::FILL);
-        btn->signal_clicked().connect([this, cmd]() {
-            if (active_tab_ >= 0 && active_tab_ < (int)tabs_.size() &&
-                tabs_[active_tab_]->kind() == TabKind::Terminal) {
-                auto* t = static_cast<TerminalTabView*>(tabs_[active_tab_].get());
-                if (auto* p = t->focused_pane()) p->feed(cmd);
-            }
-        });
-        history_commands_list_->append(*btn);
-    };
+        // Set the tracker for the focused pane
+        if (auto* tracker = t->history_tracker(focused_pane_id)) {
+            commands_page_->set_tracker(tracker);
+        } else {
+            commands_page_->set_tracker(nullptr);
+        }
 
-    const auto back = std::min<std::size_t>(history.size(), 500);
-    const auto start = history.size() - back;
-    for (std::size_t i = 0; i < back; ++i) {
-        add(history[start + i]);
-    }
-    if (history_scroller_) {
-        auto v = history_scroller_->get_vadjustment();
-        if (v) v->set_value(v->get_upper());
+        // Set the target pane for click-to-insert
+        if (auto* pane = t->focused_pane()) {
+            commands_page_->set_target_pane(pane);
+        }
+
+        commands_page_->refresh();
+    } else {
+        // No terminal tab active - clear the page
+        commands_page_->set_tracker(nullptr);
+        commands_page_->set_target_pane(nullptr);
+        commands_page_->refresh();
     }
 }
 
 void MainWindow::update_history_windows_list() {
+    if (windows_list_rebuild_scheduled_) return;
+    windows_list_rebuild_scheduled_ = true;
+    Glib::signal_idle().connect_once([this]() {
+        windows_list_rebuild_scheduled_ = false;
+        do_update_history_windows_list();
+    });
+}
+
+void MainWindow::do_update_history_windows_list() {
     if (!history_windows_list_ || !controller_ || !controller_->core()) return;
     auto* core = controller_->core();
     auto* ws = core->current_workspace();
@@ -1045,28 +1055,302 @@ void MainWindow::update_history_windows_list() {
     auto* storage = core->storage();
     if (!storage) return;
 
-    while (auto* child = history_windows_list_->get_first_child()) history_windows_list_->remove(*child);
+    // Keep the search entry (first child) but clear the rest
+    auto* search_entry = windows_search_entry_;
+    while (auto* child = history_windows_list_->get_first_child()) {
+        if (child != search_entry) {
+            history_windows_list_->remove(*child);
+        } else {
+            break;
+        }
+    }
 
-    auto closed = storage->list_closed_windows(ws->id);
-    for (const auto& snap : closed) {
-        auto time_str = std::to_string(snap.closed_at.time_since_epoch().count());
-        auto* btn = Gtk::make_managed<Gtk::Button>(snap.label + "  (" + time_str + ")");
+    std::string search_text = "";
+    if (windows_search_entry_) {
+        search_text = windows_search_entry_->get_text();
+        std::transform(search_text.begin(), search_text.end(), search_text.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+    }
+
+    // 1. Show current workspace windows
+    for (const auto& wnd : ws->windows) {
+        std::string label = wnd.label;
+        std::string label_lower = label;
+        std::transform(label_lower.begin(), label_lower.end(), label_lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (!search_text.empty() && label_lower.find(search_text) == std::string::npos) {
+            continue;
+        }
+
+        // Count tabs and panes
+        int tab_count = static_cast<int>(wnd.tabs.size());
+        int pane_count = 0;
+        for (const auto& tab : wnd.tabs) {
+            if (tab.kind == remin::core::TabKind::Terminal) {
+                std::vector<const remin::core::Pane*> panes;
+                tab.pane_tree.collect_panes(panes);
+                pane_count += static_cast<int>(panes.size());
+            }
+        }
+
+        // Format timestamps
+        auto format_time = [](const std::chrono::system_clock::time_point& tp) -> std::string {
+            if (tp == std::chrono::system_clock::time_point{}) return "N/A";
+            auto t = std::chrono::system_clock::to_time_t(tp);
+            char buf[32];
+            std::strftime(buf, sizeof(buf), "%d %b %Y %H:%M", std::localtime(&t));
+            return buf;
+        };
+
+        std::string created_str = format_time(wnd.created_at);
+        std::string last_active_str = format_time(wnd.last_active);
+
+        // Build tooltip with detailed metadata
+        std::string tooltip = "Window: " + label + "\n";
+        tooltip += "Created: " + created_str + "\n";
+        tooltip += "Last active: " + last_active_str + "\n";
+        tooltip += "Tabs: " + std::to_string(tab_count) + "\n";
+        tooltip += "Panes: " + std::to_string(pane_count);
+
+        auto* btn = Gtk::make_managed<Gtk::Button>();
         btn->add_css_class("remin-history-item");
         btn->set_halign(Gtk::Align::FILL);
-        btn->signal_clicked().connect([this, snap_id = snap.id, ws_id = ws->id, label = snap.label]() {
-            // Restore closed window: not implemented in V1 (multi-window GUI is V2+).
-            // For now just show a placeholder message.
+        btn->set_tooltip_text(tooltip);
+
+        auto* hbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+        hbox->set_hexpand(true);
+
+        auto* icon = Gtk::make_managed<Gtk::Image>();
+        icon->set_from_icon_name("window-new-symbolic");
+        icon->set_pixel_size(16);
+        hbox->append(*icon);
+
+        auto* vbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+        vbox->set_hexpand(true);
+
+        auto* name_label = Gtk::make_managed<Gtk::Label>(label);
+        name_label->set_xalign(0.0);
+        name_label->add_css_class("remin-window-name");
+        vbox->append(*name_label);
+
+        auto* meta_label = Gtk::make_managed<Gtk::Label>(
+            created_str + "  ·  " + last_active_str + "  ·  " + 
+            std::to_string(tab_count) + " tabs  ·  " + std::to_string(pane_count) + " panes");
+        meta_label->set_xalign(0.0);
+        meta_label->add_css_class("remin-window-meta");
+        vbox->append(*meta_label);
+
+        hbox->append(*vbox);
+        btn->set_child(*hbox);
+
+        // Left click: Open window (future: switch to this window in multi-window GUI)
+        btn->signal_clicked().connect([this, wnd_id = wnd.id]() {
             auto dialog = Gtk::make_managed<Gtk::MessageDialog>(
-                *this, "Window History",
+                *this, "Window",
                 false, Gtk::MessageType::INFO, Gtk::ButtonsType::OK, true);
-            dialog->set_secondary_text(
-                "Restoring closed windows will be implemented with multi-window GUI (V2+).\n"
-                "Window: " + label);
+            dialog->set_secondary_text("Window switching will be implemented with multi-window GUI (V2+).");
             dialog->signal_response().connect([dialog](int) { dialog->close(); });
             dialog->present();
         });
+
+        // Right click: Context menu
+        auto click = Gtk::GestureClick::create();
+        click->set_button(3); // Right click
+        click->signal_pressed().connect([this, btn, wnd_id = wnd.id](int, double x, double y) {
+            show_window_context_menu(btn, x, y, wnd_id, false);
+        });
+        btn->add_controller(click);
+
         history_windows_list_->append(*btn);
     }
+
+    // 2. Show closed windows from storage (separator + entries)
+    auto closed = storage->list_closed_windows(ws->id);
+    if (!closed.empty()) {
+        // Add separator
+        auto* sep = Gtk::make_managed<Gtk::Separator>();
+        sep->set_margin_top(8);
+        sep->set_margin_bottom(4);
+        history_windows_list_->append(*sep);
+
+        auto* closed_label = Gtk::make_managed<Gtk::Label>("Closed Windows");
+        closed_label->set_xalign(0.0);
+        closed_label->add_css_class("remin-section-header");
+        closed_label->set_margin_start(8);
+        closed_label->set_margin_bottom(4);
+        history_windows_list_->append(*closed_label);
+
+        for (const auto& snap : closed) {
+            std::string label = snap.label;
+            std::string label_lower = label;
+            std::transform(label_lower.begin(), label_lower.end(), label_lower.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+            if (!search_text.empty() && label_lower.find(search_text) == std::string::npos) {
+                continue;
+            }
+
+            auto t = std::chrono::system_clock::to_time_t(snap.closed_at);
+            char time_buf[32];
+            std::strftime(time_buf, sizeof(time_buf), "%d %b %Y %H:%M", std::localtime(&t));
+            std::string closed_str = time_buf;
+
+            std::string tooltip = "Closed Window: " + label + "\n";
+            tooltip += "Closed: " + closed_str + "\n";
+            tooltip += "Generation: " + std::to_string(snap.generation);
+
+            auto* btn = Gtk::make_managed<Gtk::Button>();
+            btn->add_css_class("remin-history-item");
+            btn->set_halign(Gtk::Align::FILL);
+            btn->set_tooltip_text(tooltip);
+
+            auto* hbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 8);
+            hbox->set_hexpand(true);
+
+            auto* icon = Gtk::make_managed<Gtk::Image>();
+            icon->set_from_icon_name("window-close-symbolic");
+            icon->set_pixel_size(16);
+            hbox->append(*icon);
+
+            auto* vbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+            vbox->set_hexpand(true);
+
+            auto* name_label = Gtk::make_managed<Gtk::Label>(label);
+            name_label->set_xalign(0.0);
+            name_label->add_css_class("remin-window-name");
+            vbox->append(*name_label);
+
+            auto* meta_label = Gtk::make_managed<Gtk::Label>("Closed: " + closed_str);
+            meta_label->set_xalign(0.0);
+            meta_label->add_css_class("remin-window-meta");
+            vbox->append(*meta_label);
+
+            hbox->append(*vbox);
+            btn->set_child(*hbox);
+
+            // Left click: Show info (future: restore window)
+            btn->signal_clicked().connect([this, snap_id = snap.id, ws_id = ws->id, label = snap.label]() {
+                auto dialog = Gtk::make_managed<Gtk::MessageDialog>(
+                    *this, "Window History",
+                    false, Gtk::MessageType::INFO, Gtk::ButtonsType::OK, true);
+                dialog->set_secondary_text(
+                    "Restoring closed windows will be implemented with multi-window GUI (V2+).\n"
+                    "Window: " + label);
+                dialog->signal_response().connect([dialog](int) { dialog->close(); });
+                dialog->present();
+            });
+
+            // Right click: Context menu
+            auto click = Gtk::GestureClick::create();
+            click->set_button(3); // Right click
+            click->signal_pressed().connect([this, btn, window_id = snap.window_id, ws_id = ws->id, snap_id = snap.id](int, double x, double y) {
+                show_window_context_menu(btn, x, y, window_id, true, snap_id);
+            });
+            btn->add_controller(click);
+
+            history_windows_list_->append(*btn);
+        }
+    }
+}
+
+void MainWindow::schedule_windows_list_rebuild() {
+    update_history_windows_list();
+}
+
+void MainWindow::show_window_context_menu(Gtk::Button* anchor, double x, double y,
+                                           const remin::core::WindowId& window_id,
+                                           bool is_closed_window,
+                                           const remin::core::SnapshotId& snap_id) {
+    if (!anchor || !controller_ || !controller_->core()) return;
+    auto* core = controller_->core();
+    auto* ws = core->current_workspace();
+    if (!ws) return;
+    auto* storage = core->storage();
+    if (!storage) return;
+
+    auto* popover = Gtk::make_managed<Gtk::Popover>();
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);
+    box->set_margin(4);
+
+    auto make_item = [&](const std::string& label, std::function<void()> action) {
+        auto* btn = Gtk::make_managed<Gtk::Button>(label);
+        btn->add_css_class("remin-context-menu-item");
+        btn->set_halign(Gtk::Align::FILL);
+        btn->signal_clicked().connect([popover, action = std::move(action)]() {
+            action();
+            popover->popdown();
+        });
+        box->append(*btn);
+    };
+
+    // 1. Open
+    make_item("Open", [this, window_id, is_closed_window]() {
+        if (is_closed_window) {
+            // Future: restore closed window
+            auto dialog = Gtk::make_managed<Gtk::MessageDialog>(
+                *this, "Window History",
+                false, Gtk::MessageType::INFO, Gtk::ButtonsType::OK, true);
+            dialog->set_secondary_text("Restoring closed windows will be implemented with multi-window GUI (V2+).");
+            dialog->signal_response().connect([dialog](int) { dialog->close(); });
+            dialog->present();
+        } else {
+            // Future: switch to this window
+            auto dialog = Gtk::make_managed<Gtk::MessageDialog>(
+                *this, "Window",
+                false, Gtk::MessageType::INFO, Gtk::ButtonsType::OK, true);
+            dialog->set_secondary_text("Window switching will be implemented with multi-window GUI (V2+).");
+            dialog->signal_response().connect([dialog](int) { dialog->close(); });
+            dialog->present();
+        }
+    });
+
+    // 2. Pin
+    make_item("Pin", [this, window_id, is_closed_window]() {
+        // For now, just show a message. In the future, this would pin the window
+        // in the history list (e.g., keep it at the top, prevent auto-cleanup)
+        auto dialog = Gtk::make_managed<Gtk::MessageDialog>(
+            *this, "Pin Window",
+            false, Gtk::MessageType::INFO, Gtk::ButtonsType::OK, true);
+        dialog->set_secondary_text("Pinning windows in history will be implemented in a future update.");
+        dialog->signal_response().connect([dialog](int) { dialog->close(); });
+        dialog->present();
+    });
+
+    // 3. Delete
+    make_item("Delete", [this, window_id, is_closed_window, ws, snap_id]() {
+        // Confirmation dialog
+        auto dialog = Gtk::make_managed<Gtk::MessageDialog>(
+            *this, is_closed_window ? "Delete Closed Window" : "Delete Window",
+            false, Gtk::MessageType::WARNING, Gtk::ButtonsType::OK_CANCEL, true);
+        dialog->set_secondary_text(
+            "Are you sure you want to " + std::string(is_closed_window ? "delete this closed window from history?" : "delete this window?") +
+            "\n\nThis action cannot be undone.");
+        dialog->signal_response().connect([this, dialog, window_id, is_closed_window, ws, snap_id](int response) {
+            dialog->close();
+            if (response != Gtk::ResponseType::OK) return;
+
+            auto* core = controller_->core();
+            if (!core) return;
+            auto* storage = core->storage();
+            if (!storage) return;
+
+            if (is_closed_window) {
+                // Delete from closed windows history - use the SnapshotId
+                storage->delete_closed_window(ws->id, snap_id);
+            } else {
+                // Delete current window - close it in the workspace
+                core->remove_window(window_id);
+            }
+            // Refresh the list
+            schedule_windows_list_rebuild();
+        });
+        dialog->present();
+    });
+
+    popover->set_child(*box);
+    popover->set_parent(*anchor);
+    popover->set_has_arrow(false);
+    popover->set_pointing_to(Gdk::Rectangle{static_cast<int>(x), static_cast<int>(y), 1, 1});
+    popover->popup();
 }
 
 void MainWindow::clear_history() {
@@ -1190,10 +1474,13 @@ void MainWindow::new_terminal_tab() {
     view->set_history_callback([this]() {
         update_history_sidebar();
     });
-    view->set_pane_focus_callback([this]() {
-        update_history_sidebar();
-    });
-    view->set_close_tab_request_callback([this, view]() {
+view->set_pane_focus_callback([this]() {
+                update_history_sidebar();
+            });
+            view->set_history_changed_callback([this]() {
+                update_history_sidebar();
+            });
+            view->set_close_tab_request_callback([this, view]() {
         for (size_t i = 0; i < tabs_.size(); ++i) {
             if (tabs_[i].get() == view) {
                 close_tab(static_cast<int>(i));
@@ -2014,9 +2301,14 @@ void MainWindow::toggle_history_sidebar() {
     sidebar_visible_ = !sidebar_visible_;
     if (sidebar_visible_) {
         main_paned_->set_position(220);
-        // Refresh if showing directory
-        if (sidebar_stack_ && sidebar_stack_->get_visible_child_name() == "directory") {
-            if (directory_panel_) directory_panel_->refresh();
+        // Refresh the active sidebar content
+        if (sidebar_stack_) {
+            auto child_name = sidebar_stack_->get_visible_child_name();
+            if (child_name == "directory") {
+                if (directory_panel_) directory_panel_->refresh();
+            } else if (child_name == "history") {
+                update_history_sidebar();
+            }
         }
         if (sidebar_toggle_btn_) {
             sidebar_toggle_btn_->set_icon_name("sidebar-hide-symbolic");
@@ -2128,7 +2420,7 @@ void MainWindow::refresh_theme() {
 }
 
 void MainWindow::on_terminal_color_profile() {
-    if (active_tab_ < 0 || active_tab_ >= (int)tabs_.size() ||
+    if (active_tab_ < 0 || static_cast<size_t>(active_tab_) >= tabs_.size() ||
         tabs_[active_tab_]->kind() != TabKind::Terminal) {
         return;
     }

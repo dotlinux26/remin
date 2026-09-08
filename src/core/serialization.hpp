@@ -134,6 +134,7 @@ inline void from_json(const json& j, InterruptedCommand& c) {
 
 inline void to_json(json& j, const CommandRecord& r) {
     j = json{{"command", r.command}, {"timestamp_us", r.timestamp_us}};
+    if (r.pinned) j["pinned"] = true;
 }
 
 inline void from_json(const json& j, CommandRecord& r) {
@@ -143,6 +144,7 @@ inline void from_json(const json& j, CommandRecord& r) {
     }
     r.command = j.value("command", std::string{});
     r.timestamp_us = j.value("timestamp_us", std::int64_t{0});
+    r.pinned = j.value("pinned", false);
 }
 
 inline void to_json(json& j, const PaneState& s) {
@@ -255,6 +257,8 @@ inline void to_json(json& j, const Window& w) {
         {"y", w.y},
         {"width", w.width},
         {"height", w.height},
+        {"created_at", w.created_at.time_since_epoch().count()},
+        {"last_active", w.last_active.time_since_epoch().count()},
         {"tabs", w.tabs},
     };
     if (w.focus_tab_id) j["focus_tab_id"] = w.focus_tab_id->str();
@@ -267,10 +271,17 @@ inline void from_json(const json& j, Window& w) {
     if (j.contains("label")) w.label = j.at("label").get<std::string>();
     else if (j.contains("title")) w.label = j.at("title").get<std::string>();
     w.x = j.value("x", 0);
-    w.x = j.value("x", 0);
     w.y = j.value("y", 0);
     w.width = j.value("width", 0u);
     w.height = j.value("height", 0u);
+    if (j.contains("created_at")) {
+        w.created_at = std::chrono::system_clock::time_point(
+            std::chrono::nanoseconds{j.value("created_at", 0L)});
+    }
+    if (j.contains("last_active")) {
+        w.last_active = std::chrono::system_clock::time_point(
+            std::chrono::nanoseconds{j.value("last_active", 0L)});
+    }
     if (j.contains("tabs")) j.at("tabs").get_to(w.tabs);
     if (j.contains("focus_tab_id")) w.focus_tab_id = TabId{j.value("focus_tab_id", std::string{})};
     if (j.contains("focus_pane_id")) w.focus_pane_id = PaneId{j.value("focus_pane_id", std::string{})};

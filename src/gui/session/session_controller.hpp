@@ -169,6 +169,15 @@ public:
     // non-empty, only returns history for that specific pane.
     [[nodiscard]] std::vector<std::string> get_command_history(
         const remin::core::PaneId& pane_id = remin::core::PaneId{}) const;
+    // Rich per-pane history for the Command panel: full CommandRecords of the
+    // given pane, newest first. Empty pane_id → fall back to the workspace's
+    // most recently focused pane.
+    [[nodiscard]] std::vector<remin::core::CommandRecord> get_command_history_records(
+        const remin::core::PaneId& pane_id = remin::core::PaneId{}) const;
+    // Pin/unpin the most recent record matching `command` in the given pane
+    // (Command panel). Persisted with the next checkpoint.
+    bool set_command_pinned(const remin::core::PaneId& pane,
+                            const std::string& command, bool pinned);
     // Persist a clear: empty every pane's canonical history.
     bool clear_command_history();
 

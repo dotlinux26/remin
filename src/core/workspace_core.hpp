@@ -132,6 +132,13 @@ public:
     // collapsed and the list is capped (design §6.1). Returns false when the
     // tab/pane does not exist or the record is empty.
     bool add_command_to_pane(const TabId& tab, const PaneId& pane, CommandRecord record);
+    // Read-only copy of the pane's canonical command history (oldest → newest).
+    [[nodiscard]] std::vector<CommandRecord>
+    get_pane_command_history(const TabId& tab, const PaneId& pane) const;
+    // Pin/unpin the first (most recent) record whose command matches. Returns
+    // false when the tab/pane does not exist or no record matches.
+    bool set_command_pinned(const TabId& tab, const PaneId& pane,
+                            const std::string& command, bool pinned);
     // Clear every pane's command history across the open workspace. Persisted
     // at the next checkpoint (`clear_history()` must survive a restart).
     bool clear_command_history();
