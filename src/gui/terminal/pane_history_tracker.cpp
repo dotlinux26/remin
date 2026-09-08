@@ -144,6 +144,21 @@ bool PaneHistoryTracker::is_pinned(const std::string& command) const {
     return false;
 }
 
+void PaneHistoryTracker::apply_annotations(const std::vector<remin::core::Storage::HistoryAnnotation>& annotations) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& ann : annotations) {
+        if (!ann.pinned) continue;
+        // Match by command text (most recent first)
+        for (auto it = cache_.rbegin(); it != cache_.rend(); ++it) {
+            if (it->record.command == ann.command) {
+                it->pinned = true;
+                break;
+            }
+        }
+    }
+}
+
+
 void PaneHistoryTracker::parse_and_merge(const std::string& new_content) {
     if (new_content.empty()) return;
 

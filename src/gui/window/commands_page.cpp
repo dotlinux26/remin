@@ -58,6 +58,8 @@ void CommandsPage::refresh() {
         row.display_text = truncate_for_display(rec.command);
         row.timestamp_us = rec.timestamp_us;
         row.pinned = rec.pinned;
+        row.pane_id = current_pane_id_;
+        row.window_id = current_window_id_;
         rows_.push_back(std::move(row));
     }
     schedule_rebuild();
@@ -70,6 +72,11 @@ void CommandsPage::schedule_rebuild() {
         rebuild_scheduled_ = false;
         rebuild_list();
     });
+}
+
+void CommandsPage::set_pane_context(const std::string& pane_id, const std::string& window_id) {
+    current_pane_id_ = pane_id;
+    current_window_id_ = window_id;
 }
 
 void CommandsPage::set_search_text(const std::string& text) {

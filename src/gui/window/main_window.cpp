@@ -2,6 +2,7 @@
 #include "gui/window/settings_dialog.hpp"
 #include "gui/terminal/pane_history_tracker.hpp"
 #include "core/serialization.hpp"
+#include "core/crypto.hpp"
 #include <adwaita.h>
 #include <terminal/shell/shell.hpp>
 
@@ -1028,6 +1029,67 @@ void MainWindow::update_history_sidebar() {
         if (auto* pane = t->focused_pane()) {
             commands_page_->set_target_pane(pane);
         }
+
+        // Set pane context for DB annotations
+        commands_page_->set_pane_context(focused_pane_id.str(), window_id_.str());
+
+        // Set pin callback to persist to DB
+        auto pane_id_copy = focused_pane_id;
+        auto window_id_copy = window_id_;
+        commands_page_->set_pin_callback([this, pane_id_copy, window_id_copy](const std::string& command, bool pinned) {
+            if (!controller_ || !controller_->core() || !controller_->core()->storage()) return;
+            auto* ws = controller_->core()->current_workspace();
+            if (!ws) return;
+            
+            // Find the pane in the workspace to get its timestamp
+            int64_t timestamp_us = 0;
+            for (const auto& wnd : ws->windows) {
+                for (const auto& tab : wnd.tabs) {
+                    if (tab.kind == remin::core::TabKind::Terminal) {
+                        std::vector<const remin::core::Pane*> panes;
+                        tab.pane_tree.collect_panes(panes);
+                        for (const auto* p : panes) {
+                            if (p && p->id == pane_id_copy) {
+                                for (const auto& rec : p->state.command_history) {
+                                    if (rec.command == command) {
+                                        timestamp_us = rec.timestamp_us;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Generate fingerprint: SHA256(command + timestamp_us + pane_id)
+            std::string fingerprint_input = command + std::to_string(timestamp_us) + pane_id_copy.str();
+            std::string fingerprint = remin::core::sha256_hex(fingerprint_input);
+            
+            // Load existing annotation or create new
+            auto* storage = controller_->core()->storage();
+            auto existing = storage->load_history_annotation(ws->id, fingerprint);
+            
+            remin::core::Storage::HistoryAnnotation ann;
+            if (existing) {
+                ann = *existing;
+                ann.pinned = pinned;
+                ann.updated_at = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+            } else {
+                ann.fingerprint = fingerprint;
+                ann.command = command;
+                ann.timestamp_us = timestamp_us;
+                ann.pane_id = pane_id_copy.str();
+                ann.window_id = window_id_copy.str();
+                ann.pinned = pinned;
+                ann.created_at = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                ann.updated_at = ann.created_at;
+            }
+            
+            storage->store_history_annotation(ws->id, ann);
+        });
 
         commands_page_->refresh();
     } else {

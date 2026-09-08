@@ -51,6 +51,18 @@ CREATE TABLE IF NOT EXISTS closed_windows (
     generation INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (workspace_id, id)
 ) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS history_annotations (
+    fingerprint TEXT PRIMARY KEY,
+    command TEXT NOT NULL,
+    timestamp_us INTEGER,
+    pane_id TEXT,
+    window_id TEXT,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    comment TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 )SQL";
 
 // Migration: add schema_version, generation, reason to snapshots if missing.

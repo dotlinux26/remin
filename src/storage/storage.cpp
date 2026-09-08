@@ -449,4 +449,116 @@ void SqliteStorage::delete_closed_window(const remin::core::WorkspaceId& ws_id, 
     sqlite3_finalize(stmt);
 }
 
+void SqliteStorage::store_history_annotation(const remin::core::WorkspaceId& ws_id, const remin::core::Storage::HistoryAnnotation& ann) {
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = R"SQL(
+        INSERT INTO history_annotations (fingerprint, command, timestamp_us, pane_id, window_id, pinned, comment, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        ON CONFLICT(fingerprint) DO UPDATE SET
+            command = excluded.command,
+            timestamp_us = excluded.timestamp_us,
+            pane_id = excluded.pane_id,
+            window_id = excluded.window_id,
+            pinned = excluded.pinned,
+            comment = excluded.comment,
+            updated_at = excluded.updated_at;
+    )SQL";
+    if (sqlite3_prepare_v2(db_->raw(), sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        err_ = sqlite3_errmsg(db_->raw());
+        return;
+    }
+    sqlite3_bind_text(stmt, 1, ann.fingerprint.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, ann.command.c_str(), -1, SQLITE_TRANSIENT);
+    if (ann.timestamp_us.has_value()) {
+        sqlite3_bind_int64(stmt, 3, static_cast<sqlite3_int64>(ann.timestamp_us.value()));
+    } else {
+        sqlite3_bind_null(stmt, 3);
+    }
+    sqlite3_bind_text(stmt, 4, ann.pane_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 5, ann.window_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 6, ann.pinned ? 1 : 0);
+    sqlite3_bind_text(stmt, 7, ann.comment.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 8, static_cast<sqlite3_int64>(ann.created_at));
+    sqlite3_bind_int64(stmt, 9, static_cast<sqlite3_int64>(ann.updated_at));
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+std::optional<remin::core::Storage::HistoryAnnotation> SqliteStorage::load_history_annotation(const remin::core::WorkspaceId& ws_id, const std::string& fingerprint) {
+    (void)ws_id; // workspace_id not used in current schema (single workspace per DB)
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_->raw(), "SELECT fingerprint, command, timestamp_us, pane_id, window_id, pinned, comment, created_at, updated_at FROM history_annotations WHERE fingerprint=?1;", -1, &stmt, nullptr) != SQLITE_OK) {
+        err_ = sqlite3_errmsg(db_->raw());
+        return std::nullopt;
+    }
+    sqlite3_bind_text(stmt, 1, fingerprint.c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<remin::core::Storage::HistoryAnnotation> result = std::nullopt;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        remin::core::Storage::HistoryAnnotation ann;
+        ann.fingerprint = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        ann.command = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        if (sqlite3_column_type(stmt, 2) != SQLITE_NULL) {
+            ann.timestamp_us = sqlite3_column_int64(stmt, 2);
+        }
+        ann.pane_id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        ann.window_id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+        ann.pinned = sqlite3_column_int(stmt, 5) != 0;
+        ann.comment = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6));
+        ann.created_at = sqlite3_column_int64(stmt, 7);
+        ann.updated_at = sqlite3_column_int64(stmt, 8);
+        result = std::move(ann);
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+std::vector<remin::core::Storage::HistoryAnnotation> SqliteStorage::list_history_annotations(const remin::core::WorkspaceId& ws_id, const std::string& pane_id) {
+    (void)ws_id; // workspace_id not used in current schema
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    std::vector<remin::core::Storage::HistoryAnnotation> result;
+    sqlite3_stmt* stmt = nullptr;
+    std::string sql = "SELECT fingerprint, command, timestamp_us, pane_id, window_id, pinned, comment, created_at, updated_at FROM history_annotations";
+    if (!pane_id.empty()) {
+        sql += " WHERE pane_id = ?1 ORDER BY updated_at DESC;";
+    } else {
+        sql += " ORDER BY updated_at DESC;";
+    }
+    if (sqlite3_prepare_v2(db_->raw(), sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        err_ = sqlite3_errmsg(db_->raw());
+        return result;
+    }
+    if (!pane_id.empty()) {
+        sqlite3_bind_text(stmt, 1, pane_id.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        remin::core::Storage::HistoryAnnotation ann;
+        ann.fingerprint = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        ann.command = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        if (sqlite3_column_type(stmt, 2) != SQLITE_NULL) {
+            ann.timestamp_us = sqlite3_column_int64(stmt, 2);
+        }
+        ann.pane_id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        ann.window_id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+        ann.pinned = sqlite3_column_int(stmt, 5) != 0;
+        ann.comment = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6));
+        ann.created_at = sqlite3_column_int64(stmt, 7);
+        ann.updated_at = sqlite3_column_int64(stmt, 8);
+        result.push_back(std::move(ann));
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+void SqliteStorage::delete_history_annotation(const remin::core::WorkspaceId& ws_id, const std::string& fingerprint) {
+    (void)ws_id;
+    std::lock_guard<std::recursive_mutex> lk(db_->mutex());
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_->raw(), "DELETE FROM history_annotations WHERE fingerprint=?1;", -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, fingerprint.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
 } // namespace remin::storage

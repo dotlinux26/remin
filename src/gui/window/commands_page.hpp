@@ -29,6 +29,9 @@ public:
     /// Set the terminal pane for command insertion (click handler).
     void set_target_pane(TerminalPane* pane);
 
+    /// Set the current pane/window IDs for DB annotation.
+    void set_pane_context(const std::string& pane_id, const std::string& window_id);
+
     /// Refresh the list from the tracker (call on pane focus, history sync, search change).
     void refresh();
 
@@ -52,6 +55,8 @@ private:
         bool pinned = false;
         Gtk::Button* button = nullptr;
         Gtk::Popover* popover = nullptr;
+        std::string pane_id;
+        std::string window_id;
     };
 
     void rebuild_list();
@@ -67,6 +72,8 @@ private:
 
     PaneHistoryTracker* tracker_ = nullptr;
     TerminalPane* target_pane_ = nullptr;
+    std::string current_pane_id_;
+    std::string current_window_id_;
     std::string search_text_;
     std::vector<CommandRow> rows_;
 

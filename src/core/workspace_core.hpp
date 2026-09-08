@@ -49,6 +49,23 @@ public:
     virtual std::optional<ClosedWindowSnapshot> load_closed_window(const WorkspaceId& ws_id, const SnapshotId& snap_id) = 0;
     virtual void delete_closed_window(const WorkspaceId& ws_id, const SnapshotId& snap_id) = 0;
 
+    // History annotations (pinned commands, comments, metadata) — per-pane, survives HISTFILE loss.
+    struct HistoryAnnotation {
+        std::string fingerprint;        // SHA256(command + timestamp_us + pane_id)
+        std::string command;
+        std::optional<int64_t> timestamp_us;
+        std::string pane_id;
+        std::string window_id;
+        bool pinned = false;
+        std::string comment;
+        int64_t created_at = 0;         // Unix epoch microseconds
+        int64_t updated_at = 0;         // Unix epoch microseconds
+    };
+    virtual void store_history_annotation(const WorkspaceId& ws_id, const HistoryAnnotation& ann) = 0;
+    virtual std::optional<HistoryAnnotation> load_history_annotation(const WorkspaceId& ws_id, const std::string& fingerprint) = 0;
+    virtual std::vector<HistoryAnnotation> list_history_annotations(const WorkspaceId& ws_id, const std::string& pane_id = "") = 0;
+    virtual void delete_history_annotation(const WorkspaceId& ws_id, const std::string& fingerprint) = 0;
+
     // Atomic checkpoint: writes workspace JSON, all terminal snapshots, and a
     // snapshot row in a single transaction. Returns true on success.
     // `generation` is the new generation number (monotonically increasing).

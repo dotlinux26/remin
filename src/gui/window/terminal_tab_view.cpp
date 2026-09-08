@@ -3,6 +3,7 @@
 #include "gui/session/session_controller.hpp"
 #include "gui/session/workspace_session.hpp"
 #include "gui/ui/context_menu.hpp"
+#include "gui/terminal/pane_history_tracker.hpp"
 #include "terminal/shell/shell.hpp"
 
 #include <algorithm>
@@ -257,7 +258,15 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
     }
 
     // Connect history change callback to notify MainWindow
-    panes_[new_pane.str()]->set_history_changed_callback([this]() {
+    panes_[new_pane.str()]->set_history_changed_callback([this, pane_id = new_pane.str()]() {
+        // Load and apply DB annotations for this pane
+        if (controller_ && controller_->core() && controller_->core()->storage()) {
+            auto annotations = controller_->core()->storage()->list_history_annotations(
+                controller_->core()->current_workspace()->id, pane_id);
+            if (auto* tracker = history_tracker(remin::core::PaneId{pane_id})) {
+                tracker->apply_annotations(annotations);
+            }
+        }
         if (on_history_changed_) on_history_changed_();
     });
 
@@ -528,7 +537,15 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                 }
 
                 // Connect history change callback to notify MainWindow
-                it.first->second->set_history_changed_callback([this]() {
+                it.first->second->set_history_changed_callback([this, pane_id = pid.str()]() {
+                    // Load and apply DB annotations for this pane
+                    if (controller_ && controller_->core() && controller_->core()->storage()) {
+                        auto annotations = controller_->core()->storage()->list_history_annotations(
+                            controller_->core()->current_workspace()->id, pane_id);
+                        if (auto* tracker = history_tracker(remin::core::PaneId{pane_id})) {
+                            tracker->apply_annotations(annotations);
+                        }
+                    }
                     if (on_history_changed_) on_history_changed_();
                 });
 

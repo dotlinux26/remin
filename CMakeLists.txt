@@ -20,6 +20,7 @@ option(REMIN_ENABLE_SANITIZERS "Enable ASan/UBSan" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+find_package(OpenSSL REQUIRED)
 include(CompilerWarnings)
 include(Dependencies)
 include(Sanitizers)

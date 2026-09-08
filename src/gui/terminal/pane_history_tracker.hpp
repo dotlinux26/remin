@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/pane/pane.hpp"
+#include "core/workspace_core.hpp"
 
 #include <string>
 #include <vector>
@@ -36,6 +37,10 @@ public:
 
     // Check if a command is pinned (by exact text match).
     [[nodiscard]] bool is_pinned(const std::string& command) const;
+
+    // Apply pinned/comment annotations from DB.
+    // `annotations` should be the list of HistoryAnnotation for this pane.
+    void apply_annotations(const std::vector<remin::core::Storage::HistoryAnnotation>& annotations);
 
     // Get the HISTFILE path.
     [[nodiscard]] const std::string& histfile_path() const noexcept { return histfile_path_; }

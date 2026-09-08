@@ -39,6 +39,12 @@ public:
     std::optional<remin::core::ClosedWindowSnapshot> load_closed_window(const remin::core::WorkspaceId& ws_id, const remin::core::SnapshotId& snap_id) override;
     void delete_closed_window(const remin::core::WorkspaceId& ws_id, const remin::core::SnapshotId& snap_id) override;
 
+    // History annotations (pinned commands, comments, metadata)
+    void store_history_annotation(const remin::core::WorkspaceId& ws_id, const remin::core::Storage::HistoryAnnotation& ann) override;
+    std::optional<remin::core::Storage::HistoryAnnotation> load_history_annotation(const remin::core::WorkspaceId& ws_id, const std::string& fingerprint) override;
+    std::vector<remin::core::Storage::HistoryAnnotation> list_history_annotations(const remin::core::WorkspaceId& ws_id, const std::string& pane_id = "") override;
+    void delete_history_annotation(const remin::core::WorkspaceId& ws_id, const std::string& fingerprint) override;
+
     // Atomic checkpoint: workspace + terminal snapshots + snapshot in one transaction.
     bool checkpoint(const remin::core::WorkspaceId& ws_id,
                     const remin::core::json& workspace_state,
