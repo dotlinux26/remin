@@ -274,13 +274,19 @@ inline void from_json(const json& j, Window& w) {
     w.y = j.value("y", 0);
     w.width = j.value("width", 0u);
     w.height = j.value("height", 0u);
+    // Handle missing timestamps gracefully (for data saved before these fields existed).
+    // Default created_at to epoch if missing; last_active defaults to created_at.
     if (j.contains("created_at")) {
         w.created_at = std::chrono::system_clock::time_point(
             std::chrono::nanoseconds{j.value("created_at", 0L)});
+    } else {
+        w.created_at = std::chrono::system_clock::time_point{}; // epoch as fallback
     }
     if (j.contains("last_active")) {
         w.last_active = std::chrono::system_clock::time_point(
             std::chrono::nanoseconds{j.value("last_active", 0L)});
+    } else {
+        w.last_active = w.created_at; // default to created_at
     }
     if (j.contains("tabs")) j.at("tabs").get_to(w.tabs);
     if (j.contains("focus_tab_id")) w.focus_tab_id = TabId{j.value("focus_tab_id", std::string{})};

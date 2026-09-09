@@ -1117,14 +1117,16 @@ void MainWindow::do_update_history_windows_list() {
     auto* storage = core->storage();
     if (!storage) return;
 
-    // Keep the search entry (first child) but clear the rest
+    // Keep the search entry but clear all other children (window buttons)
     auto* search_entry = windows_search_entry_;
-    while (auto* child = history_windows_list_->get_first_child()) {
+    std::vector<Gtk::Widget*> to_remove;
+    for (auto* child = history_windows_list_->get_first_child(); child; child = child->get_next_sibling()) {
         if (child != search_entry) {
-            history_windows_list_->remove(*child);
-        } else {
-            break;
+            to_remove.push_back(child);
         }
+    }
+    for (auto* child : to_remove) {
+        history_windows_list_->remove(*child);
     }
 
     std::string search_text = "";
@@ -1157,7 +1159,7 @@ void MainWindow::do_update_history_windows_list() {
 
         // Format timestamps
         auto format_time = [](const std::chrono::system_clock::time_point& tp) -> std::string {
-            if (tp == std::chrono::system_clock::time_point{}) return "N/A";
+            if (tp == std::chrono::system_clock::time_point{}) return "Unknown";
             auto t = std::chrono::system_clock::to_time_t(tp);
             char buf[32];
             std::strftime(buf, sizeof(buf), "%d %b %Y %H:%M", std::localtime(&t));
