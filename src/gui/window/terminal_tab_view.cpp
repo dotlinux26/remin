@@ -351,6 +351,20 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
                 // Lazy-create a terminal for a pane we don't have yet.
                 auto p = std::make_unique<TerminalPane>(shell_, "", pane_history_file(pid));
                 auto* raw = p.get();
+
+                // Connect history change callback BEFORE initialize_fresh so initial_load fires it
+                raw->set_history_changed_callback([this, pane_id = pid.str()]() {
+                    // Load and apply DB annotations for this pane
+                    if (controller_ && controller_->core() && controller_->core()->storage()) {
+                        auto annotations = controller_->core()->storage()->list_history_annotations(
+                            controller_->core()->current_workspace()->id, pane_id);
+                        if (auto* tracker = history_tracker(remin::core::PaneId{pane_id})) {
+                            tracker->apply_annotations(annotations);
+                        }
+                    }
+                    if (on_history_changed_) on_history_changed_();
+                });
+
                 raw->initialize_fresh();  // Spawn shell for fresh pane
                 if (controller_->autosaver()) {
                     auto cid = pid;
@@ -360,6 +374,10 @@ Gtk::Widget& TerminalTabView::build_node(const remin::core::PaneTree& node) {
                 }
                 panes_.emplace(pid.str(), std::move(p));
                 it = panes_.find(pid.str());
+                // Register this pane with the history watcher (root pane path).
+                if (history_watcher_) {
+                    history_watcher_->register_pane(pid.str(), pane_history_file(pid));
+                }
             }
             // Track focused pane on click (GTK4: use GestureClick).
             // Only add controllers once per pane to avoid accumulation on rebuild.
