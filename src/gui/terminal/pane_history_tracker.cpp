@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <algorithm>
 #include <mutex>
+#include <glibmm.h>
 
 namespace remin::gui {
 
@@ -30,9 +31,11 @@ void PaneHistoryTracker::initial_load() {
     last_known_mtime_ = file_mtime(histfile_path_);
     initial_load_done_ = true;
     
-    // Notify after initial load
+    // Notify after initial load - defer to avoid deadlock during construction
     if (on_history_changed_) {
-        on_history_changed_();
+        Glib::signal_idle().connect_once([this]() {
+            if (on_history_changed_) on_history_changed_();
+        });
     }
 }
 

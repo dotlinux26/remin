@@ -262,7 +262,12 @@ void TerminalPane::feed_child(std::string_view data) {
 
 void TerminalPane::sync_history() {
     if (tracker_ && tracker_->sync()) {
-        if (on_history_changed_) on_history_changed_();
+        // Defer callback to avoid potential deadlock during construction
+        if (on_history_changed_) {
+            Glib::signal_idle().connect_once([this]() {
+                if (on_history_changed_) on_history_changed_();
+            });
+        }
     }
 }
 

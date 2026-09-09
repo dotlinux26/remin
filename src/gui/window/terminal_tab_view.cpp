@@ -243,7 +243,10 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
     auto shell = shell_;
     auto pane = std::make_unique<TerminalPane>(shell, "", pane_history_file(new_pane));
     auto* raw = pane.get();
-    
+
+    // Add pane to map BEFORE initialize_fresh so callback can find tracker
+    panes_.emplace(new_pane.str(), std::move(pane));
+
     // Connect history change callback BEFORE initialize_fresh so initial_load fires it
     raw->set_history_changed_callback([this, pane_id = new_pane.str()]() {
         // Load and apply DB annotations for this pane
@@ -256,7 +259,7 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
         }
         if (on_history_changed_) on_history_changed_();
     });
-    
+
     raw->initialize_fresh();  // Spawn shell for fresh pane
     if (controller_->autosaver()) {
         auto pid = new_pane;
@@ -264,25 +267,11 @@ remin::core::PaneId TerminalTabView::split(remin::core::PaneTree::Kind kind) {
             controller_->autosaver()->note_terminal_activity(pid);
         });
     }
-    panes_.emplace(new_pane.str(), std::move(pane));
 
     // Register with filesystem watcher
     if (history_watcher_) {
         history_watcher_->register_pane(new_pane.str(), pane_history_file(new_pane));
     }
-
-    // Connect history change callback to notify MainWindow
-    panes_[new_pane.str()]->set_history_changed_callback([this, pane_id = new_pane.str()]() {
-        // Load and apply DB annotations for this pane
-        if (controller_ && controller_->core() && controller_->core()->storage()) {
-            auto annotations = controller_->core()->storage()->list_history_annotations(
-                controller_->core()->current_workspace()->id, pane_id);
-            if (auto* tracker = history_tracker(remin::core::PaneId{pane_id})) {
-                tracker->apply_annotations(annotations);
-            }
-        }
-        if (on_history_changed_) on_history_changed_();
-    });
 
     // Apply saved terminal colors to the new pane immediately
     if (controller_) {
@@ -529,7 +518,7 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                 // Seed this pane's dedicated shell history from the pane's
                 // canonical command history so restored ↑/↓ recall exactly the
                 // commands THIS pane ran (§6.1 isolation).
-                const std::string hist_file = pane_history_file(pid);
+const std::string hist_file = pane_history_file(pid);
                 seed_shell_history(hist_file, state.command_history);
                 // Create terminal pane with the persisted state (defer shell spawn
                 // because runtime_restore will handle snapshot-restore-then-spawn).
@@ -541,6 +530,9 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                         controller_->autosaver()->note_terminal_activity(cid);
                     });
                 }
+                
+                // Add pane to map BEFORE runtime_restore so callback can find tracker
+                auto it = panes_.emplace(pid.str(), std::move(p));
                 
                 // Connect history change callback BEFORE runtime_restore so initial_load fires it
                 raw->set_history_changed_callback([this, pane_id = pid.str()]() {
@@ -557,8 +549,7 @@ void TerminalTabView::restore_pane_tree(const remin::core::PaneTree& tree) {
                 
                 // Restore the terminal state (scrollback, cwd, cols/rows, etc.)
                 raw->runtime_restore(state);
-                auto it = panes_.emplace(pid.str(), std::move(p));
-
+                
                 // Register with filesystem watcher
                 if (history_watcher_) {
                     history_watcher_->register_pane(pid.str(), pane_history_file(pid));
