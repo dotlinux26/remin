@@ -1157,7 +1157,7 @@ void MainWindow::do_update_history_windows_list() {
 
         // Format timestamps
         auto format_time = [](const std::chrono::system_clock::time_point& tp) -> std::string {
-            if (tp == std::chrono::system_clock::time_point{}) return "N/A";
+            if (tp == std::chrono::system_clock::time_point{}) return "Unknown";
             auto t = std::chrono::system_clock::to_time_t(tp);
             char buf[32];
             std::strftime(buf, sizeof(buf), "%d %b %Y %H:%M", std::localtime(&t));
