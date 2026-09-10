@@ -234,6 +234,7 @@ void NoteTabView::toggle_preview() {
     content_split_->set_hexpand(true);
     content_split_->set_vexpand(true);
     preview_ = Gtk::make_managed<MarkdownPreview>();
+    preview_->set_note_dir(note_root_dir());
 
     // A slim header above the preview: [Sync Scroll □] stays compact.
     auto* preview_host = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 0);

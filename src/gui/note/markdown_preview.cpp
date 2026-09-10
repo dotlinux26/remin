@@ -25,7 +25,11 @@ std::optional<std::filesystem::path> resolve_local_image(
     if (ref.rfind("data:", 0) == 0) return std::nullopt;
 
     std::filesystem::path candidate;
-    if (ref.rfind("assets/", 0) == 0) {
+    if (ref.rfind("remin://images/", 0) == 0) {
+        const char* home = std::getenv("HOME");
+        if (!home) return std::nullopt;
+        candidate = std::filesystem::path(home) / "remin-image" / ref.substr(15);
+    } else if (ref.rfind("assets/", 0) == 0) {
         const std::string rel = ref.substr(7);
         candidate = asset_dir.empty() ? (note_dir / "assets") : asset_dir;
         candidate /= rel;
