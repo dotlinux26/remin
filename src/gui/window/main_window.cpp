@@ -300,7 +300,10 @@ void MainWindow::setup_menu_bar() {
     actions->add_action("dark", [this]() {
         AdwStyleManager* sm = adw_style_manager_get_default();
         AdwColorScheme current = adw_style_manager_get_color_scheme(sm);
-        adw_style_manager_set_color_scheme(sm, current == ADW_COLOR_SCHEME_PREFER_DARK ? ADW_COLOR_SCHEME_FORCE_LIGHT : ADW_COLOR_SCHEME_PREFER_DARK);
+        const bool dark = current != ADW_COLOR_SCHEME_PREFER_DARK;
+        adw_style_manager_set_color_scheme(sm, dark ? ADW_COLOR_SCHEME_PREFER_DARK : ADW_COLOR_SCHEME_FORCE_LIGHT);
+        if (controller_) controller_->set_theme_dark(dark);
+        refresh_note_previews();
     });
     actions->add_action("reload", [this]() {
         AdwStyleManager* sm = adw_style_manager_get_default();
@@ -1117,16 +1120,14 @@ void MainWindow::do_update_history_windows_list() {
     auto* storage = core->storage();
     if (!storage) return;
 
-    // Keep the search entry but clear all other children (window buttons)
+    // Keep the search entry (first child) but clear the rest
     auto* search_entry = windows_search_entry_;
-    std::vector<Gtk::Widget*> to_remove;
-    for (auto* child = history_windows_list_->get_first_child(); child; child = child->get_next_sibling()) {
+    while (auto* child = history_windows_list_->get_first_child()) {
         if (child != search_entry) {
-            to_remove.push_back(child);
+            history_windows_list_->remove(*child);
+        } else {
+            break;
         }
-    }
-    for (auto* child : to_remove) {
-        history_windows_list_->remove(*child);
     }
 
     std::string search_text = "";
@@ -1159,7 +1160,7 @@ void MainWindow::do_update_history_windows_list() {
 
         // Format timestamps
         auto format_time = [](const std::chrono::system_clock::time_point& tp) -> std::string {
-            if (tp == std::chrono::system_clock::time_point{}) return "Unknown";
+            if (tp == std::chrono::system_clock::time_point{}) return "N/A";
             auto t = std::chrono::system_clock::to_time_t(tp);
             char buf[32];
             std::strftime(buf, sizeof(buf), "%d %b %Y %H:%M", std::localtime(&t));
@@ -2415,6 +2416,7 @@ void MainWindow::apply_initial_sidebar_state() {
 void MainWindow::on_settings() {
     auto dialog = Gtk::make_managed<SettingsDialog>(*this, controller_);
     dialog->set_transient_for(*this);
+    dialog->signal_hide().connect([this]() { refresh_note_previews(); });
     dialog->present();
 }
 
@@ -2475,6 +2477,14 @@ void MainWindow::open_note_from_path(const std::filesystem::path& path) {
     update_toolbar();
     view->activate();
     update_status_bar();
+}
+
+void MainWindow::refresh_note_previews() {
+    for (auto& tab : tabs_) {
+        if (tab->kind() == TabKind::Note) {
+            static_cast<NoteTabView*>(tab.get())->refresh_preview_settings();
+        }
+    }
 }
 
 void MainWindow::refresh_theme() {

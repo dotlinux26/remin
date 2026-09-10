@@ -36,27 +36,8 @@ bool WorkspaceCore::open_workspace(const WorkspaceId& id) {
     if (!loaded) return false;
     ws_current_ = std::move(*loaded);
     
-    // Fix missing timestamps for windows (data saved before timestamp fields existed)
+    // Load terminal snapshots from database into pane states
     if (ws_current_) {
-        auto now = std::chrono::system_clock::now();
-        for (auto& w : ws_current_->windows) {
-            // Fix created_at: if epoch (default), set to workspace created_at or now
-            if (w.created_at == std::chrono::system_clock::time_point{}) {
-                w.created_at = ws_current_->created_at;
-                if (w.created_at == std::chrono::system_clock::time_point{}) {
-                    w.created_at = now;
-                }
-            }
-            // Fix last_active: if epoch, set to created_at
-            if (w.last_active == std::chrono::system_clock::time_point{}) {
-                w.last_active = w.created_at;
-            }
-        }
-        
-        // Mark workspace as dirty so fixed timestamps get persisted
-        ws_dirty_ = true;
-        
-        // Load terminal snapshots from database into pane states
         for (auto& w : ws_current_->windows) {
             for (auto& t : w.tabs) {
                 std::vector<Pane*> panes;

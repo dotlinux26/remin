@@ -1,0 +1,123 @@
+/* markdown-preview.css — Remin HTML export stylesheet.
+ *
+ * This is plain CSS for the exported HTML file (and a convenient starting
+ * point for a custom stylesheet). The native GTK preview and the PDF export
+ * use the smaller CSS-like subset from the builtin stylesheet and accept
+ * `@text`/`@accent`/... palette tokens instead.
+ */
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --text: #202124;
+    --text-muted: #6b7076;
+    --accent: #2563eb;
+    --bg: #ffffff;
+    --surface: #f8f9fb;
+    --border: #d4d8e0;
+    --code-bg: #f0f1f3;
+    --quote-bg: #f2f5fb;
+    --ok: #1f9d55;
+    --error: #ba1a1a;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #e8eaed;
+    --text-muted: #9aa0a6;
+    --accent: #8ab4f8;
+    --bg: #1e1f24;
+    --surface: #26272d;
+    --border: #3c4043;
+    --code-bg: #2c2d33;
+    --quote-bg: #262a33;
+    --ok: #81c995;
+    --error: #f28b82;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 24px 28px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  font-family: system-ui, "Segoe UI", "Noto Sans", sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 1.2em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+h1 { font-size: 1.7em; }
+h2 { font-size: 1.35em; }
+h3 { font-size: 1.15em; }
+h4 { font-size: 1em; }
+
+p { margin: 0.6em 0; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+  font-family: "JetBrains Mono", "Fira Code", "Noto Sans Mono", monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--code-bg);
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+
+pre code { padding: 0; background: none; }
+
+blockquote {
+  margin: 0.8em 0;
+  padding: 0.3em 1em;
+  border-left: 4px solid var(--accent);
+  background: var(--quote-bg);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-muted);
+}
+
+img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.6em 0;
+}
+
+table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+}
+
+th, td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+}
+
+th { background: var(--surface); font-weight: 600; }
+
+tr:nth-child(even) td { background: color-mix(in srgb, var(--surface) 50%, transparent); }
+
+ul, ol { padding-left: 1.6em; }
+li { margin: 0.2em 0; }
+
+.task-list-item::marker { content: "☐ "; }
+.task-list-item[data-checked]::marker { content: "☑ "; }

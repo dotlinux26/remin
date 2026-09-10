@@ -44,6 +44,16 @@ public:
         on_preview_ = std::move(cb);
     }
 
+    // Fired when the user pastes image clipboard content (Ctrl+V). Receives
+    // PNG bytes; the caller saves the asset and inserts the markdown
+    // reference. Returning false from the underlying key handler leaves the
+    // paste alone (only image content triggers this).
+    void set_on_image_paste(std::function<void(const std::string&)> cb) {
+        on_image_paste_ = std::move(cb);
+    }
+    // Insert text at the cursor (used to place the generated image reference).
+    void insert_text_at_cursor(const Glib::ustring& text);
+
     void request_save() { if (on_save_) on_save_(); }
 
     // Public find/replace actions — operate on the active search context.
@@ -84,10 +94,12 @@ private:
     bool on_preview_tick();
     void do_search(bool forward);
     bool on_highlight_tick();
+    bool on_key_pressed(guint keyval, guint keycode, Gdk::ModifierType state);
 
     std::function<void()> on_change_;
     std::function<void()> on_save_;
     std::function<void(const std::string&)> on_preview_;
+    std::function<void(const std::string&)> on_image_paste_;
 
     // Replacement string for do_replace()/do_replace_all().
     Glib::ustring replace_text_;

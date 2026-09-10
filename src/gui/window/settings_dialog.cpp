@@ -24,6 +24,7 @@ SettingsDialog::SettingsDialog(Gtk::Window& parent, SessionController* controlle
     setup_terminal_page();
     setup_editor_page();
     setup_behavior_page();
+    setup_markdown_page();
 
     show();
 }
@@ -109,6 +110,60 @@ void SettingsDialog::setup_editor_page() {
     page->append(*info);
 
     notebook_->append_page(*page, "Editor");
+}
+
+void SettingsDialog::setup_markdown_page() {
+    auto* page = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 12);
+    page->set_margin(16);
+
+    auto* title = Gtk::make_managed<Gtk::Label>("Markdown");
+    title->add_css_class("title-2");
+    title->set_halign(Gtk::Align::START);
+    page->append(*title);
+
+    // Custom CSS path
+    auto* css_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+    css_box->set_halign(Gtk::Align::START);
+
+    auto* css_label = Gtk::make_managed<Gtk::Label>("Custom CSS stylesheet:");
+    css_label->set_valign(Gtk::Align::CENTER);
+    css_box->append(*css_label);
+
+    markdown_css_path_label_ = Gtk::make_managed<Gtk::Label>("");
+    markdown_css_path_label_->set_valign(Gtk::Align::CENTER);
+    markdown_css_path_label_->add_css_class("monospace");
+    css_box->append(*markdown_css_path_label_);
+
+    markdown_css_choose_btn_ = Gtk::make_managed<Gtk::Button>("Choose…");
+    markdown_css_choose_btn_->signal_clicked().connect(
+        [this]() { on_markdown_css_changed(); });
+    css_box->append(*markdown_css_choose_btn_);
+
+    markdown_css_reset_btn_ = Gtk::make_managed<Gtk::Button>("Reset");
+    markdown_css_reset_btn_->signal_clicked().connect(
+        [this]() {
+            if (controller_) {
+                controller_->set_markdown_css_path("");
+                update_markdown_css_label();
+            }
+        });
+    css_box->append(*markdown_css_reset_btn_);
+
+    page->append(*css_box);
+
+    // Hint
+    auto* hint = Gtk::make_managed<Gtk::Label>(
+        "Select a custom CSS file to style the Markdown preview and HTML/PDF export. "
+        "Leave empty to use the built-in theme-aware stylesheet.");
+    hint->set_wrap(true);
+    hint->set_halign(Gtk::Align::START);
+    hint->add_css_class("dim-label");
+    page->append(*hint);
+
+    // Update label with current path
+    update_markdown_css_label();
+
+    notebook_->append_page(*page, "Markdown");
 }
 
 void SettingsDialog::setup_behavior_page() {
@@ -259,6 +314,49 @@ void SettingsDialog::save_color_profile() {
 
     // Also apply to all current terminal panes
     // This would need MainWindow integration - for now just save
+}
+
+void SettingsDialog::update_markdown_css_label() {
+    if (!controller_ || !markdown_css_path_label_) return;
+    const std::string path = controller_->markdown_css_path();
+    if (path.empty()) {
+        markdown_css_path_label_->set_text("(using built-in stylesheet)");
+    } else {
+        markdown_css_path_label_->set_text(path);
+    }
+}
+
+void SettingsDialog::on_markdown_css_changed() {
+    auto* root = get_root();
+    auto* win = dynamic_cast<Gtk::Window*>(root);
+    if (!win || !controller_) return;
+
+    auto dialog = Gtk::make_managed<Gtk::FileChooserDialog>(
+        *win, "Choose Markdown CSS…", Gtk::FileChooser::Action::OPEN);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Select", Gtk::ResponseType::OK);
+    dialog->set_modal(true);
+
+    auto filter = Gtk::FileFilter::create();
+    filter->set_name("CSS files");
+    filter->add_pattern("*.css");
+    dialog->add_filter(filter);
+
+    dialog->signal_response().connect([this, dialog](int response) {
+        if (response == Gtk::ResponseType::OK) {
+            const auto file = dialog->get_file();
+            if (file) {
+                const auto path = file->get_path();
+                if (!path.empty() && controller_) {
+                    controller_->set_markdown_css_path(path);
+                    update_markdown_css_label();
+                }
+            }
+        }
+        dialog->close();
+    });
+    dialog->set_transient_for(*win);
+    dialog->present();
 }
 
 } // namespace remin::gui

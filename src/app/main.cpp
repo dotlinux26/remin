@@ -13,10 +13,28 @@
 #include <memory>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <glib.h>
+#include <execinfo.h>
+#include <cstdio>
 
 using namespace remin;
 
 namespace {
+
+static void glib_log_handler(const gchar *log_domain, GLogLevelFlags log_level, const gchar *message, gpointer user_data) {
+    if (log_level & G_LOG_LEVEL_CRITICAL) {
+        void *array[100];
+        size_t size = backtrace(array, 100);
+        fprintf(stderr, "\n=== GLib CRITICAL: %s ===\n", message);
+        backtrace_symbols_fd(array, size, STDERR_FILENO);
+        fprintf(stderr, "=== END BACKTRACE ===\n\n");
+    }
+    g_log_default_handler(log_domain, log_level, message, user_data);
+}
+
+void setup_glib_log_handler() {
+    g_log_set_handler(NULL, G_LOG_LEVEL_CRITICAL, glib_log_handler, NULL);
+}
 
 const char* kUsage =
     "Remin — Remember your work.\n"
@@ -133,6 +151,7 @@ int run_command(const std::vector<std::string>& args) {
 } // namespace
 
 int main(int argc, char** argv) {
+    setup_glib_log_handler();
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) args.emplace_back(argv[i]);
     return run_command(args);

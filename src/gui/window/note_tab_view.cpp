@@ -1,15 +1,21 @@
 #include "gui/window/note_tab_view.hpp"
 #include "gui/session/session_controller.hpp"
+#include "gui/markdown/markdown_document.hpp"
+#include "gui/markdown/markdown_pdf_export.hpp"
+#include "gui/markdown/markdown_css.hpp"
+#include "gui/markdown/markdown_html.hpp"
 
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <sstream>
 
 namespace remin::gui {
 
 NoteTabView::NoteTabView(SessionController* controller, const std::string& noteId)
     : controller_(controller), note_id_(noteId), title_("note") {
-    editor_ = Gtk::make_managed<NoteEditor>(
+    editor_ = new NoteEditor(
         [this]() {
             if (controller_ && controller_->autosaver())
                 controller_->autosaver()->note_note_activity(note_id_);
@@ -48,8 +54,20 @@ NoteTabView::~NoteTabView() {
     if (buffer_modified_connection_.connected()) buffer_modified_connection_.disconnect();
     if (buffer_changed_connection_.connected()) buffer_changed_connection_.disconnect();
 
-    // editor_ is managed by Gtk::make_managed, no manual ref/unref needed
-    editor_ = nullptr;
+    // Disconnect preview signals
+    if (sync_toggle_connection_.connected()) sync_toggle_connection_.disconnect();
+    if (editor_scroll_connection_.connected()) editor_scroll_connection_.disconnect();
+    if (preview_scroll_connection_.connected()) preview_scroll_connection_.disconnect();
+    if (idle_callback_connection_.connected()) idle_callback_connection_.disconnect();
+
+    // preview_ / content_split_ are managed by Gtk::make_managed and destroyed
+    // with the widget tree; no manual ref/unref needed.
+    // editor_ is owned by NoteTabView (created with new, not make_managed).
+    if (editor_) {
+        editor_->unparent();
+        delete editor_;
+        editor_ = nullptr;
+    }
 }
 
 void NoteTabView::connect_editor() {
@@ -60,6 +78,9 @@ void NoteTabView::connect_editor() {
     });
     editor_->set_on_preview([this](const std::string& md) {
         if (preview_) preview_->render(md);
+    });
+    editor_->set_on_image_paste([this](const std::string& png) {
+        on_image_paste(png);
     });
 
     // Track modified state changes in real-time to update the dirty dot (●) immediately.
@@ -229,6 +250,20 @@ void NoteTabView::toggle_preview() {
         }
     });
     preview_header->append(*sync);
+
+    // Export HTML button
+    auto* html_btn = Gtk::make_managed<Gtk::Button>("HTML");
+    html_btn->add_css_class("remin-preview-toggle");
+    html_btn->set_tooltip_text("Export the note as HTML");
+    html_btn->signal_clicked().connect(sigc::mem_fun(*this, &NoteTabView::export_html));
+    preview_header->append(*html_btn);
+
+    // Export PDF button
+    auto* pdf_btn = Gtk::make_managed<Gtk::Button>("PDF");
+    pdf_btn->add_css_class("remin-preview-toggle");
+    pdf_btn->set_tooltip_text("Export the note as PDF");
+    pdf_btn->signal_clicked().connect(sigc::mem_fun(*this, &NoteTabView::export_pdf));
+    preview_header->append(*pdf_btn);
     preview_host->append(*preview_header);
     preview_host->append(*preview_);
 
@@ -289,6 +324,152 @@ void NoteTabView::on_preview_scroll() {
     double target = frac * (sadj->get_upper() - sadj->get_page_size());
     sadj->set_value(target);
     syncing_ = false;
+}
+
+void NoteTabView::on_image_paste(const std::string& png_bytes) {
+    if (!controller_) return;
+    auto doc = std::make_unique<markdown::MarkdownDocument>();
+    doc->set_source(editor_->text());
+    std::filesystem::path note_root = note_root_dir();
+    doc->set_note_dir(note_root);
+    doc->set_asset_dir(note_root / "assets");
+
+    auto asset_ref = doc->save_pasted_image(png_bytes);
+    if (!asset_ref) return;
+
+    std::string markdown_ref = "![](" + *asset_ref + ")";
+    editor_->insert_text_at_cursor(markdown_ref);
+
+    // Re-render preview if open
+    if (preview_) {
+        preview_->render(editor_->text());
+    }
+}
+
+void NoteTabView::export_html() {
+    if (!controller_) return;
+    auto* root = get_root();
+    auto* win = dynamic_cast<Gtk::Window*>(root);
+    if (!win) return;
+
+    auto dialog = Gtk::make_managed<Gtk::FileChooserDialog>(
+        *win, "Export HTML…", Gtk::FileChooser::Action::SAVE);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Export", Gtk::ResponseType::OK);
+    dialog->set_modal(true);
+    dialog->set_current_folder(Gio::File::create_for_path(note_root_dir().string()));
+    dialog->set_current_name((title_ == "note" ? "note" : title_) + ".html");
+    dialog->signal_response().connect([this, dialog](int response) {
+        if (response != Gtk::ResponseType::OK) {
+            dialog->close();
+            return;
+        }
+        const auto file = dialog->get_file();
+        dialog->close();
+        if (!file) return;
+        const auto target = file->get_path();
+        if (target.empty()) return;
+
+        const std::filesystem::path note_root = note_root_dir();
+        markdown::MarkdownDocument doc;
+        doc.set_source(editor_->text());
+        doc.set_note_dir(note_root);
+        doc.set_asset_dir(note_root / "assets");
+
+        markdown::HtmlRenderOptions opts;
+        opts.resolve_asset = [&doc](const std::string& ref) -> std::string {
+            if (!ref.empty() && ref[0] == '/') {
+                if (auto abs = doc.resolve_asset(ref))
+                    return "file://" + abs->string();
+            }
+            return ref;
+        };
+        const std::string body = remin::markdown::render_html_body(doc.ast(), opts);
+        const std::string css_path = controller_->markdown_css_path();
+        const std::string css = css_path.empty() ? remin::markdown::builtin_preview_css()
+                                                 : [&]() {
+                                                       std::ifstream ifs(css_path);
+                                                       std::stringstream ss;
+                                                       ss << ifs.rdbuf();
+                                                       return ss.str();
+                                                   }();
+        const std::string html = remin::markdown::build_html_document(
+            body, css.empty() ? remin::markdown::builtin_preview_css() : css, title_);
+
+        std::ofstream out(target, std::ios::binary);
+        if (!out) {
+            g_warning("remin: could not export HTML to %s", target.c_str());
+            return;
+        }
+        out.write(html.data(), static_cast<std::streamsize>(html.size()));
+    });
+    dialog->present();
+}
+
+void NoteTabView::export_pdf() {
+    if (!controller_) return;
+    auto* root = get_root();
+    auto* win = dynamic_cast<Gtk::Window*>(root);
+    if (!win) return;
+
+    auto dialog = Gtk::make_managed<Gtk::FileChooserDialog>(
+        *win, "Export PDF…", Gtk::FileChooser::Action::SAVE);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Export", Gtk::ResponseType::OK);
+    dialog->set_modal(true);
+    dialog->set_current_folder(Gio::File::create_for_path(note_root_dir().string()));
+    dialog->set_current_name((title_ == "note" ? "note" : title_) + ".pdf");
+
+    dialog->signal_response().connect([this, dialog](int response) {
+        if (response != Gtk::ResponseType::OK) {
+            dialog->close();
+            return;
+        }
+        const auto file = dialog->get_file();
+        dialog->close();
+        if (!file) return;
+        const auto target = file->get_path();
+        if (target.empty()) return;
+
+        const std::filesystem::path note_root = note_root_dir();
+        markdown::MarkdownDocument doc;
+        doc.set_source(editor_->text());
+        doc.set_note_dir(note_root);
+        doc.set_asset_dir(note_root / "assets");
+
+        markdown::MarkdownDocument& d = doc;
+        auto asset_resolver = [&d](const std::string& ref) -> std::string {
+            if (!ref.empty() && ref[0] == '/') {
+                if (auto abs = d.resolve_asset(ref))
+                    return abs->string();
+            }
+            return ref;
+        };
+        remin::markdown::PdfPageMeta meta;
+        meta.title = title_;
+        meta.author = "remin";
+        meta.header_left = "";
+        meta.header_center = "";
+        meta.header_right = "";
+        meta.footer_left = "{title}";
+        meta.footer_center = "";
+        meta.footer_right = "{page} / {pages}";
+        if (!remin::markdown::export_pdf(d.ast(), remin::markdown::default_style(remin::markdown::light_palette()), asset_resolver, target, meta)) {
+            g_warning("remin: could not export PDF to %s", target.c_str());
+        }
+    });
+    dialog->present();
+}
+
+std::filesystem::path NoteTabView::note_root_dir() const {
+    if (controller_) {
+        const auto path = controller_->note_path(note_id_);
+        if (!path.empty()) {
+            return std::filesystem::path(path).parent_path();
+        }
+    }
+    // Fallback for unsaved notes
+    return std::filesystem::path(Glib::get_user_data_dir()) / "remin" / "unsaved-notes";
 }
 
 void NoteTabView::start_watcher() {
@@ -496,15 +677,19 @@ NoteTabView::State NoteTabView::capture_state() const {
         s.cursor_offset = 0;
         s.scroll_fraction = 0.0;
     }
-    s.preview_enabled = preview_ != nullptr;
-    if (content_split_) {
-        int total = content_split_->get_width();
-        if (total > 0) {
-            s.split_ratio = static_cast<double>(content_split_->get_position()) / total;
-        }
-    }
+    // Don't persist preview state (preview_enabled, split_ratio) - always start with preview closed
+    s.preview_enabled = false;
+    s.split_ratio = 0.5;
     s.sync_scroll = sync_scroll_;
     return s;
+}
+
+void NoteTabView::refresh_preview_settings() {
+    if (preview_) {
+        preview_->set_style_path(controller_ ? controller_->markdown_css_path() : "");
+        preview_->set_dark(controller_ ? controller_->theme_dark() : false);
+        preview_->render(editor_->text());
+    }
 }
 
 void NoteTabView::restore_state(const State& state) {
@@ -531,18 +716,18 @@ void NoteTabView::restore_state(const State& state) {
         }
     }
 
-    // Restore preview state
-    bool want_preview = state.preview_enabled;
-    bool have_preview = preview_ != nullptr;
-    if (want_preview != have_preview) {
-        toggle_preview();
-    }
-    if (preview_ && content_split_) {
-        int total = content_split_->get_width();
-        if (total > 0) {
-            content_split_->set_position(static_cast<int>(state.split_ratio * total));
-        }
-    }
+    // Don't restore preview state - always start with preview closed
+    // bool want_preview = state.preview_enabled;
+    // bool have_preview = preview_ != nullptr;
+    // if (want_preview != have_preview) {
+    //     toggle_preview();
+    // }
+    // if (preview_ && content_split_) {
+    //     int total = content_split_->get_width();
+    //     if (total > 0) {
+    //         content_split_->set_position(static_cast<int>(state.split_ratio * total));
+    //     }
+    // }
     sync_scroll_ = state.sync_scroll;
     if (sync_scroll_ && preview_) {
         // Immediately sync scroll from editor to preview

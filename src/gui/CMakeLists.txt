@@ -14,6 +14,15 @@ add_library(remin_gui STATIC
   terminal/history_file_watcher.cpp
   note/note_editor.cpp
   note/markdown_preview.cpp
+  markdown/markdown_ast.cpp
+  markdown/markdown_css.cpp
+  markdown/markdown_document.cpp
+  markdown/markdown_draw.cpp
+  markdown/markdown_html.cpp
+  markdown/markdown_layout.cpp
+  markdown/markdown_pango.cpp
+  markdown/markdown_pdf_export.cpp
+  markdown/markdown_style.cpp
 )
 target_include_directories(remin_gui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/..
@@ -31,10 +40,22 @@ target_link_libraries(remin_gui PUBLIC
   PkgConfig::GTKSOURCE
 )
 
-if(MD4C_FOUND)
-  target_link_libraries(remin_gui PRIVATE PkgConfig::MD4C)
-  target_compile_definitions(remin_gui PRIVATE REMIN_HAVE_MD4C=1)
-endif()
+# Vendored md4c 0.5.3 (third_party/md4c). The distro libmd4c 0.4.8 rejects
+# GFM table delimiter cells shorter than 3 dashes ("| - |"), so we ship the
+# fixed parser directly instead of depending on a system version.
+target_sources(remin_gui PRIVATE
+  markdown/third_party/md4c/md4c.c
+  markdown/third_party/md4c/entity.c
+)
+target_include_directories(remin_gui PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/markdown/third_party/md4c
+)
+set_source_files_properties(
+  ${CMAKE_CURRENT_SOURCE_DIR}/markdown/third_party/md4c/md4c.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/markdown/third_party/md4c/entity.c
+  PROPERTIES LANGUAGE C
+)
+target_compile_definitions(remin_gui PRIVATE REMIN_HAVE_MD4C=1)
 
 remin_enable_warnings(remin_gui)
 remin_enable_sanitizers(remin_gui)

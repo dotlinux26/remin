@@ -79,6 +79,10 @@ public:
     // The on-disk path this note is bound to ("" if it is a temp draft).
     [[nodiscard]] std::string path() const;
 
+    // Re-apply the active theme/CSS settings to the live preview (called when
+    // the user toggles dark mode or changes the stylesheet).
+    void refresh_preview_settings();
+
     // Open-file exception: when the user explicitly re-opens the file this note
     // is bound to (from the directory tree) while the note has unsaved edits, we
     // must NOT auto-reload (even if auto-reload is enabled) because that would
@@ -125,6 +129,12 @@ private:
     void on_editor_scroll();
     void on_preview_scroll();
     void notify_save_state();
+
+    // Image paste + export helpers (shared markdown document model).
+    [[nodiscard]] std::filesystem::path note_root_dir() const;
+    void on_image_paste(const std::string& png_bytes);
+    void export_html();
+    void export_pdf();
 
     SessionController* controller_;
     std::string note_id_;

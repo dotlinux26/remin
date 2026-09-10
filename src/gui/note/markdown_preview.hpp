@@ -2,20 +2,21 @@
 
 #include <gtkmm.h>
 #include <string>
+#include <vector>
+#include <optional>
+#include <memory>
+
+#include "gui/markdown/markdown_ast.hpp"
+#include "gui/markdown/markdown_layout.hpp"
+#include "gui/markdown/markdown_style.hpp"
 
 namespace remin::gui {
 
-// Markdown preview pane: the note editor, when split, renders markdown to the
-// side in a live preview.
-//
-// Parsing is done by md4c (CommonMark) — a tiny C library (~100 KB) — and the
-// result is turned into Pango markup shown by a Gtk::Label inside a scrolled
-// window. WebKitGTK is deliberately avoided so the app stays lightweight;
-// headings, lists, code blocks, block quotes, emphasis, strikethrough and
-// links are supported.
 class MarkdownPreview : public Gtk::ScrolledWindow {
 public:
     MarkdownPreview();
+    ~MarkdownPreview() override;
+
     void render(const std::string& markdown);
 
     // Set the vertical scroll position as a fraction (0.0..1.0) of the content
@@ -27,11 +28,39 @@ public:
         return get_vadjustment();
     }
 
-    // Pure, testable converter: markdown -> Pango markup string.
-    static std::string to_pango(const std::string& markdown);
+    // Local asset resolution roots. `asset_dir` defaults to note_dir/assets.
+    void set_note_dir(const std::string& note_dir, const std::string& asset_dir = {});
+
+    // User CSS path (settings). Empty = builtin stylesheet.
+    void set_style_path(const std::string& css_path);
+
+    // Follow the active dark/light theme.
+    void set_dark(bool dark);
 
 private:
-    Gtk::Label* label_{nullptr};
+    void relayout_if_needed();
+    void on_canvas_draw(const Cairo::RefPtr<Cairo::Context>& cr, int w, int h);
+    std::size_t first_visible_block(double vis_top) const;
+    std::size_t last_visible_block(double vis_bottom, std::size_t first) const;
+
+    Gtk::DrawingArea* canvas_{nullptr};
+    std::string source_;
+    remin::markdown::MarkdownAst ast_;
+    remin::markdown::LayoutResult layout_;
+    remin::markdown::StyleSheet style_;
+    remin::markdown::ReminPalette palette_{remin::markdown::light_palette()};
+    bool dark_{false};
+    bool dirty_{false};
+    int last_layout_width_{0};
+
+    std::string note_dir_;
+    std::string asset_dir_;
+    std::string css_path_;
+    std::filesystem::path resolved_asset_dir_;
+    bool cursor_over_link_{false};
+
+    // Cache for resolved asset pixbufs
+    std::vector<std::pair<std::string, Gdk::Pixbuf>> resolve_asset_cache_;
 };
 
 } // namespace remin::gui

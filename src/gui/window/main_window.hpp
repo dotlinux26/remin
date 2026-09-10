@@ -69,6 +69,7 @@ private:
     void open_note_from_path(const std::filesystem::path& path);
     void on_custom_split();
     void refresh_theme();
+    void refresh_note_previews();
 
     void update_tab_bar();
     // Persistent tab widgets: `build_tab_widget` creates a fresh tab container

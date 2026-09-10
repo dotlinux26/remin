@@ -3,6 +3,9 @@
 #include <adwaita.h>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 
 namespace remin::gui {
 
@@ -65,6 +68,17 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     scroller_->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
     scroller_->set_child(*Glib::wrap(GTK_WIDGET(source_view_)));
     append(*scroller_);
+
+    // Image paste handler (Ctrl+V). Reads clipboard image via read_texture_async().
+    auto key_ctrl = Gtk::EventControllerKey::create();
+    key_ctrl->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+    key_ctrl->signal_key_pressed().connect(
+        sigc::slot<bool(unsigned int, unsigned int, Gdk::ModifierType)>(
+            [this](unsigned int keyval, unsigned int keycode, Gdk::ModifierType mods) -> bool {
+                return on_key_pressed(keyval, keycode, mods);
+            }),
+        false);
+    scroller_->add_controller(key_ctrl);
 
     // Repaint only the visible search highlights when the view scrolls.
     if (auto vadj = scroller_->get_vadjustment()) {
@@ -181,8 +195,57 @@ bool NoteEditor::on_preview_tick() {
     return false;
 }
 
-// The find/replace UI lives in MainWindow's shared find bar; this hook is kept
-// for API compatibility (NoteTabView still calls it).
+bool NoteEditor::on_key_pressed(guint keyval, guint /*keycode*/, Gdk::ModifierType state) {
+    const bool ctrl = (state & Gdk::ModifierType::CONTROL_MASK) != Gdk::ModifierType{};
+    const bool shift = (state & Gdk::ModifierType::SHIFT_MASK) != Gdk::ModifierType{};
+    if (!ctrl || shift) return false;
+    if (keyval != GDK_KEY_V && keyval != GDK_KEY_v) return false;
+
+    if (!alive_) return false;
+    auto display = Gdk::Display::get_default();
+    if (!display) return false;
+    auto clip = display->get_clipboard();
+    if (!clip) return false;
+
+    // Only intercept Ctrl+V when the clipboard actually advertises an image.
+    // IMPORTANT: this key controller runs in CAPTURE phase BEFORE GtkSourceView's
+    // native paste handler. If no image is present we MUST return false so the
+    // event keeps propagating and normal text paste works unchanged.
+    auto formats = clip->get_formats();
+    if (!formats) return false;
+    const bool has_image = formats->contain_gtype(GDK_TYPE_TEXTURE) ||
+                           formats->contain_mime_type("image/png") ||
+                           formats->contain_mime_type("image/jpeg");
+
+    if (!has_image) return false;
+
+    // Read image from clipboard as texture (PNG/any format GTK supports)
+    clip->read_texture_async([this, clip](Glib::RefPtr<Gio::AsyncResult>& result) {
+        try {
+            if (!alive_) return;
+            auto texture = clip->read_texture_finish(result);
+            if (!texture) return;
+            // Save texture to PNG bytes via std::filesystem
+            std::filesystem::path img_dir = std::filesystem::path(Glib::get_home_dir()) / "remin-image";
+            std::error_code ec;
+            std::filesystem::create_directories(img_dir, ec);
+            std::filesystem::path img_path = img_dir / ("remin-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".png");
+            gdk_texture_save_to_png(texture->gobj(), img_path.c_str());
+            if (std::filesystem::exists(img_path)) {
+                std::ifstream ifs(img_path, std::ios::binary);
+                if (ifs) {
+                    std::string png((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+                    if (on_image_paste_) on_image_paste_(png);
+                }
+            }
+        } catch (...) {
+            // Ignore errors (no image on clipboard, etc.)
+        }
+    });
+
+    return true; // consumed
+}
+
 void NoteEditor::show_find(bool) {}
 
 void NoteEditor::clear_find_replace_entries() {}
@@ -627,6 +690,16 @@ Glib::RefPtr<Gtk::Adjustment> NoteEditor::vadjustment() const {
 
 void NoteEditor::focus_editor() {
     gtk_widget_grab_focus(GTK_WIDGET(source_view_));
+}
+
+void NoteEditor::insert_text_at_cursor(const Glib::ustring& text) {
+    if (!alive_ || !source_buffer_ || !GTK_IS_TEXT_BUFFER(source_buffer_)) return;
+    GtkTextBuffer* buffer = GTK_TEXT_BUFFER(source_buffer_);
+    GtkTextIter iter;
+    gtk_text_buffer_get_iter_at_mark(buffer, &iter,
+                                     gtk_text_buffer_get_insert(buffer));
+    gtk_text_buffer_insert(buffer, &iter, text.c_str(),
+                           static_cast<int>(text.length()));
 }
 
 } // namespace remin::gui

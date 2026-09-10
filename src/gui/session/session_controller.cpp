@@ -22,6 +22,7 @@ constexpr const char* kColorProfileBgKey = "settings:color-profile-bg";
 constexpr const char* kTerminalFgKey = "settings:terminal-fg";
 constexpr const char* kTerminalBgKey = "settings:terminal-bg";
 constexpr const char* kWindowHistoryKey = "settings:window-history";
+constexpr const char* kMarkdownCssKey = "settings:markdown-css";
 // Reserved, prefixed ids in the shared blob store must be mutated safely; the
 // blob interface is keyed by PaneId, so we wrap metadata strings in PaneId.
 remin::core::PaneId meta_id(const std::string& key) {
@@ -305,6 +306,16 @@ bool SessionController::persist_open_windows() const {
 void SessionController::set_persist_open_windows(bool enabled) {
     if (!storage_) return;
     storage_->store_scrollback(meta_id(kPersistOpenWindowsKey), enabled ? "1" : "0");
+}
+
+std::string SessionController::markdown_css_path() const {
+    if (!storage_) return "";
+    return storage_->load_scrollback(meta_id(kMarkdownCssKey));
+}
+
+void SessionController::set_markdown_css_path(const std::string& path) {
+    if (!storage_) return;
+    storage_->store_scrollback(meta_id(kMarkdownCssKey), path);
 }
 
 SessionController::UnsavedClose SessionController::unsaved_close_behavior() const {

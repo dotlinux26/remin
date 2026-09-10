@@ -18,12 +18,15 @@ private:
     void setup_terminal_page();
     void setup_editor_page();
     void setup_behavior_page();
+    void setup_markdown_page();
 
     bool on_theme_changed(bool dark);
     bool on_autoreload_changed(bool enabled);
     void on_color_foreground_changed();
     void on_color_background_changed();
     void save_color_profile();
+    void on_markdown_css_changed();
+    void update_markdown_css_label();
 
     SessionController* controller_{nullptr};
 
@@ -40,6 +43,11 @@ private:
     Gtk::Switch* autoreload_switch_{nullptr};
     Gtk::DropDown* unsaved_close_drop_{nullptr};
     Gtk::Switch* persist_open_windows_switch_{nullptr};
+
+    // Markdown page
+    Gtk::Label* markdown_css_path_label_{nullptr};
+    Gtk::Button* markdown_css_choose_btn_{nullptr};
+    Gtk::Button* markdown_css_reset_btn_{nullptr};
 };
 
 } // namespace remin::gui

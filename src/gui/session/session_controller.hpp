@@ -121,6 +121,10 @@ public:
     [[nodiscard]] bool persist_open_windows() const;
     void set_persist_open_windows(bool enabled);
 
+    // Markdown: user stylesheet path
+    [[nodiscard]] std::string markdown_css_path() const;
+    void set_markdown_css_path(const std::string& path);
+
     // Setting: Window History — capture closed windows for later restore.
     //  - ON: when a window is closed, capture its final state + label + timestamp
     //     into the closed-window history (can be restored later via History panel).

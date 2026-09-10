@@ -74,6 +74,12 @@ public:
     }
     void delete_closed_window(const WorkspaceId&, const SnapshotId&) override {}
 
+    // History annotations (stubs)
+    void store_history_annotation(const WorkspaceId&, const HistoryAnnotation&) override {}
+    std::optional<HistoryAnnotation> load_history_annotation(const WorkspaceId&, const std::string&) override { return std::nullopt; }
+    std::vector<HistoryAnnotation> list_history_annotations(const WorkspaceId&, const std::string&) override { return {}; }
+    void delete_history_annotation(const WorkspaceId&, const std::string&) override {}
+
     bool checkpoint(const WorkspaceId& ws_id, const json& workspace_state, int, int64_t, const std::string&,
                     const std::vector<std::pair<PaneId, std::vector<std::uint8_t>>>&) override {
         // Save workspace for open_workspace to find
