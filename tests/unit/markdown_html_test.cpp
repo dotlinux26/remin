@@ -80,6 +80,20 @@ int main() {
         std::string html = render_html_body(ast);
         check_contains(html, "<nav class=\"toc\">", "toc nav emitted");
         check_contains(html, "href=\"#intro\"", "toc link to intro");
+        check_contains(html, "class=\"toc-row\"", "toc row has leader hook");
+    }
+
+    // --- raw HTML is passed through verbatim (HTML export) ---
+    {
+        auto ast = MarkdownAst::parse(
+            "Paragraph with <span style=\"color:red\">red</span> text.\n\n"
+            "<div style=\"page-break-after: always;\"></div>\n"
+            "After");
+        std::string html = render_html_body(ast);
+        check_contains(html, "<span style=\"color:red\">red</span>",
+                       "inline html span passed through");
+        check_contains(html, "<div style=\"page-break-after: always;\"></div>",
+                       "html block passed through");
     }
 
     if (fails == 0) {

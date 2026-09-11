@@ -121,3 +121,16 @@ li { margin: 0.2em 0; }
 
 .task-list-item::marker { content: "☐ "; }
 .task-list-item[data-checked]::marker { content: "☑ "; }
+
+/* TOC: flex row so the leader dots fill the remaining width. */
+.toc-row { display: flex; align-items: baseline; }
+.toc-row a { flex-shrink: 0; }
+.toc-row::after {
+  content: "";
+  flex: 1 1 auto;
+  margin-left: 0.5em;
+  border-bottom: 1px dotted var(--text-muted);
+  transform: translateY(-2px);
+}
+.toc ol { list-style: none; padding-left: 1.2em; }
+.toc .toc-title { font-weight: 600; margin-bottom: 0.4em; }

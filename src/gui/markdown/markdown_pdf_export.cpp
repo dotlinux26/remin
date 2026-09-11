@@ -6,6 +6,7 @@
 #include <cairomm/cairomm.h>
 
 #include <ctime>
+#include <map>
 #include <sstream>
 #include <vector>
 
@@ -75,6 +76,58 @@ std::string expand_tokens(const std::string& in, int page, int pages,
 
 } // namespace
 
+std::vector<PdfPageSlice> paginate_blocks(const std::vector<Block>& blocks,
+                                          double page_height_pt) {
+    std::vector<PdfPageSlice> pages;
+    const std::size_t n = blocks.size();
+    std::size_t cursor = 0;
+    while (cursor < n) {
+        // Skip leading page-break markers (they only separate pages).
+        while (cursor < n && blocks[cursor].kind == Block::Kind::PageBreak)
+            ++cursor;
+        if (cursor >= n) break;
+
+        std::size_t last = cursor;
+        const double page_top = blocks[cursor].y;
+        std::size_t candidate = cursor;
+        while (candidate < n) {
+            if (blocks[candidate].kind == Block::Kind::PageBreak)
+                break;  // hard boundary: end this page before the marker
+            const Block& b = blocks[candidate];
+            const double rel_top = b.y - page_top;
+            const double rel_bottom = rel_top + b.height;
+            if (rel_bottom > page_height_pt) {
+                if (candidate == cursor) {
+                    // block taller than a full page: force it in (clipped) once.
+                    last = candidate;
+                    candidate = n;
+                    break;
+                }
+                break;
+            }
+            last = candidate;
+            ++candidate;
+            // heading keep-with-next: require the next block to fit too
+            if (candidate < n && blocks[candidate].kind != Block::Kind::PageBreak &&
+                b.kind == Block::Kind::Heading) {
+                const Block& nb = blocks[candidate];
+                const double nb_rel_top = nb.y - page_top;
+                if (nb_rel_top + nb.height > page_height_pt) {
+                    // Next block doesn't fit: end this page *before* the
+                    // heading so heading + content move together.
+                    if (last > cursor) --last;
+                    break;
+                }
+            }
+        }
+        pages.push_back(PdfPageSlice{cursor, last, page_top});
+        cursor = last + 1;  // next page starts after this page's last block
+    }
+    if (pages.empty())
+        pages.push_back(PdfPageSlice{0, 0, 0.0});
+    return pages;
+}
+
 bool export_pdf(const MarkdownAst& ast, const StyleSheet& style,
                 const ImageResolver& resolve_image,
                 const std::filesystem::path& out_path,
@@ -91,60 +144,40 @@ bool export_pdf(const MarkdownAst& ast, const StyleSheet& style,
     const double content_top = margin;
     const double content_bottom = page_h - margin;
 
-    const LayoutResult layout = layout_document(ast, style, content_w, resolve_image);
+    // ---- layout + paginate (two-pass so the TOC can show page numbers) -----
+    // Pass 1: layout without page numbers, paginate, then map every heading
+    // anchor to the page it lands on. If the document has a TOC, re-layout
+    // with those pages filled into the TOC rows and paginate again.
+    auto layout = layout_document(ast, style, content_w, resolve_image);
     if (layout.blocks.empty()) return false;
+    auto pages = paginate_blocks(layout.blocks, content_bottom - content_top);
 
-    // ---- paginate into page slices ----------------------------------------
-    struct PageSlice {
-        std::size_t first;
-        std::size_t last;       // included index
-        double start_y;
-    };
-    std::vector<PageSlice> pages;
-    std::size_t cursor = 0;
-    double page_top = layout.blocks[0].y;  // absolute y of this page's first block
-    while (cursor < layout.blocks.size()) {
-        std::size_t last = cursor;
-        const std::size_t n = layout.blocks.size();
-        // find the longest consecutive run fitting the page
-        std::size_t candidate = cursor;
-        while (candidate < n) {
-            const Block& b = layout.blocks[candidate];
-            const double rel_top = b.y - page_top;
-            const double rel_bottom = rel_top + b.height;
-            if (rel_bottom > content_bottom - content_top) {
-                if (candidate == cursor) {
-                    // block taller than a full page: force it in (clipped) once.
-                    last = candidate;
-                    candidate = n;
-                    break;
-                }
-                break;
-            }
-            last = candidate;
-            ++candidate;
-            // heading keep-with-next: require the next block to fit too
-            if (candidate < n && layout.block_keeps_with_next(b)) {
-                const Block& nb = layout.blocks[candidate];
-                const double nb_rel_top = nb.y - page_top;
-                if (nb_rel_top + nb.height > content_bottom - content_top) {
-                    // Next block doesn't fit: end this page *before* the
-                    // heading so heading + content move together.
-                    if (last > cursor) --last;
-                    break;
-                }
+    bool has_toc = false;
+    for (const Block& b : layout.blocks)
+        if (b.kind == Block::Kind::TocRow) { has_toc = true; break; }
+    if (has_toc) {
+        std::map<std::string, int> anchor_page;
+        for (std::size_t pi = 0; pi < pages.size(); ++pi) {
+            const PdfPageSlice& slice = pages[pi];
+            for (std::size_t i = slice.first; i <= slice.last && i < layout.blocks.size(); ++i) {
+                const Block& b = layout.blocks[i];
+                if (b.kind != Block::Kind::Heading) continue;
+                if (b.link_href.empty() || b.link_href[0] != '#') continue;
+                anchor_page[b.link_href.substr(1)] = static_cast<int>(pi) + 1;
             }
         }
-        pages.push_back(PageSlice{cursor, last, page_top});
-        // advance
-        std::size_t next = last + 1;
-        if (next < n) {
-            page_top = layout.blocks[next].y;
+        if (!anchor_page.empty()) {
+            const TocPageResolver resolver =
+                [&anchor_page](const std::string& a) -> std::optional<int> {
+                    const auto it = anchor_page.find(a);
+                    if (it == anchor_page.end()) return std::nullopt;
+                    return it->second;
+                };
+            layout = layout_document(ast, style, content_w, resolve_image, resolver);
+            if (layout.blocks.empty()) return false;
+            pages = paginate_blocks(layout.blocks, content_bottom - content_top);
         }
-        cursor = next;
     }
-    if (pages.empty())
-        pages.push_back(PageSlice{0, 0, 0.0});
 
     const int total_pages = static_cast<int>(pages.size());
 
@@ -159,7 +192,7 @@ bool export_pdf(const MarkdownAst& ast, const StyleSheet& style,
     auto cr = Cairo::Context::create(surface);
 
     for (int pi = 0; pi < total_pages; ++pi) {
-        const PageSlice& slice = pages[static_cast<std::size_t>(pi)];
+        const PdfPageSlice& slice = pages[static_cast<std::size_t>(pi)];
         // content
         cr->save();
         cr->translate(content_left, -(slice.start_y - content_top));

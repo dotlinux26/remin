@@ -16,7 +16,7 @@ enum class NodeType {
     Paragraph,
     BlockQuote,
     CodeBlock,       // text = verbatim body; info = fence language
-    HtmlBlock,       // raw HTML block (not rendered)
+    HtmlBlock,       // raw HTML block (emitted raw in HTML; page-break markers -> PageBreak block)
     ThematicBreak,
     List,            // ordered flag; start in `start`; tight in `tight`
     ListItem,        // task/checked in `task`/`checked`
@@ -32,7 +32,7 @@ enum class NodeType {
     Text,            // text = content
     SoftBreak,
     HardBreak,
-    HtmlSpan,        // raw inline HTML (not rendered)
+    HtmlSpan,        // raw inline HTML (emitted raw in HTML)
     Toc,             // [[TOC]] marker — expanded by renderers
 };
 

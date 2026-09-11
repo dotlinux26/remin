@@ -107,9 +107,9 @@ void render_inline(const Node& n, std::string& out, const RenderContext& ctx) {
             out += "<br>\n";
             return;
         case NodeType::HtmlSpan:
-        case NodeType::HtmlBlock:
-            // Raw HTML is deliberately not emitted (kept safe, matching the
-            // old Pango preview that dropped it).
+            // Raw inline HTML is passed through verbatim, matching CommonMark
+            // / GitHub behavior (the browser applies the embedded CSS).
+            out += n.text;
             return;
         default:
             for (const Node& c : n.children) render_inline(c, out, ctx);
@@ -177,7 +177,12 @@ void render_block(const Node& n, std::string& out, RenderContext& ctx) {
             out += "</code></pre>\n";
             return;
         case NodeType::HtmlBlock:
-            return; // dropped for safety
+            // Raw HTML blocks are emitted verbatim so embedded CSS (e.g. a
+            // page-break div) reaches the browser. Block elements render as
+            // siblings of the surrounding blocks.
+            out += n.text;
+            if (out.empty() || out.back() != '\n') out += '\n';
+            return;
         case NodeType::ThematicBreak:
             out += "<hr>\n";
             return;
@@ -279,8 +284,8 @@ void emit_toc(const std::vector<TocNode>& nodes, int id, std::vector<int>& count
         if (d) num += ".";
         num += std::to_string(counters[d]);
     }
-    out << "<li><a href=\"#" << esc_attr(n.h->anchor) << "\">"
-        << esc_text(num + ". " + n.h->text) << "</a>";
+    out << "<li><span class=\"toc-row\"><a href=\"#" << esc_attr(n.h->anchor) << "\">"
+        << esc_text(num + ". " + n.h->text) << "</a></span>";
     if (!n.children.empty()) {
         out << "<ol>";
         for (int c : n.children) emit_toc(nodes, c, counters, depth + 1, out);

@@ -114,6 +114,100 @@ int main() {
         check(saw_toc, "toc row with anchor");
     }
 
+    // --- is_page_break_marker: block-level elements with break CSS ---
+    {
+        check(is_page_break_marker("<div style=\"page-break-after: always;\"></div>"),
+              "page-break-after always");
+        check(is_page_break_marker("<div style=\"break-after: page;\"></div>"),
+              "break-after page");
+        check(is_page_break_marker("<section style=\"page-break-before: always\"></section>"),
+              "page-break-before always");
+        check(is_page_break_marker("<p style=\"break-before: page\">.</p>"),
+              "break-before page");
+        check(!is_page_break_marker("<div style=\"color: red;\"></div>"),
+              "non-break css is not a marker");
+        check(!is_page_break_marker("<div></div>"), "plain div not a marker");
+        check(!is_page_break_marker("<table></table>"), "unknown tag not a marker");
+        check(!is_page_break_marker("not html at all"), "plain text not a marker");
+        check(!is_page_break_marker(""), "empty not a marker");
+    }
+
+    // --- HtmlBlock page-break markers become PageBreak blocks, other HTML ---
+    // --- blocks are ignored (never become visible flow content) ---
+    {
+        const auto ast = MarkdownAst::parse(
+            "Before\n\n"
+            "<div style=\"page-break-after: always;\"></div>\n\n"
+            "After\n\n"
+            "<div class=\"custom\">ignored</div>\n");
+        const auto r = layout_document(ast, style, content_w, {});
+        bool saw_break = false;
+        bool saw_custom_html = false;
+        for (const auto& b : r.blocks) {
+            if (b.kind == Block::Kind::PageBreak) saw_break = true;
+            for (const auto& run : b.run)
+                if (run.text.find("ignored") != std::string::npos) saw_custom_html = true;
+        }
+        check(saw_break, "page-break marker produced a PageBreak block");
+        check(!saw_custom_html, "non-break raw html is not rendered as flow text");
+    }
+
+    // --- TOC rows receive page numbers via the resolver; title width is ---
+    // --- not stolen by the trailing page-number run ---
+    {
+        const auto ast = MarkdownAst::parse("[[TOC]]\n\n# Alpha\n\n## Beta\n");
+        const TocPageResolver resolver = [](const std::string& a) -> std::optional<int> {
+            if (a == "alpha") return 2;
+            if (a == "beta") return 5;
+            return std::nullopt;
+        };
+        const auto r = layout_document(ast, style, content_w, {}, resolver);
+        bool alpha_ok = false, beta_ok = false;
+        for (const auto& b : r.blocks) {
+            if (b.kind != Block::Kind::TocRow) continue;
+            if (b.toc_anchor == "alpha" && b.toc_has_page && b.toc_page == 2) alpha_ok = true;
+            if (b.toc_anchor == "beta" && b.toc_has_page && b.toc_page == 5) beta_ok = true;
+        }
+        check(alpha_ok, "toc alpha got page 2");
+        check(beta_ok, "toc beta got page 5");
+    }
+
+    // --- paginate_blocks: PageBreak forces a hard boundary and is never ---
+    // --- part of any slice (no empty pages) ---
+    {
+        const auto ast = MarkdownAst::parse(
+            "# A\n\nbody one\n\n"
+            "<div style=\"page-break-after: always;\"></div>\n\n"
+            "# B\n\nbody two\n\n"
+            "<div style=\"page-break-after: always;\"></div>\n\n"
+            "# C\n\nbody three\n");
+        const auto r = layout_document(ast, style, content_w, {});
+        const double page_h = 120.0;  // tiny page: forces multiple pages anyway
+        const auto pages = paginate_blocks(r.blocks, page_h);
+        check(pages.size() >= 2, "page breaks produce multiple pages");
+
+        // markers must not appear inside any slice
+        bool marker_in_slice = false;
+        for (const auto& p : pages)
+            for (std::size_t i = p.first; i <= p.last && i < r.blocks.size(); ++i)
+                if (r.blocks[i].kind == Block::Kind::PageBreak) marker_in_slice = true;
+        check(!marker_in_slice, "page-break markers excluded from all slices");
+    }
+
+    // --- paginate_blocks: leading PageBreak does not create an empty page ---
+    {
+        const auto ast = MarkdownAst::parse(
+            "<div style=\"break-after: page;\"></div>\n\n"
+            "# Only\n");
+        const auto r = layout_document(ast, style, content_w, {});
+        const auto pages = paginate_blocks(r.blocks, 500.0);
+        check(pages.size() == 1, "leading marker does not create an empty page");
+        check(pages[0].first <= pages[0].last &&
+                  pages[0].last < r.blocks.size() &&
+                  r.blocks[pages[0].first].kind != Block::Kind::PageBreak,
+              "first slice starts on real content");
+    }
+
     // --- export_pdf writes a real PDF (magic header + pages) ---
     {
         const auto ast = MarkdownAst::parse(

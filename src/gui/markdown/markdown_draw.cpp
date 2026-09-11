@@ -194,6 +194,22 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                 cr->restore();
                 continue;
             }
+            case Block::Kind::PageBreak: {
+                // A subtle dashed line marking a forced page break (preview).
+                // The PDF paginator never feeds these blocks to the renderer.
+                const double yc = y + b.height / 2.0;
+                cr->save();
+                Color c = b.color;
+                c.a *= 0.40f;
+                set_color(cr, c);
+                cr->set_line_width(1.0);
+                cr->set_dash(std::vector<double>{3.0, 3.0}, 0.0);
+                cr->move_to(0.0, yc);
+                cr->line_to(b.content_width, yc);
+                cr->stroke();
+                cr->restore();
+                continue;
+            }
             default:
                 break;  // text blocks below
         }
@@ -233,6 +249,52 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
             text_x = b.toc_indent;
             text_w = b.content_width - b.toc_indent;
             wrap_w = text_w;
+            if (b.toc_has_page && b.run.size() >= 2) {
+                // PDF TOC row: title + dotted leader + right-aligned page
+                // number. The page number lives in the last run; everything
+                // before it is the clickable title.
+                const std::size_t title_n = b.run.size() - 1;
+                const std::vector<StyledText> title_runs(
+                    b.run.begin(), b.run.begin() + static_cast<std::ptrdiff_t>(title_n));
+                const auto tm = measure_runs(title_runs, wrap_w, style);
+                auto title_layout = Pango::Layout::create(cr);
+                apply_styled_runs(*title_layout, title_runs, wrap_w, style);
+                cr->save();
+                cr->move_to(text_x, text_y);
+                title_layout->show_in_cairo_context(cr);
+                cr->restore();
+
+                // Right edge of the content column (b.content_width already
+                // excludes toc_indent, so add it back).
+                const double page_right = b.content_width + b.toc_indent;
+                const double pn_w = std::max(0.0, b.page_num_w);
+                const double gap = 6.0;
+                const double leader_right = page_right - pn_w - gap;
+                const double leader_left = text_x + tm.width + gap;
+                if (leader_right > leader_left + 4.0) {
+                    const double leader_y = y + b.baseline - 0.6;
+                    cr->save();
+                    Color leader_c = style.text_color;
+                    leader_c.a *= 0.35f;
+                    set_color(cr, leader_c);
+                    cr->set_line_width(0.9);
+                    cr->set_dash(std::vector<double>{1.4, 3.4}, 0.0);
+                    cr->move_to(leader_left, leader_y);
+                    cr->line_to(leader_right, leader_y);
+                    cr->stroke();
+                    cr->restore();
+                }
+
+                const StyledText pn_run = b.run.back();
+                const auto pnm = measure_runs(std::vector<StyledText>{pn_run}, -1.0, style);
+                auto pn_layout = Pango::Layout::create(cr);
+                apply_styled_runs(*pn_layout, std::vector<StyledText>{pn_run}, -1.0, style);
+                cr->save();
+                cr->move_to(page_right - pnm.width, text_y);
+                pn_layout->show_in_cairo_context(cr);
+                cr->restore();
+                continue;
+            }
         }
 
         if (b.run.empty() || wrap_w <= 0.0) continue;

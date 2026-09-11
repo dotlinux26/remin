@@ -37,6 +37,7 @@ struct Block {
         P, Heading, Quote, Code,
         UlItem, OlItem, TaskItem,
         Table, Hr, Image, TocRow,
+        PageBreak,               // hard page boundary in exported documents
     };
     Kind kind = Kind::P;
 
@@ -90,6 +91,9 @@ struct Block {
     std::string toc_number;
     std::string toc_text;
     std::string toc_anchor;
+    bool toc_has_page = false;   // PDF: page number shown in the leader
+    int toc_page = 0;
+    double page_num_w = 0.0;     // measured width of the trailing page number
 
     // Anchor for hyperlink hit-testing
     double link_x = 0, link_y = 0, link_w = 0, link_h = 0;
@@ -109,12 +113,23 @@ struct LayoutResult {
 // Resolves an image reference to a physical path (may be empty for remote srcs).
 using ImageResolver = std::function<std::optional<std::filesystem::path>(const std::string&)>;
 
+// Resolves a heading anchor to its page number (1-based) for the PDF TOC.
+using TocPageResolver = std::function<std::optional<int>(const std::string& anchor)>;
+
+// True if a raw HTML block source is a page-break marker, i.e. a block-level
+// element whose inline style requests a hard break:
+//   <div style="page-break-after: always"></div>
+//   <div style="break-after: page"></div>
+//   <section style="page-break-before: always"></section>
+[[nodiscard]] bool is_page_break_marker(const std::string& html_block_source);
+
 // Layout the whole document into a continuous flow. `note_dir` unused in favor
 // of the explicit resolver. `page_height` unused here (pagination lives in the
 // exporter so preview/layout stay one shared code path).
 [[nodiscard]] LayoutResult layout_document(const MarkdownAst& ast,
                                            const StyleSheet& style,
                                            double content_width_pt,
-                                           const ImageResolver& resolve_image);
+                                           const ImageResolver& resolve_image,
+                                           const TocPageResolver& toc_pages = {});
 
 } // namespace remin::markdown

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 
 namespace remin::markdown {
 
@@ -224,9 +225,47 @@ void build_cell_run(const Node& cell, const StyleSheet& style, std::vector<Style
 
 } // namespace
 
+bool is_page_break_marker(const std::string& html_block_source) {
+    auto is_space = [](char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    };
+    std::string s = html_block_source;
+    while (!s.empty() && is_space(s.front())) s.erase(s.begin());
+    while (!s.empty() && is_space(s.back())) s.pop_back();
+    if (s.empty()) return false;
+    if (s.front() != '<') return false;
+
+    // Only block-level elements that carry an inline style attribute.
+    const std::string lower = [&] {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return out;
+    }();
+
+    const bool known_tag =
+        lower.rfind("<div", 0) == 0 || lower.rfind("<section", 0) == 0 ||
+        lower.rfind("<p", 0) == 0 || lower.rfind("<span", 0) == 0;
+    if (!known_tag) return false;
+
+    const bool break_before =
+        lower.find("page-break-before:") != std::string::npos ||
+        lower.find("break-before:") != std::string::npos;
+    const bool break_after =
+        lower.find("page-break-after:") != std::string::npos ||
+        lower.find("break-after:") != std::string::npos;
+    if (!break_before && !break_after) return false;
+
+    const bool wants_pretty =
+        lower.find(": always") != std::string::npos ||
+        lower.find(": page") != std::string::npos;
+    return wants_pretty;
+}
+
 LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                              double content_width_pt,
-                             const ImageResolver& resolve_image) {
+                             const ImageResolver& resolve_image,
+                             const TocPageResolver& toc_pages) {
     LayoutResult res;
     std::vector<Block>& blocks = res.blocks;
 
@@ -605,9 +644,39 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                     txt.color = style.color_for(StyleSelector::TocLink);
                     txt.underline = false;
                     runs.push_back(txt);
+// Optional trailing page number (PDF two-pass layout).
+                    // Measured separately so the title+leader wrap width is
+                    // unaffected; the draw layer right-aligns this last run.
+                    double page_num_w = 0.0;
+                    if (toc_pages) {
+                        if (const auto pg = toc_pages(h.anchor)) {
+                            b.toc_has_page = true;
+                            b.toc_page = *pg;
+                            StyledText pg_run;
+                            pg_run.text = std::to_string(*pg);
+                            pg_run.font_family = style.base_font;
+                            pg_run.size_pt = style.base_font_pt;
+                            pg_run.color = style.text_color;
+                            pg_run.underline = false;
+                            runs.push_back(std::move(pg_run));
+                        }
+                    }
+                    // Measure the title runs (all but the last page-number run)
+                    // at the full available width; the page number itself is
+                    // tiny so it must never steal wrap width from the title.
+                    const std::size_t title_n = toc_pages && b.toc_has_page
+                                                    ? runs.size() - 1 : runs.size();
+                    std::vector<StyledText> title_runs(runs.begin(),
+                                                       runs.begin() + static_cast<std::ptrdiff_t>(title_n));
+                    double avail = content_width_pt - b.toc_indent;
+                    PangoMetrics m;
+                    if (!title_runs.empty())
+                        m = measure_runs(title_runs, avail, style);
+                    if (b.toc_has_page)
+                        page_num_w = measure_runs(
+                            std::vector<StyledText>{runs.back()}, -1.0, style).width;
+                    b.page_num_w = page_num_w;
                     b.run = std::move(runs);
-                    const double avail = content_width_pt - b.toc_indent;
-                    const auto m = measure_runs(b.run, avail, style);
                     b.content_width = avail;
                     b.height = m.height;
                     b.baseline = m.baseline_pt;
@@ -618,6 +687,22 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                 return;
             }
             case NodeType::HtmlBlock:
+                if (is_page_break_marker(n.text)) {
+                    // A page-break marker is a small, nearly-invisible block:
+                    // the preview draws a subtle dashed line on it, the PDF
+                    // paginator treats it as a hard page boundary. It must
+                    // never push content far apart in the continuous preview.
+                    Block b;
+                    b.kind = Block::Kind::PageBreak;
+                    b.margin_before = 6.0;
+                    b.margin_after = 6.0;
+                    b.height = 2.0;
+                    b.content_width = content_width_pt;
+                    b.color = style.text_color;
+                    b.y = y + b.margin_before;
+                    y = b.y + b.height + b.margin_after;
+                    push_block(std::move(b));
+                }
                 return;
             default:
                 for (const Node& c : n.children) emit_node(c);
