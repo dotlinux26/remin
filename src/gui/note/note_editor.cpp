@@ -681,7 +681,12 @@ Glib::RefPtr<Gtk::TextBuffer> NoteEditor::buffer() const {
     if (!alive_ || !source_buffer_) return {};
     // Check if the buffer is still a valid GtkTextBuffer
     if (!GTK_IS_TEXT_BUFFER(source_buffer_)) return {};
-    return Glib::wrap(GTK_TEXT_BUFFER(source_buffer_));
+    // take_copy=true so the returned RefPtr owns a reference of its own.
+    // Glib::wrap(ptr, false) transfers ownership of an EXISTING reference
+    // instead, so every returned-and-dropped RefPtr would decrement a
+    // reference we (and GtkTextView) still need -> premature free -> the
+    // GTK_IS_TEXT_BUFFER() assertion flood and SIGSEGV on redraw.
+    return Glib::wrap(GTK_TEXT_BUFFER(source_buffer_), true);
 }
 
 Glib::RefPtr<Gtk::Adjustment> NoteEditor::vadjustment() const {

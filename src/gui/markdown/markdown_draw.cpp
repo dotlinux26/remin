@@ -2,6 +2,7 @@
 
 #include "gui/markdown/markdown_pango.hpp"
 
+#include <cairo/cairo.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
 #include <algorithm>
@@ -11,52 +12,125 @@ namespace remin::markdown {
 
 namespace {
 
+// Copy a GdkPixbuf into an ARGB32 Cairo image surface at its current size.
+// The pixel channel order (RGBA on disk) is swapped to Cairo's BGRA with
+// premultiplied alpha so `paint()` composes correctly.
+Cairo::RefPtr<Cairo::ImageSurface> pixbuf_to_surface(GdkPixbuf* pb) {
+    const int sw = gdk_pixbuf_get_width(pb);
+    const int sh = gdk_pixbuf_get_height(pb);
+    if (sw <= 0 || sh <= 0) return {};
+    const int rowstride = gdk_pixbuf_get_rowstride(pb);
+    const int nch = gdk_pixbuf_get_n_channels(pb);
+    const bool has_alpha = gdk_pixbuf_get_has_alpha(pb);
+
+    auto surface = Cairo::ImageSurface::create(Cairo::Surface::Format::ARGB32, sw, sh);
+    if (!surface->get_data()) return {};
+    const guint8* src = gdk_pixbuf_get_pixels(pb);
+    guint8* dst = surface->get_data();
+    const int dstride = surface->get_stride();
+    for (int y2 = 0; y2 < sh; ++y2) {
+        const guint8* row = src + y2 * rowstride;
+        guint8* outrow = dst + y2 * dstride;
+        for (int x2 = 0; x2 < sw; ++x2) {
+            const guint8* p = row + x2 * nch;
+            guint8* o = outrow + x2 * 4;
+            if (has_alpha) {
+                const guint8 a = p[3];
+                o[0] = static_cast<guint8>((static_cast<unsigned>(p[2]) * a) / 255);  // b
+                o[1] = static_cast<guint8>((static_cast<unsigned>(p[1]) * a) / 255);  // g
+                o[2] = static_cast<guint8>((static_cast<unsigned>(p[0]) * a) / 255);  // r
+                o[3] = a;
+            } else {
+                o[0] = p[2];
+                o[1] = p[1];
+                o[2] = p[0];
+                o[3] = 0xFF;
+            }
+        }
+    }
+    surface->mark_dirty();
+    return surface;
+}
+
 // Draw a pixbuf at (x,y) scaled to (w,h) with premultiplied alpha for Cairo.
+// On a PDF target the image keeps its native resolution and Cairo scales the
+// painting with a transform, so the PDF embeds the full-resolution pixels
+// (crisp when zoomed — same trade-off as the HTML `<img src>`). The on-screen
+// path keeps the old behavior: pre-scale bilinear, blit 1:1.
 void draw_pixbuf(const Cairo::RefPtr<Cairo::Context>& cr, GdkPixbuf* source,
                  double x, double y, double w, double h) {
     if (!source) return;
-    GdkPixbuf* scaled = gdk_pixbuf_scale_simple(
-        source, static_cast<int>(std::max(1.0, w)), static_cast<int>(std::max(1.0, h)),
-        GDK_INTERP_BILINEAR);
-    if (!scaled) return;
-    const int sw = gdk_pixbuf_get_width(scaled);
-    const int sh = gdk_pixbuf_get_height(scaled);
-    const int rowstride = gdk_pixbuf_get_rowstride(scaled);
-    const int nch = gdk_pixbuf_get_n_channels(scaled);
-    const bool has_alpha = gdk_pixbuf_get_has_alpha(scaled);
+    const bool pdf_target =
+        cr->get_target() && cr->get_target()->get_type() == Cairo::Surface::Type::PDF;
 
-    auto surface = Cairo::ImageSurface::create(Cairo::Surface::Format::ARGB32, sw, sh);
-    if (surface->get_data()) {
-        const guint8* src = gdk_pixbuf_get_pixels(scaled);
-        guint8* dst = surface->get_data();
-        const int dstride = surface->get_stride();
-        for (int y2 = 0; y2 < sh; ++y2) {
-            const guint8* row = src + y2 * rowstride;
-            guint8* outrow = dst + y2 * dstride;
-            for (int x2 = 0; x2 < sw; ++x2) {
-                const guint8* p = row + x2 * nch;
-                guint8* o = outrow + x2 * 4;
-                if (has_alpha) {
-                    const guint8 a = p[3];
-                    o[0] = static_cast<guint8>((static_cast<unsigned>(p[2]) * a) / 255);  // b
-                    o[1] = static_cast<guint8>((static_cast<unsigned>(p[1]) * a) / 255);  // g
-                    o[2] = static_cast<guint8>((static_cast<unsigned>(p[0]) * a) / 255);  // r
-                    o[3] = a;
-                } else {
-                    o[0] = p[2];
-                    o[1] = p[1];
-                    o[2] = p[0];
-                    o[3] = 0xFF;
-                }
-            }
-        }
-        surface->mark_dirty();
+    if (!pdf_target) {
+        GdkPixbuf* scaled = gdk_pixbuf_scale_simple(
+            source, static_cast<int>(std::max(1.0, w)),
+            static_cast<int>(std::max(1.0, h)), GDK_INTERP_BILINEAR);
+        if (!scaled) return;
+        auto surface = pixbuf_to_surface(scaled);
+        g_object_unref(scaled);
+        if (!surface) return;
+        cr->save();
+        cr->set_source(surface, x, y);
+        cr->paint();
+        cr->restore();
+        return;
     }
+
+    auto surface = pixbuf_to_surface(source);
+    if (!surface) return;
+    const double nw = gdk_pixbuf_get_width(source);
+    const double nh = gdk_pixbuf_get_height(source);
+    if (nw <= 0.0 || nh <= 0.0) return;
     cr->save();
-    cr->set_source(surface, x, y);
+    cr->translate(x, y);
+    cr->scale(w / nw, h / nh);
+    cr->set_source(surface, 0.0, 0.0);
     cr->paint();
     cr->restore();
-    g_object_unref(scaled);
+}
+
+// PDF named-link/destination helpers (cairo's C tag API — cairomm does not
+// wrap cairo_tag_begin/end). Attribute strings must survive only for the
+// duration of the call; begin/end bracket the drawing ops that form the
+// clickable/target rectangle.
+void tag_begin(const Cairo::RefPtr<Cairo::Context>& cr, const std::string& name,
+               const std::string& attrs) {
+    cairo_tag_begin(cr->cobj(), name.c_str(), attrs.c_str());
+}
+void tag_end(const Cairo::RefPtr<Cairo::Context>& cr, const std::string& name) {
+    cairo_tag_end(cr->cobj(), name.c_str());
+}
+
+// The anchor of a block whose href is an internal "#fragment"; empty otherwise.
+std::string internal_anchor(const Block& b) {
+    if (b.link_href.size() > 1 && b.link_href[0] == '#') return b.link_href.substr(1);
+    return {};
+}
+
+// Open the PDF tag appropriate for the block (`emit_links` only). Headings
+// become *destinations* (link targets); other linked blocks become Links.
+void open_link_tags(const Cairo::RefPtr<Cairo::Context>& cr, const Block& b,
+                    bool emit_links) {
+    if (!emit_links || !b.has_link_hit) return;
+    const std::string anchor = internal_anchor(b);
+    if (anchor.empty()) return;
+    if (b.kind == Block::Kind::Heading)
+        tag_begin(cr, CAIRO_TAG_DEST, "name='" + anchor + "'");
+    else
+        tag_begin(cr, CAIRO_TAG_LINK, "dest='" + anchor + "'");
+}
+
+void close_link_tags(const Cairo::RefPtr<Cairo::Context>& cr, const Block& b,
+                     bool emit_links) {
+    if (!emit_links || !b.has_link_hit) return;
+    const std::string anchor = internal_anchor(b);
+    if (anchor.empty()) return;
+    if (b.kind == Block::Kind::Heading)
+        tag_end(cr, CAIRO_TAG_DEST);
+    else
+        tag_end(cr, CAIRO_TAG_LINK);
 }
 
 void set_color(const Cairo::RefPtr<Cairo::Context>& cr, const Color& c) {
@@ -85,7 +159,8 @@ void draw_flow(const Cairo::RefPtr<Cairo::Context>& cr,
 void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                        const std::vector<Block>& blocks,
                        std::size_t begin, std::size_t end,
-                       const StyleSheet& style, bool justify) {
+                       const StyleSheet& style, bool justify,
+                       bool emit_links) {
     for (std::size_t idx = begin; idx < end; ++idx) {
         const Block& b = blocks[idx];
         const double y = b.y;
@@ -253,6 +328,7 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                 // PDF TOC row: title + dotted leader + right-aligned page
                 // number. The page number lives in the last run; everything
                 // before it is the clickable title.
+                open_link_tags(cr, b, emit_links);
                 const std::size_t title_n = b.run.size() - 1;
                 const std::vector<StyledText> title_runs(
                     b.run.begin(), b.run.begin() + static_cast<std::ptrdiff_t>(title_n));
@@ -263,6 +339,7 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                 cr->move_to(text_x, text_y);
                 title_layout->show_in_cairo_context(cr);
                 cr->restore();
+                close_link_tags(cr, b, emit_links);
 
                 // Right edge of the content column (b.content_width already
                 // excludes toc_indent, so add it back).
@@ -299,6 +376,7 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
 
         if (b.run.empty() || wrap_w <= 0.0) continue;
 
+        open_link_tags(cr, b, emit_links);
         auto layout = Pango::Layout::create(cr);
         apply_styled_runs(*layout, b.run, wrap_w, style);
         if (justify) {
@@ -309,6 +387,7 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
         cr->move_to(text_x, text_y);
         layout->show_in_cairo_context(cr);
         cr->restore();
+        close_link_tags(cr, b, emit_links);
     }
 }
 

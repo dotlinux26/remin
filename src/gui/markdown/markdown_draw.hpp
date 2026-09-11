@@ -20,10 +20,14 @@ void draw_flow(const Cairo::RefPtr<Cairo::Context>& cr,
 // Draw only blocks in the half-open index range [begin, end). Used by the PDF
 // exporter to render one page of the flow (origin already translated).
 // If `justify` is true, multi-line text is justified (PDF printing).
+// If `emit_links` is true (PDF export) internal links and destinations are
+// emitted as PDF tags: every heading is a named dest and every block with an
+// internal "#anchor" (TOC rows, link paragraphs) becomes a clickable Link.
 void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                        const std::vector<Block>& blocks,
                        std::size_t begin, std::size_t end,
-                       const StyleSheet& style, bool justify = false);
+                       const StyleSheet& style, bool justify = false,
+                       bool emit_links = false);
 
 // Clickable regions for the preview (links inside blocks).
 struct HitRegion {

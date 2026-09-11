@@ -3,8 +3,10 @@
 #include "gui/markdown/markdown_draw.hpp"
 #include "gui/markdown/markdown_pango.hpp"
 
+#include <cairo/cairo-pdf.h>
 #include <cairomm/cairomm.h>
 
+#include <algorithm>
 #include <ctime>
 #include <map>
 #include <sstream>
@@ -196,7 +198,8 @@ bool export_pdf(const MarkdownAst& ast, const StyleSheet& style,
         // content
         cr->save();
         cr->translate(content_left, -(slice.start_y - content_top));
-        draw_blocks_range(cr, layout.blocks, slice.first, slice.last + 1, style, true);
+        draw_blocks_range(cr, layout.blocks, slice.first, slice.last + 1,
+                          style, true, true);
         cr->restore();
 
         // header / footer
@@ -211,6 +214,21 @@ bool export_pdf(const MarkdownAst& ast, const StyleSheet& style,
         draw_band(cr, style, fleft, fcenter, fright, content_left, content_right, bottom_anchor);
 
         if (pi + 1 < total_pages) surface->show_page();
+    }
+
+    // ---- PDF outline (bookmarks) ---------------------------------------------
+    // Hierarchical heading tree (design gate §6.1): H1 is a root child, each
+    // Hn becomes a child of the most recent heading at level n-1, so H2/H3 nest
+    // below their current section heading. An outline is attached in document
+    // order before the surface is finalized.
+    cairo_surface_t* csurf = surface->cobj();
+    std::vector<int> last(7, CAIRO_PDF_OUTLINE_ROOT);  // last outline id per level
+    for (const MarkdownAst::Heading& h : ast.headings()) {
+        const int level = std::clamp(h.level, 1, 6);
+        const std::string attrs = "dest='" + h.anchor + "'";
+        last[static_cast<std::size_t>(level)] = cairo_pdf_surface_add_outline(
+            csurf, last[static_cast<std::size_t>(level - 1)], h.text.c_str(),
+            attrs.c_str(), static_cast<cairo_pdf_outline_flags_t>(0));
     }
     surface->finish();
     return true;
