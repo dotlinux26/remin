@@ -8,7 +8,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <glibmm/base64.h>
 #include <memory>
+#include <optional>
 #include <sstream>
 
 namespace remin::gui {
@@ -379,11 +381,35 @@ void NoteTabView::export_html() {
 
         markdown::HtmlRenderOptions opts;
         opts.resolve_asset = [&doc](const std::string& ref) -> std::string {
-            if (!ref.empty() && ref[0] == '/') {
-                if (auto abs = doc.resolve_asset(ref))
-                    return "file://" + abs->string();
+            // Embed local images directly into the HTML as data URIs so the
+            // exported file carries its own content (no external path, no
+            // remin:// scheme).
+            auto abs = doc.resolve_asset(ref);
+            if (!abs) {
+                if (!ref.empty() && ref[0] == '/') return std::string("file://") + ref;
+                return ref;
             }
-            return ref;
+            std::ifstream in(*abs, std::ios::binary);
+            if (!in) {
+                if (ref[0] == '/') return std::string("file://") + ref;
+                return ref;
+            }
+            std::string bytes((std::istreambuf_iterator<char>(in)),
+                              std::istreambuf_iterator<char>());
+            if (bytes.empty()) return ref;
+
+            const std::string ext = abs->extension().string();
+            std::string mime = "image/png";
+            if (ext == ".jpg" || ext == ".jpeg") mime = "image/jpeg";
+            else if (ext == ".gif") mime = "image/gif";
+            else if (ext == ".webp") mime = "image/webp";
+            else if (ext == ".svg") mime = "image/svg+xml";
+            else if (ext == ".bmp") mime = "image/bmp";
+            else if (ext == ".ico") mime = "image/x-icon";
+            else if (ext == ".avif") mime = "image/avif";
+
+            std::string b64 = Glib::Base64::encode(bytes);
+            return "data:" + mime + ";base64," + b64;
         };
         const std::string body = remin::markdown::render_html_body(doc.ast(), opts);
         const std::string css_path = controller_->markdown_css_path();
@@ -439,12 +465,8 @@ void NoteTabView::export_pdf() {
         doc.set_asset_dir(note_root / "assets");
 
         markdown::MarkdownDocument& d = doc;
-        auto asset_resolver = [&d](const std::string& ref) -> std::string {
-            if (!ref.empty() && ref[0] == '/') {
-                if (auto abs = d.resolve_asset(ref))
-                    return abs->string();
-            }
-            return ref;
+        auto asset_resolver = [&d](const std::string& ref) -> std::optional<std::filesystem::path> {
+            return d.resolve_asset(ref);
         };
         remin::markdown::PdfPageMeta meta;
         meta.title = title_;

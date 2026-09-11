@@ -162,17 +162,17 @@ bool export_pdf(const MarkdownAst& ast, const StyleSheet& style,
         const PageSlice& slice = pages[static_cast<std::size_t>(pi)];
         // content
         cr->save();
-        cr->translate(-content_left, -(slice.start_y - content_top));
-        draw_blocks_range(cr, layout.blocks, slice.first, slice.last + 1, style);
+        cr->translate(content_left, -(slice.start_y - content_top));
+        draw_blocks_range(cr, layout.blocks, slice.first, slice.last + 1, style, true);
         cr->restore();
 
         // header / footer
-        const std::string hleft = expand_tokens(meta.header_left, pi, total_pages, meta);
-        const std::string hcenter = expand_tokens(meta.header_center, pi, total_pages, meta);
-        const std::string hright = expand_tokens(meta.header_right, pi, total_pages, meta);
-        const std::string fleft = expand_tokens(meta.footer_left, pi, total_pages, meta);
-        const std::string fcenter = expand_tokens(meta.footer_center, pi, total_pages, meta);
-        const std::string fright = expand_tokens(meta.footer_right, pi, total_pages, meta);
+        const std::string hleft = expand_tokens(meta.header_left, pi + 1, total_pages, meta);
+        const std::string hcenter = expand_tokens(meta.header_center, pi + 1, total_pages, meta);
+        const std::string hright = expand_tokens(meta.header_right, pi + 1, total_pages, meta);
+        const std::string fleft = expand_tokens(meta.footer_left, pi + 1, total_pages, meta);
+        const std::string fcenter = expand_tokens(meta.footer_center, pi + 1, total_pages, meta);
+        const std::string fright = expand_tokens(meta.footer_right, pi + 1, total_pages, meta);
 
         draw_band(cr, style, hleft, hcenter, hright, content_left, content_right, top_anchor);
         draw_band(cr, style, fleft, fcenter, fright, content_left, content_right, bottom_anchor);

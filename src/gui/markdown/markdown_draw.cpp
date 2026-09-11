@@ -50,6 +50,7 @@ void draw_pixbuf(const Cairo::RefPtr<Cairo::Context>& cr, GdkPixbuf* source,
                 }
             }
         }
+        surface->mark_dirty();
     }
     cr->save();
     cr->set_source(surface, x, y);
@@ -84,7 +85,7 @@ void draw_flow(const Cairo::RefPtr<Cairo::Context>& cr,
 void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                        const std::vector<Block>& blocks,
                        std::size_t begin, std::size_t end,
-                       const StyleSheet& style) {
+                       const StyleSheet& style, bool justify) {
     for (std::size_t idx = begin; idx < end; ++idx) {
         const Block& b = blocks[idx];
         const double y = b.y;
@@ -238,6 +239,10 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
 
         auto layout = Pango::Layout::create(cr);
         apply_styled_runs(*layout, b.run, wrap_w, style);
+        if (justify) {
+            layout->set_justify(true);
+            layout->set_alignment(Pango::Alignment::LEFT);
+        }
         cr->save();
         cr->move_to(text_x, text_y);
         layout->show_in_cairo_context(cr);

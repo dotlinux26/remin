@@ -19,10 +19,11 @@ void draw_flow(const Cairo::RefPtr<Cairo::Context>& cr,
 
 // Draw only blocks in the half-open index range [begin, end). Used by the PDF
 // exporter to render one page of the flow (origin already translated).
+// If `justify` is true, multi-line text is justified (PDF printing).
 void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                        const std::vector<Block>& blocks,
                        std::size_t begin, std::size_t end,
-                       const StyleSheet& style);
+                       const StyleSheet& style, bool justify = false);
 
 // Clickable regions for the preview (links inside blocks).
 struct HitRegion {
