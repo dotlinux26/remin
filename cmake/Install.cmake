@@ -36,3 +36,10 @@ function(remin_install_app_icon resources_dir)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
   )
 endfunction()
+
+# Install AppStream metadata for software-center integration.
+function(remin_install_appstream resources_dir)
+  install(FILES ${resources_dir}/remin.metainfo.xml
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo
+  )
+endfunction()

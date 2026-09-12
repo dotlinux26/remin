@@ -50,32 +50,35 @@ int main() {
         check(PrintConfig::from_json("{broken").show_toc, "malformed json -> defaults");
     }
 
-    // --- save_pasted_image writes assets + returns the right reference ---
+    // --- save_pasted_image writes into the shared ~/remin-image/ store and
+    // --- returns a remin://images/ reference; numbering scans the store ---
     {
         const auto dir = temp_dir();
+        const char* old_home = std::getenv("HOME");
+        check(setenv("HOME", dir.c_str(), 1) == 0, "setenv HOME");
+
         MarkdownDocument doc;
-        doc.set_note_dir(dir);
-        doc.set_asset_dir(dir / "assets");
 
         const std::string png(64, '\x89');
         const auto ref1 = doc.save_pasted_image(png);
         check(ref1.has_value(), "first paste saved");
-        check(*ref1 == "assets/asset-001.png", "first asset name");
-        check(std::filesystem::exists(dir / "assets" / "asset-001.png"),
-              "asset file written");
+        check(*ref1 == "remin://images/asset-001.png", "first asset ref");
+        check(std::filesystem::exists(dir / "remin-image" / "asset-001.png"),
+              "shared asset file written");
 
         const auto ref2 = doc.save_pasted_image(png);
-        check(ref2.has_value() && *ref2 == "assets/asset-002.png", "second asset name");
+        check(ref2.has_value() && *ref2 == "remin://images/asset-002.png",
+              "second asset ref");
 
         check(!doc.save_pasted_image("").has_value(), "empty paste rejected");
 
-        // Re-pasting into a fresh doc (same dir) continues the numbering.
+        // Re-pasting into a fresh doc scans the shared store and continues.
         MarkdownDocument doc2;
-        doc2.set_note_dir(dir);
-        doc2.set_asset_dir(dir / "assets");
         const auto ref3 = doc2.save_pasted_image(png);
-        check(ref3.has_value() && *ref3 == "assets/asset-003.png", "numbering continues");
+        check(ref3.has_value() && *ref3 == "remin://images/asset-003.png",
+              "numbering continues");
 
+        if (old_home) setenv("HOME", old_home, 1);
         std::filesystem::remove_all(dir);
     }
 

@@ -1,5 +1,6 @@
 add_library(remin_gui STATIC
   application.cpp
+  resources.cpp
   ui/context_menu.cpp
   session/workspace_session.cpp
   session/session_controller.cpp
@@ -28,8 +29,14 @@ add_library(remin_gui STATIC
 target_include_directories(remin_gui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
+# Compile-time fallback resource dir. Dev builds point it at the source tree;
+# release packaging may override with -DREMIN_RESOURCE_DIR="" to force the
+# runtime <exe_dir>/../share/remin/resources resolution (see resources.cpp).
+set(REMIN_RESOURCE_DIR_DEFAULT "${CMAKE_SOURCE_DIR}/resources")
+set(REMIN_RESOURCE_DIR "${REMIN_RESOURCE_DIR_DEFAULT}" CACHE STRING
+    "Compile-time fallback resources directory (empty = relocatable)")
 target_compile_definitions(remin_gui PRIVATE
-  REMIN_RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources"
+  REMIN_RESOURCE_DIR="${REMIN_RESOURCE_DIR}"
 )
 target_link_libraries(remin_gui PUBLIC
   remin_core

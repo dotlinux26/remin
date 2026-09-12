@@ -1,4 +1,5 @@
 #include "gui/application.hpp"
+#include "gui/resources.hpp"
 
 #include <adwaita.h>
 #include <gtkmm.h>
@@ -42,7 +43,7 @@ void Application::on_activate() {
     // Register bundled icons GResource so GTK can resolve all symbolic icon
     // names without depending on system icon themes (Adwaita/Yaru/etc.).
     {
-        std::string icons_path = std::string(REMIN_RESOURCE_DIR) + "/icons/icons.gresource";
+        std::string icons_path = resource_path("icons/icons.gresource");
         GError* err = nullptr;
         GResource* res = g_resource_load(icons_path.c_str(), &err);
         if (res) {
@@ -115,7 +116,7 @@ bool Application::on_autosave_tick() {
 
 void Application::apply_theme_css(bool dark) {
     if (!css_provider_) return;
-    std::string path = std::string(REMIN_RESOURCE_DIR) + "/styles/" +
+    std::string path = resource_path("styles/") +
                        (dark ? "dark" : "light") + ".css";
     try {
         css_provider_->load_from_path(path);

@@ -1,6 +1,7 @@
 #include "gui/window/main_window.hpp"
 #include "gui/window/settings_dialog.hpp"
 #include "gui/terminal/pane_history_tracker.hpp"
+#include "gui/resources.hpp"
 #include "core/serialization.hpp"
 #include "core/crypto.hpp"
 #include <adwaita.h>
@@ -27,7 +28,7 @@ MainWindow::MainWindow(SessionController* controller,
     try {
         auto icon_theme = Gtk::IconTheme::get_for_display(get_display());
         icon_theme->add_resource_path("/icons/hicolor/scalable");
-        icon_theme->add_search_path(std::string(REMIN_RESOURCE_DIR) + "/icons");
+        icon_theme->add_search_path(resource_path("icons"));
     } catch (const Glib::Error&) {}
     set_icon_name("remin");
 

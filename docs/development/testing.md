@@ -28,12 +28,16 @@ Five ctest suites cover, roughly:
 
 See [VTE testing](../patches/vte/testing.md) for the full background.
 
-## Known pre-existing failures (out of scope)
+## Test status (v1.0.0)
 
-Current builds have two pre-existing failures unrelated to feature code:
+As of the 1.0.0 release the full suite is green: **22/22 ctest suites pass**
+(`build-release`), including:
 
-- `vte_critical_validation_test` — fails to spawn under the test environment
-  (permission denied)
-- `markdown_document_test` — 4 asset-number/file-name assertions
+- `vte_critical_validation_test` — verified spawning under the release
+  environment (previously failed under CI).
+- `markdown_document_test` — asset assertions updated to the shared
+  `~/remin-image/` store + `remin://images/` reference model (the old test
+  asserted the superseded per-document `assets/asset-*.png` scheme).
 
-These predate the v1.0.0rc work and are tracked separately.
+The `markdown_document_test` fix is a test-only change; the Markdown engine
+behavior was not altered.

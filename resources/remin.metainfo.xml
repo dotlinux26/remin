@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.remind.remin</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Remin</name>
+  <summary>Terminal workspace with persistent state</summary>
+  <description>
+    <p>
+      Remin is a workspace platform for CLI and desktop-oriented tools. It
+      gathers terminal, notes and file browsing into a single window whose
+      state — tabs, panes, scrollback, working directories — is saved
+      continuously and restored on the next launch, so a working session
+      survives a reboot or a crash.
+    </p>
+  </description>
+  <launchable type="desktop-id">remin.desktop</launchable>
+  <developer id="io.github.remin">
+    <name>Remin project</name>
+  </developer>
+  <url type="homepage">https://github.com/dotlinux26/remin</url>
+  <screenshots>
+    <screenshot type="default">
+      <image type="source">https://raw.githubusercontent.com/dotlinux26/remin/main/docs/images/remin1-light.png</image>
+      <caption>Remin main window (light theme)</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source">https://raw.githubusercontent.com/dotlinux26/remin/main/docs/images/remin1.png</image>
+      <caption>Remin main window (dark theme)</caption>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="1.0.0" date="2026-09-12">
+      <description>
+        <ul>
+          <li>First stable release.</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+  <provides>
+    <binary>remin</binary>
+  </provides>
+  <categories>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>terminal</keyword>
+    <keyword>workspace</keyword>
+    <keyword>notes</keyword>
+    <keyword>markdown</keyword>
+    <keyword>persistent</keyword>
+  </keywords>
+</component>

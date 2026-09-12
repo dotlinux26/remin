@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(remin
-  VERSION 0.1.0
+  VERSION 1.0.0
   DESCRIPTION "Remin - Remember your work. Linux-native CLI workspace application."
   LANGUAGES CXX C
 )
@@ -36,6 +36,7 @@ if(REMIN_BUILD_GUI)
   add_subdirectory(src/gui)
   remin_install_resources(${CMAKE_CURRENT_SOURCE_DIR}/resources)
   remin_install_app_icon(${CMAKE_CURRENT_SOURCE_DIR}/resources)
+  remin_install_appstream(${CMAKE_CURRENT_SOURCE_DIR}/resources)
 endif()
 
 add_subdirectory(src/app)

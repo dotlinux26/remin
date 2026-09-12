@@ -1,4 +1,5 @@
 #include "gui/markdown/markdown_css.hpp"
+#include "gui/resources.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -32,8 +33,7 @@ th { background: #f6f8fa; }
 } // namespace
 
 std::string builtin_preview_css() {
-    const std::string path =
-        std::string(REMIN_RESOURCE_DIR) + "/styles/markdown-preview.css";
+    const std::string path = gui::resource_path("styles/markdown-preview.css");
     std::ifstream in(path);
     if (!in) return kFallbackCss;
     std::ostringstream ss;
