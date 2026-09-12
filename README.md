@@ -114,7 +114,8 @@ remin gui
 - **Command history** — canonical per-pane `command_history` (cap 1000) with an
   aggregate sidebar; searchable, click-to-insert
 - **Notes** — markdown editor with live preview, and HTML/PDF export
-  (TOC, clickable links, monospace code / tables)
+  (TOC, clickable links, monospace code / tables). See
+  [Markdown Guide](docs/usage/markdown.md) and [Test Template](docs/usage/test-template.md).
 - **Directory tree** — VS Code-style panel with live filter, context menu,
   and open-in-editor
 - **Linux PTY** — `forkpty()` through a `PTYProvider` abstraction
