@@ -7,6 +7,12 @@
 
 namespace remin::gui {
 
+// VS Code-style auto-close for opening HTML tags. Given the current line text
+// up to the just-typed '>' (cursor == index of that '>'), returns the closing
+// tag to append, e.g. "</h1>", or "" when nothing should close. Pure helper
+// (unit-tested without GTK).
+[[nodiscard]] std::string suggest_closing_html_tag(const std::string& line, std::size_t cursor);
+
 // A note editor tab (edit surface only) using GtkSourceView 5 C API.
 //
 // Features:
@@ -95,6 +101,8 @@ private:
     void do_search(bool forward);
     bool on_highlight_tick();
     bool on_key_pressed(guint keyval, guint keycode, Gdk::ModifierType state);
+    void on_auto_close_after_change();
+    void on_paste_done();
 
     std::function<void()> on_change_;
     std::function<void()> on_save_;
@@ -150,6 +158,11 @@ private:
 
     // Signal connection for buffer "changed" signal - stored for cleanup
     gulong buffer_changed_signal_id_{0};
+
+    // Signal connection for auto-close "changed" signal
+    gulong auto_close_signal_id_{0};
+    bool auto_close_busy_{false};
+    bool paste_in_progress_{false};
 
     // Signal connection for adw_style_manager "notify::color-scheme" signal
     gulong color_scheme_signal_id_{0};

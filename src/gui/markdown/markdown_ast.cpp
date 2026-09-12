@@ -185,7 +185,10 @@ int on_enter_block(MD_BLOCKTYPE type, void* detail, void* userdata) {
             auto* code = static_cast<MD_BLOCK_CODE_DETAIL*>(detail);
             auto* n = b.open(NodeType::CodeBlock);
             if (code) {
-                n->data.text.assign(code->info.text, code->info.size);
+                // The body accumulates from the MD_TEXT_* events below; only
+                // the fence language is taken from the opening line, otherwise
+                // the info string ("cpp") leaks into the rendered text.
+                n->data.text.clear();
                 n->data.info.assign(code->lang.text, code->lang.size);
             }
             break;

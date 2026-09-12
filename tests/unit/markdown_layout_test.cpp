@@ -132,8 +132,8 @@ int main() {
         check(!is_page_break_marker(""), "empty not a marker");
     }
 
-    // --- HtmlBlock page-break markers become PageBreak blocks, other HTML ---
-    // --- blocks are ignored (never become visible flow content) ---
+    // --- HtmlBlock page-break markers become PageBreak blocks; non-break ---
+    // --- raw HTML chunks render with the inline subset (design Q3, 2026-09-12) ---
     {
         const auto ast = MarkdownAst::parse(
             "Before\n\n"
@@ -149,7 +149,7 @@ int main() {
                 if (run.text.find("ignored") != std::string::npos) saw_custom_html = true;
         }
         check(saw_break, "page-break marker produced a PageBreak block");
-        check(!saw_custom_html, "non-break raw html is not rendered as flow text");
+        check(saw_custom_html, "non-break raw html chunk kept its text");
     }
 
     // --- TOC rows receive page numbers via the resolver; title width is ---

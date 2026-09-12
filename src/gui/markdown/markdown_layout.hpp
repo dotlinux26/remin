@@ -126,10 +126,13 @@ using TocPageResolver = std::function<std::optional<int>(const std::string& anch
 // Layout the whole document into a continuous flow. `note_dir` unused in favor
 // of the explicit resolver. `page_height` unused here (pagination lives in the
 // exporter so preview/layout stay one shared code path).
+// If `render_toc` is false, the [[TOC]] marker emits a literal "[[TOC]]"
+// paragraph instead of expanding to a table of contents (used by preview).
 [[nodiscard]] LayoutResult layout_document(const MarkdownAst& ast,
                                            const StyleSheet& style,
                                            double content_width_pt,
                                            const ImageResolver& resolve_image,
-                                           const TocPageResolver& toc_pages = {});
+                                           const TocPageResolver& toc_pages = {},
+                                           bool render_toc = true);
 
 } // namespace remin::markdown

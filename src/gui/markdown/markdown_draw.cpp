@@ -111,26 +111,36 @@ std::string internal_anchor(const Block& b) {
 
 // Open the PDF tag appropriate for the block (`emit_links` only). Headings
 // become *destinations* (link targets); other linked blocks become Links.
+// External links (http/https) use `uri` attribute; internal anchors use `dest`.
 void open_link_tags(const Cairo::RefPtr<Cairo::Context>& cr, const Block& b,
                     bool emit_links) {
     if (!emit_links || !b.has_link_hit) return;
-    const std::string anchor = internal_anchor(b);
-    if (anchor.empty()) return;
-    if (b.kind == Block::Kind::Heading)
-        tag_begin(cr, CAIRO_TAG_DEST, "name='" + anchor + "'");
-    else
-        tag_begin(cr, CAIRO_TAG_LINK, "dest='" + anchor + "'");
+    if (b.kind == Block::Kind::Heading) {
+        const std::string anchor = internal_anchor(b);
+        if (!anchor.empty())
+            tag_begin(cr, CAIRO_TAG_DEST, "name='" + anchor + "'");
+        return;
+    }
+    // Non-heading link: could be internal (#anchor) or external (http(s)://).
+    if (b.link_href.rfind("http", 0) == 0) {
+        tag_begin(cr, CAIRO_TAG_LINK, "uri='" + b.link_href + "'");
+    } else if (!b.link_href.empty() && b.link_href[0] == '#') {
+        tag_begin(cr, CAIRO_TAG_LINK, "dest='" + b.link_href.substr(1) + "'");
+    }
 }
 
 void close_link_tags(const Cairo::RefPtr<Cairo::Context>& cr, const Block& b,
                      bool emit_links) {
     if (!emit_links || !b.has_link_hit) return;
-    const std::string anchor = internal_anchor(b);
-    if (anchor.empty()) return;
-    if (b.kind == Block::Kind::Heading)
-        tag_end(cr, CAIRO_TAG_DEST);
-    else
+    if (b.kind == Block::Kind::Heading) {
+        const std::string anchor = internal_anchor(b);
+        if (!anchor.empty())
+            tag_end(cr, CAIRO_TAG_DEST);
+        return;
+    }
+    if (b.link_href.rfind("http", 0) == 0 || (!b.link_href.empty() && b.link_href[0] == '#')) {
         tag_end(cr, CAIRO_TAG_LINK);
+    }
 }
 
 void set_color(const Cairo::RefPtr<Cairo::Context>& cr, const Color& c) {
@@ -298,6 +308,30 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
         if (b.kind == Block::Kind::Code || b.kind == Block::Kind::Quote) {
             text_x = b.padding;
             text_y = y + b.padding;
+        }
+        // Code fence language badge (top-right corner).
+        if (b.kind == Block::Kind::Code && !b.code_lang.empty()) {
+            const double badge_pad = 4.0;
+            const double badge_font_pt = 7.5;
+            auto badge_layout = Pango::Layout::create(cr);
+            Pango::FontDescription fd(style.base_font);
+            fd.set_absolute_size(static_cast<int>(badge_font_pt * PANGO_SCALE));
+            badge_layout->set_font_description(fd);
+            badge_layout->set_text(b.code_lang);
+            int bw, bh;
+            badge_layout->get_pixel_size(bw, bh);
+            const double badge_w = static_cast<double>(bw) + 2.0 * badge_pad;
+            const double badge_h = static_cast<double>(bh) + 2.0 * badge_pad;
+            const double badge_x = b.content_width + 2.0 * b.padding - badge_w - badge_pad;
+            const double badge_y = y + badge_pad;
+            // Badge text only (no background).
+            cr->save();
+            Color fg = style.text_color;
+            fg.a *= 0.6f;
+            set_color(cr, fg);
+            cr->move_to(badge_x, badge_y);
+            badge_layout->show_in_cairo_context(cr);
+            cr->restore();
         }
         if (b.kind == Block::Kind::UlItem || b.kind == Block::Kind::OlItem ||
             b.kind == Block::Kind::TaskItem) {

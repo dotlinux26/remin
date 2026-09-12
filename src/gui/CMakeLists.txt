@@ -19,6 +19,7 @@ add_library(remin_gui STATIC
   markdown/markdown_document.cpp
   markdown/markdown_draw.cpp
   markdown/markdown_html.cpp
+  markdown/markdown_inline_html.cpp
   markdown/markdown_layout.cpp
   markdown/markdown_pango.cpp
   markdown/markdown_pdf_export.cpp

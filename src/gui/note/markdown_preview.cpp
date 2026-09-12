@@ -17,6 +17,11 @@ using namespace remin::markdown;
 
 namespace {
 
+// Horizontal breathing room for the on-screen preview (the PDF exporter uses
+// the stylesheet's own page margin). Just a little inset so the content never
+// touches the split divider / window edge.
+constexpr double kPreviewMargin = 20.0;
+
 std::optional<std::filesystem::path> resolve_local_image(
     const std::string& ref, const std::filesystem::path& asset_dir,
     const std::filesystem::path& note_dir) {
@@ -68,7 +73,7 @@ MarkdownPreview::MarkdownPreview() {
     click->set_button(1);
     click->signal_pressed().connect([this](int n, double x, double y) {
         if (n != 1) return;
-        const double margin = style_.page_margin_pt;
+        const double margin = kPreviewMargin;
         const double vis = get_vadjustment() ? get_vadjustment()->get_value() : 0.0;
         const double fx = x - margin;
         const double fy = y + vis - margin;
@@ -95,7 +100,7 @@ MarkdownPreview::MarkdownPreview() {
 
     auto motion = Gtk::EventControllerMotion::create();
     motion->signal_motion().connect([this](double x, double y) {
-        const double margin = style_.page_margin_pt;
+        const double margin = kPreviewMargin;
         const double vis = get_vadjustment() ? get_vadjustment()->get_value() : 0.0;
         const double fx = x - margin;
         const double fy = y + vis - margin;
@@ -179,7 +184,9 @@ void MarkdownPreview::relayout_if_needed() {
         return resolve_local_image(ref, resolved_asset_dir_, std::filesystem::path(note_dir_));
     };
 
-    layout_ = layout_document(ast, style_, static_cast<double>(w), resolve_asset);
+    const double content_w = std::max(1.0, static_cast<double>(w) - 2.0 * kPreviewMargin);
+
+    layout_ = layout_document(ast, style_, content_w, resolve_asset, {}, false);
 
     // Make the canvas report the full content height so the ScrolledWindow's
     // adjustment has a scrollable range (a DrawingArea has zero natural size,
@@ -187,7 +194,7 @@ void MarkdownPreview::relayout_if_needed() {
     double h = 0.0;
     for (const auto& b : layout_.blocks)
         if (b.y + b.height > h) h = b.y + b.height;
-    if (canvas_) canvas_->set_size_request(-1, static_cast<int>(h));
+    if (canvas_) canvas_->set_size_request(-1, static_cast<int>(h) + static_cast<int>(kPreviewMargin));
     dirty_ = false;
 }
 
@@ -202,7 +209,10 @@ void MarkdownPreview::on_canvas_draw(const Cairo::RefPtr<Cairo::Context>& cr, in
     // Draw all blocks: the canvas is allocated at full content height and GTK
     // clips the drawing to the damaged/visible region.
     if (!layout_.blocks.empty()) {
+        cr->save();
+        cr->translate(kPreviewMargin, kPreviewMargin);
         draw_blocks_range(cr, layout_.blocks, 0, layout_.blocks.size(), style_);
+        cr->restore();
     }
 }
 

@@ -2,12 +2,44 @@
 
 #include <adwaita.h>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 
 namespace remin::gui {
+
+// ---- VS Code-style HTML tag auto-close ---------------------------------------
+
+std::string suggest_closing_html_tag(const std::string& line, std::size_t cursor) {
+    if (cursor == 0 || cursor > line.size()) return {};
+    // Find the nearest '<' before cursor (which is the index of the just-typed '>').
+    std::size_t lt = line.rfind('<', cursor - 1);
+    if (lt == std::string::npos || lt + 1 >= cursor) return {};
+    // Skip closing tags, comments, and declarations.
+    if (line[lt + 1] == '/' || line[lt + 1] == '!') return {};
+    // The tag body must not already contain '>' (i.e. not already closed).
+    for (std::size_t k = lt + 1; k < cursor; ++k) if (line[k] == '>') return {};
+    // Extract tag name (first token after '<', skipping whitespace).
+    std::size_t i = lt + 1;
+    while (i < cursor && (line[i] == ' ' || line[i] == '\t')) ++i;
+    if (i >= cursor) return {};
+    const std::size_t name_begin = i;
+    auto is_name_char = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
+    };
+    while (i < cursor && is_name_char(line[i])) ++i;
+    if (i == name_begin) return {};
+    std::string name = line.substr(name_begin, i - name_begin);
+    if (!std::isalpha(static_cast<unsigned char>(name[0]))) return {};
+    for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    // Void elements: never auto-close.
+    static const char* kVoid[] = {"area","base","br","col","embed","hr","img","input",
+                                  "link","meta","param","source","track","wbr"};
+    for (const char* v : kVoid) if (name == v) return {};
+    return "</" + name + ">";
+}
 
 NoteEditor::NoteEditor(std::function<void()> on_change)
     : Gtk::Box(Gtk::Orientation::VERTICAL, 0), on_change_(std::move(on_change)) {
@@ -33,6 +65,25 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     // Change tracking (activity signal -> autosaver + live preview debounce).
     buffer_changed_signal_id_ = g_signal_connect(source_buffer_, "changed", G_CALLBACK(+[](GtkTextBuffer*, gpointer self) {
         static_cast<NoteEditor*>(self)->on_buffer_changed();
+    }), this);
+
+    // VS Code-style HTML tag auto-close: when the user types '>', look back for
+    // an unclosed opening tag and insert the matching closing tag.
+    auto_close_signal_id_ = g_signal_connect(source_buffer_, "changed", G_CALLBACK(+[](GtkTextBuffer*, gpointer self) {
+        static_cast<NoteEditor*>(self)->on_auto_close_after_change();
+    }), this);
+
+    // Handle paste from context menu (right-click -> Paste) to skip auto-close.
+    // Signals: `paste-clipboard` fires on the view BEFORE the insert (right
+    // moment to set the flag), `paste-done` on the buffer fires AFTER the
+    // insert (too late for context-menu paste on its own).
+    g_signal_connect(source_view_, "paste-clipboard",
+                     G_CALLBACK(+[](GtkTextView*, gpointer self) {
+                         static_cast<NoteEditor*>(self)->on_paste_done();
+                     }),
+                     this);
+    g_signal_connect(source_buffer_, "paste-done", G_CALLBACK(+[](GtkTextBuffer*, GdkClipboard*, gpointer self) {
+        static_cast<NoteEditor*>(self)->on_paste_done();
     }), this);
 
     // Search context used by the shared MainWindow find bar. Enable
@@ -183,6 +234,50 @@ void NoteEditor::on_buffer_changed() {
     }
 }
 
+void NoteEditor::on_auto_close_after_change() {
+    if (!alive_ || !source_buffer_ || !GTK_IS_TEXT_BUFFER(source_buffer_)) return;
+    if (auto_close_busy_ || paste_in_progress_) return;
+
+    GtkTextBuffer* tb = GTK_TEXT_BUFFER(source_buffer_);
+    GtkTextIter cursor;
+    gtk_text_buffer_get_iter_at_mark(tb, &cursor, gtk_text_buffer_get_insert(tb));
+
+    // The character immediately before the cursor must be the '>' the user
+    // just typed.
+    GtkTextIter before = cursor;
+    if (!gtk_text_iter_backward_char(&before)) return;
+    if (gtk_text_iter_get_char(&before) != (gunichar)'>') return;
+
+    // Build the line text up to (but not including) that '>'.
+    GtkTextIter line_start = before;
+    while (!gtk_text_iter_starts_line(&line_start))
+        if (!gtk_text_iter_backward_char(&line_start)) break;
+    const gint cursor_char = gtk_text_iter_get_offset(&before) - gtk_text_iter_get_offset(&line_start);
+    gchar* line = gtk_text_buffer_get_text(tb, &line_start, &before, FALSE);
+    if (!line) return;
+    const std::string line_str(line);
+    g_free(line);
+
+    const std::string close = suggest_closing_html_tag(line_str, static_cast<std::size_t>(cursor_char));
+    if (close.empty()) return;
+
+    auto_close_busy_ = true;
+    GtkTextIter ins = cursor;  // after the '>'
+    gtk_text_buffer_insert(tb, &ins, close.c_str(), static_cast<gint>(close.size()));
+    // Leave the cursor between '>' and the inserted closing tag.
+    GtkTextIter back = ins;
+    for (std::size_t i = 0; i < close.size(); ++i) gtk_text_iter_backward_char(&back);
+    gtk_text_buffer_place_cursor(tb, &back);
+    auto_close_busy_ = false;
+}
+
+void NoteEditor::on_paste_done() {
+    // Mark paste in progress so auto-close skips the bulk insert.
+    paste_in_progress_ = true;
+    // Reset after a short delay (paste + changed signals are synchronous-ish).
+    Glib::signal_timeout().connect_once([this] { paste_in_progress_ = false; }, 50);
+}
+
 bool NoteEditor::on_highlight_tick() {
     if (highlight_pending_) refresh_match_highlight();
     highlight_pending_ = false;
@@ -200,6 +295,11 @@ bool NoteEditor::on_key_pressed(guint keyval, guint /*keycode*/, Gdk::ModifierTy
     const bool shift = (state & Gdk::ModifierType::SHIFT_MASK) != Gdk::ModifierType{};
     if (!ctrl || shift) return false;
     if (keyval != GDK_KEY_V && keyval != GDK_KEY_v) return false;
+
+    // Mark paste in progress so auto-close skips the bulk insert.
+    // This handles both image paste (async) and text paste (sync).
+    paste_in_progress_ = true;
+    Glib::signal_timeout().connect_once([this] { paste_in_progress_ = false; }, 50);
 
     if (!alive_) return false;
     auto display = Gdk::Display::get_default();

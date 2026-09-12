@@ -1,6 +1,7 @@
 #include "gui/markdown/markdown_layout.hpp"
 
 #include "gui/markdown/markdown_html.hpp"  // inline_plain_text (anchors)
+#include "gui/markdown/markdown_inline_html.hpp"  // inline HTML/CSS subset
 #include "gui/markdown/markdown_pango.hpp"
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -16,6 +17,17 @@ bool LayoutResult::block_keeps_with_next(const Block& b) const {
 }
 
 namespace {
+
+std::string trim_ws(const std::string& s) {
+    auto is_space = [](char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+    };
+    std::size_t a = 0;
+    std::size_t b = s.size();
+    while (a < b && is_space(s[a])) ++a;
+    while (b > a && is_space(s[b - 1])) --b;
+    return s.substr(a, b - a);
+}
 
 // Collect inline styled runs from an AST node into `out`.
 class RunBuilder {
@@ -35,11 +47,27 @@ public:
         is_link_ = false;
         href_.clear();
         anchor_.clear();
+        html_stack_.clear();
     }
 
     void set_anchor(const std::string& a) { anchor_ = a; }
     [[nodiscard]] const std::string& anchor() const { return anchor_; }
     void set_weight(int w) { weight_ = w; }
+
+    // Apply an inline HTML/CSS style override onto the current run state. The
+    // fields not named by the override stay untouched (inherit) so the subset
+    // may only affect what it explicitly declares.
+    void apply(const InlineCssStyle& css) {
+        if (css.has_color) color_ = css.color;
+        if (css.has_bg) bg_ = css.background;
+        if (css.weight > 0) weight_ = css.weight;
+        if (css.italic_set) italic_ = css.italic;
+        if (css.underline_set) underline_ = css.underline;
+        if (css.strike_set) strike_ = css.strike;
+        if (css.size_pt > 0.0) size_pt_ = css.size_pt;
+        else if (css.size_pct > 0.0) size_pt_ *= css.size_pct;
+        if (!css.font_family.empty()) font_ = css.font_family;
+    }
 
     void push(const std::string& t) {
         if (t.empty()) return;
@@ -50,6 +78,30 @@ public:
     void emit(const Node& n);
 
 private:
+    struct RunState {
+        std::string font;
+        double size_pt;
+        int weight;
+        bool italic, strike, underline;
+        Color color, bg;
+    };
+
+    [[nodiscard]] RunState snapshot() const {
+        return RunState{font_, size_pt_, weight_, italic_, strike_, underline_,
+                        color_, bg_};
+    }
+
+    void restore(RunState s) {
+        font_ = s.font;
+        size_pt_ = s.size_pt;
+        weight_ = s.weight;
+        italic_ = s.italic;
+        strike_ = s.strike;
+        underline_ = s.underline;
+        color_ = s.color;
+        bg_ = s.bg;
+    }
+
     const StyleSheet& style_;
     std::vector<StyledText>& out_;
     std::string font_;
@@ -60,6 +112,7 @@ private:
     bool is_link_;
     std::string href_;
     std::string anchor_;
+    std::vector<RunState> html_stack_;
 };
 
 void RunBuilder::emit(const Node& n) {
@@ -132,9 +185,26 @@ void RunBuilder::emit(const Node& n) {
         case NodeType::HardBreak:
             push("\n");
             return;
-        case NodeType::HtmlSpan:
+        case NodeType::HtmlSpan: {
+            const auto tag = parse_html_tag(n.text);
+            if (!tag) return;
+            if (tag->closing) {
+                if (!html_stack_.empty()) {
+                    restore(html_stack_.back());
+                    html_stack_.pop_back();
+                }
+                return;
+            }
+            html_stack_.push_back(snapshot());
+            apply(style_from_tag(tag->name, tag->style, style_));
+            for (const Node& c : n.children) emit(c);
+            return;
+        }
         case NodeType::HtmlBlock:
-            return;  // raw HTML dropped for safety
+            // Block-level HTML is handled in emit_node (wrapper context or
+            // whole-chunk renderer); nothing inline lives under it.
+            for (const Node& c : n.children) emit(c);
+            return;
         default:
             for (const Node& c : n.children) emit(c);
             return;
@@ -263,14 +333,23 @@ bool is_page_break_marker(const std::string& html_block_source) {
 }
 
 LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
-                             double content_width_pt,
-                             const ImageResolver& resolve_image,
-                             const TocPageResolver& toc_pages) {
+                              double content_width_pt,
+                              const ImageResolver& resolve_image,
+                              const TocPageResolver& toc_pages,
+                              bool render_toc) {
     LayoutResult res;
     std::vector<Block>& blocks = res.blocks;
 
     const auto push_block = [&](Block b) {
         blocks.push_back(std::move(b));
+    };
+
+    // Open block-level HTML wrappers (Case A: <div ...> + Paragraph + </div>).
+    // The wrapper style applies onto every following text block until a matching
+    // closing HtmlBlock pops it.
+    std::vector<InlineCssStyle> block_ctx;
+    const auto apply_block_ctx = [&](RunBuilder& rb) {
+        for (const InlineCssStyle& cs : block_ctx) rb.apply(cs);
     };
 
     // ---- flow assembly -----------------------------------------------------
@@ -285,6 +364,7 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
         std::vector<StyledText> runs;
         RunBuilder rb(style, runs);
         rb.reset(style.base_font, style.base_font_pt, style.text_color);
+        apply_block_ctx(rb);
         for (const Node& c : p.children) rb.emit(c);
         b.run = std::move(runs);
         if (b.run.empty()) return;  // empty paragraph -> no box
@@ -292,6 +372,30 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
         b.content_width = content_width_pt;
         b.height = m.height;
         b.baseline = m.baseline_pt;
+        // Paragraph hyperlink: only when the whole paragraph is one uniform
+        // link (single distinct href). Mixed-text paragraphs cannot be
+        // expressed by a single block-level `<link>` tag, so they stay plain.
+        {
+            std::string href;
+            bool uniform = true;
+            for (const StyledText& r : b.run) {
+                if (r.is_link && !r.href.empty()) {
+                    if (href.empty()) {
+                        href = r.href;
+                    } else if (href != r.href) {
+                        uniform = false;
+                        break;
+                    }
+                }
+            }
+            if (uniform && !href.empty()) {
+                b.has_link_hit = true;
+                b.link_href = href;
+                b.link_x = 0;
+                b.link_w = b.content_width;
+                b.link_h = b.height;
+            }
+        }
         b.y = y + b.margin_before;
         y = b.y + b.height + b.margin_after;
         push_block(std::move(b));
@@ -308,6 +412,7 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
         std::vector<StyledText> runs;
         RunBuilder rb(style, runs);
         rb.reset(style.font_for(sel), style.font_size_for(sel), style.color_for(sel));
+        apply_block_ctx(rb);
         rb.set_weight(style.text[static_cast<int>(sel)].weight > 0
                           ? style.text[static_cast<int>(sel)].weight : 400);
         rb.set_anchor(heading_anchor(h, ast));
@@ -372,6 +477,7 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                             first_line = false;
                             RunBuilder rb(style, runs);
                             rb.reset(style.base_font, style.base_font_pt, style.text_color);
+                            apply_block_ctx(rb);
                             for (const Node& ic : c.children) rb.emit(ic);
                         } else if (c.type == NodeType::BlockQuote) {
                             self(self, c);
@@ -473,6 +579,7 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                         if (inner.type == NodeType::Paragraph) {
                             RunBuilder rb(style, runs);
                             rb.reset(style.base_font, style.base_font_pt, style.text_color);
+                            apply_block_ctx(rb);
                             for (const Node& ic : inner.children) rb.emit(ic);
                             have_text = true;
                         } else if (inner.type == NodeType::List) {
@@ -489,6 +596,7 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                                         RunBuilder rb(style, runs);
                                         rb.reset(style.base_font, style.base_font_pt,
                                                  style.text_color);
+                                        apply_block_ctx(rb);
                                         for (const Node& ic : subinner.children) rb.emit(ic);
                                     }
                                 }
@@ -498,6 +606,7 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                             // (md4c flattens the Paragraph in tight lists).
                             RunBuilder rb(style, runs);
                             rb.reset(style.base_font, style.base_font_pt, style.text_color);
+                            apply_block_ctx(rb);
                             rb.emit(inner);
                             have_text = true;
                         }
@@ -607,6 +716,27 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                 return;
             }
             case NodeType::Toc: {
+                if (!render_toc) {
+                    Block b;
+                    b.kind = Block::Kind::P;
+                    const auto pbox = style.box_for(StyleSelector::Paragraph);
+                    b.margin_before = pbox.margin_top_pt;
+                    b.margin_after = pbox.margin_bottom_pt;
+                    StyledText t;
+                    t.text = "[[TOC]]";
+                    t.font_family = style.base_font;
+                    t.size_pt = style.base_font_pt;
+                    t.color = style.text_color;
+                    b.run = {t};
+                    const auto m = measure_runs(b.run, content_width_pt, style);
+                    b.content_width = content_width_pt;
+                    b.height = m.height;
+                    b.baseline = m.baseline_pt;
+                    b.y = y + b.margin_before;
+                    y = b.y + b.height + b.margin_after;
+                    push_block(std::move(b));
+                    return;
+                }
                 const auto headings = ast.headings();
                 std::vector<int> counters;
                 for (const auto& h : headings) {
@@ -702,8 +832,45 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                     b.y = y + b.margin_before;
                     y = b.y + b.height + b.margin_after;
                     push_block(std::move(b));
+                    return;
                 }
-                return;
+                {
+                    const std::string t = trim_ws(n.text);
+                    const auto tag = parse_html_tag(t);
+                    if (tag && tag->consumed == t.size() &&
+                        is_block_level_tag(tag->name)) {
+                        if (tag->closing) {
+                            // Case A close: pop the wrapper if one is open.
+                            if (!block_ctx.empty()) block_ctx.pop_back();
+                        } else if (!tag->self_closing) {
+                            // Case A open: open a wrapper context for the
+                            // following markdown paragraphs.
+                            block_ctx.push_back(
+                                style_from_tag(tag->name, tag->style, style));
+                        }
+                        return;
+                    }
+                    // Case B/C/D: one whole raw chunk -> mini inline renderer.
+                    std::vector<StyledText> runs;
+                    if (render_html_block_runs(n.text, style, style.base_font,
+                                               style.base_font_pt, style.text_color,
+                                               runs)) {
+                        if (runs.empty()) return;
+                        Block b;
+                        b.kind = Block::Kind::P;
+                        b.margin_before = style.box_for(StyleSelector::Paragraph).margin_top_pt;
+                        b.margin_after = style.box_for(StyleSelector::Paragraph).margin_bottom_pt;
+                        b.run = std::move(runs);
+                        const auto m = measure_runs(b.run, content_width_pt, style);
+                        b.content_width = content_width_pt;
+                        b.height = m.height;
+                        b.baseline = m.baseline_pt;
+                        b.y = y + b.margin_before;
+                        y = b.y + b.height + b.margin_after;
+                        push_block(std::move(b));
+                    }
+                    return;
+                }
             default:
                 for (const Node& c : n.children) emit_node(c);
                 return;
