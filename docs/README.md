@@ -38,6 +38,8 @@ the most distinctive part of the project.
 
 ## Release engineering
 
+- [Runtime & Linking Policy](../runtime-linking-policy.md) — how official
+  binaries are linked and packaged (the VTE must never be system-provided)
 - [Packaging](packaging/appimage.md) — AppImage
 - [Debian package](packaging/debian.md)
 - [Desktop integration](packaging/desktop-integration.md)

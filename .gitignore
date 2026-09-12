@@ -6,6 +6,10 @@ build-*/
 *.so
 compile_commands.json
 
+# Environment
+
+.env
+
 # Editor / OS
 .vscode/
 .idea/

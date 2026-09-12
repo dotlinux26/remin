@@ -1,30 +1,37 @@
 # Packaging — Debian / Ubuntu
 
 A `.deb` is built from the CMake install rules plus the packaging helper
-scripts. Installed layout:
+scripts. Installed layout (hybrid packaging per the
+[Runtime & Linking Policy](../runtime-linking-policy.md)):
 
 ```text
 /usr/bin/remin
-/usr/share/remin/resources/           styles, schemas, logo
+/usr/lib/remin/libvte-2.91-gtk4.so.0      PRIVATE Remin-patched VTE
+/usr/share/remin/resources/               styles, schemas, logo
 /usr/share/applications/remin.desktop
 /usr/share/icons/hicolor/index.theme
 /usr/share/icons/hicolor/scalable/apps/remin.svg
 /usr/share/icons/hicolor/scalable/apps/remin-terminal.svg
 /usr/share/icons/hicolor/scalable/apps/remin-note.svg
+/usr/share/metainfo/remin.metainfo.xml
 ```
 
-## Dependencies
+## Dependency model
 
-Declared as Debian package dependencies so `apt` resolves them:
+The patched VTE is a **private runtime**. The binary resolves it through a
+relative RUNPATH (`$ORIGIN/../lib/remin`), not through the system loader, so a
+distro `libvte-2.91-gtk4.so` can never shadow it. The package must not declare
+a system `libvte` dependency.
+
+Other stack pieces (GTK/gtkmm/GLib/Cairo/Pango, gtksourceview, adwaita) come
+from the distro as ordinary declared dependencies:
 
 ```text
-libgtkmm-4.0, libvte-2.91 (patched), libgtksourceview-5,
-libadwaita-1, librsvg2, libmd4c, libglib2.0, pango, openssl
+libgtkmm-4.0, libgtksourceview-5, libadwaita-1, librsvg2,
+libglib2.0, pango, openssl
 ```
 
-If the distro ships an unpatched system VTE, the package depends on the Remin
-patched VTE (see the `--with-own-vte` convention below); each runtime must then
-run with `LD_LIBRARY_PATH` pointing at the bundled libvteterminal.
+md4c is statically linked into Remin (see the policy).
 
 ## Building the package
 

@@ -23,9 +23,9 @@ checkout:
 # → Remin-1.0.0-linux-x86_64.AppImage
 ```
 
-The image resolves the patched VTE at runtime via the bundled path, so
-`LD_LIBRARY_PATH` is set inside the AppRun wrapper — stock VTE never shadows
-the snapshot-capable library.
+The image resolves the patched VTE at runtime from inside the AppDir, so
+stock VTE never shadows the snapshot-capable library. This fully bundled
+runtime follows the [Runtime & Linking Policy](../runtime-linking-policy.md).
 
 ## Smoke test (do before every release)
 

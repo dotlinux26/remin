@@ -2,7 +2,9 @@
 
 Follow this in order before shipping a release. The full hardening plan that
 this checklist operationalizes lives in
-[`docs/release-hardening-plan.md`](../release-hardening-plan.md).
+[`docs/release-hardening-plan.md`](../release-hardening-plan.md); the linking
+and bundling rules for every artifact live in
+[`docs/runtime-linking-policy.md`](../runtime-linking-policy.md).
 
 ```text
 1. Docs cleanup      — restructure goes live (usage/ architecture/ design/
@@ -27,6 +29,10 @@ this checklist operationalizes lives in
   restart.
 - `.deb` installs on a clean container and launches via the desktop entry.
 - Generated artifacts are reproducible from a tagged checkout.
+- **VTE invariant gate** (policy §8): every produced artifact links the
+  Remin-patched VTE — verified with `ldd`/`readelf`/`strings` plus a runtime
+  snapshot-symbol probe; RUNPATH is relative (`$ORIGIN/...`), never an
+  absolute build path, and no artifact depends on a system `libvte`.
 
 ## Release assets
 

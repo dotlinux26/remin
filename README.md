@@ -72,6 +72,22 @@ multiple windows (`Workspace → Window → Tab → Pane`) and persists each one
 across restarts, but the GUI attaches to the *most recent* window and shows one
 at a time. Multiple on-screen windows are a V2 feature (design-only today).
 
+### Runtime dependency policy
+
+Remin relies on a modified VTE 0.76 runtime that provides the
+snapshot/restore API required for persistent terminal state.
+
+Official binary distributions therefore never rely on an arbitrary
+system VTE implementation.
+
+- Debian packages ship the Remin-patched VTE runtime privately.
+- AppImage bundles the complete GTK/VTE runtime.
+- macOS application bundles include the patched VTE dylib.
+- System Wayland/X11 integration remains provided by the host system.
+- Development dependencies may be installed through the platform's
+  package manager; they are not runtime requirements for official
+  self-contained releases.
+
 ## Install
 
 - **AppImage** (recommended, portable) — give
