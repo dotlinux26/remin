@@ -37,16 +37,32 @@ Workspace
 
 ## Screenshots
 
+Light theme:
+
 <p align="center">
-  <img src="docs/images/remin1.png" width="640" alt="Remin workspace" />
+  <img src="docs/images/remin1-light.png" width="640" alt="Remin workspace — light theme" />
   <br/>
-  <em>Remin — terminal + notes workspace</em>
+  <em>Remin — terminal + notes workspace (light)</em>
 </p>
 
 <p align="center">
-  <img src="docs/images/remin2.png" width="640" alt="Remin — second view" />
+  <img src="docs/images/remin2-light.png" width="640" alt="Remin panels & workflow — light theme" />
   <br/>
-  <em>Remin — panels & workflow</em>
+  <em>Remin — panels & workflow (light)</em>
+</p>
+
+Dark theme:
+
+<p align="center">
+  <img src="docs/images/remin1.png" width="640" alt="Remin workspace — dark theme" />
+  <br/>
+  <em>Remin — terminal + notes workspace (dark)</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/remin2.png" width="640" alt="Remin panels & workflow — dark theme" />
+  <br/>
+  <em>Remin — panels & workflow (dark)</em>
 </p>
 
 ## Status — v1.0.0rc

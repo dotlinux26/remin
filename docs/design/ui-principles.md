@@ -14,7 +14,7 @@ compact, clean aesthetic but adapted for a terminal-first workspace.
 ## Text-first with smart icons
 
 - Navigate by **words, spacing, alignment, keyboard shortcuts, subtle borders,
-  and selection state** — not by a toolbar of icons.
+  and selection state** - not by a toolbar of icons.
 - Tabs are `remin-tab` text buttons; the active tab is marked by background
   highlight + border accent.
 - Toolbar buttons use **icon + text label** for clarity (not icon-only).
@@ -24,7 +24,7 @@ compact, clean aesthetic but adapted for a terminal-first workspace.
 ## One accent system
 
 - All colors come from a small set of **semantic variables** built from the
-  logo's indigo→cyan gradient (`#4f46e5 → #6366f1 → #06b6d4`).
+  logo's indigo->cyan gradient (`#4f46e5 -> #6366f1 -> #06b6d4`).
 - Themes (`resources/styles/{light,dark}.css`) map with GTK `@define-color`:
   - `@bg` / `@surface` / `@border` / `@text` / `@text-muted`
   - `@accent` / `@accent-2` / `@accent-soft`
@@ -41,7 +41,7 @@ compact, clean aesthetic but adapted for a terminal-first workspace.
 ## Feedback is quiet but present
 
 - Long-running ops (e.g. autosave) surface as a **small pill** (`#autosave-badge`)
-  top-right: green `saved ✓`, red `save failed`. It auto-hides after ~2 s.
+  top-right: green `saved OK`, red `save failed`. It auto-hides after ~2 s.
 - No modal dialogs for routine transitions.
 - Active tab highlight is immediate and obvious.
 - Toolbar shows contextually based on active tab type.
@@ -63,7 +63,7 @@ compact, clean aesthetic but adapted for a terminal-first workspace.
 - Date shown only on hover (tooltip)
 - Search/filter box at top of directory panel
 - Right-click context menu: New File, New Folder, Rename, Delete, Copy Path
-- Double-click text files → opens in note editor
+- Double-click text files -> opens in note editor
 - Only show expander arrow for directories with children
 
 The logo itself is reused as the header mark; it is the only "hero graphic" in

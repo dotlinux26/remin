@@ -1,135 +1,135 @@
-# Transcript Recorder — Architecture Investigation (Phase D: D0 + D1 gate)
+# Transcript Recorder - Architecture Investigation (Phase D: D0 + D1 gate)
 
-Status: D0 COMPLETE · D1 DECISION PENDING (2026-09-06)
-Authoritative: `docs/design/history-system-spec.md` §3–§14 + `docs/problem-terminal-transcript-capture.md` (P0-B).
+Status: D0 COMPLETE | D1 DECISION PENDING (2026-09-06)
+Authoritative: `docs/design/history-system-spec.md` section3-section14 + `docs/problem-terminal-transcript-capture.md` (P0-B).
 
-> Objective: add a **Remin-owned TerminalTranscriptRecorder** (lịch sử output, độc
-> lập với VTE current screen/scrollback, sống sót qua `clear`) **mà KHÔNG
-> reimplement PTY** (D8 out-of-scope) và KHÔNG thay `vte_terminal_spawn_async`.
-> Theo yêu cầu user: KHÔNG triển khai recorder (D2) cho đến khi D0/D1 hiểu rõ.
-> Nếu không có tee point an toàn với integration hiện tại → **STOP và báo
-> constraint chính xác**.
+> Objective: add a **Remin-owned TerminalTranscriptRecorder** (output history,
+> independent of the VTE current screen/scrollback, survives `clear`) **without**
+> reimplementing a PTY (D8 out-of-scope) and **without** replacing `vte_terminal_spawn_async`.
+> Per user request: do NOT implement the recorder (D2) until D0/D1 are understood.
+> If there is no safe tee point within the current integration -> **STOP and report
+> the exact constraint**.
 
 ---
 
-## 1. D0 — PTY/VTE OUTPUT OWNERSHIP (verified VTE 0.76/0.78 source)
+## 1. D0 - PTY/VTE OUTPUT OWNERSHIP (verified VTE 0.76/0.78 source)
 
-| Câu hỏi | Kết luận |
+| Question | Conclusion |
 |---------|----------|
-| Ai giữ master PTY fd? | `VtePty` (`vte::base::Pty::m_pty_fd`), mở bằng `posix_openpt(..., O_NONBLOCK|O_CLOEXEC)` + **TIOCPKT packet mode**. `vte_pty_get_fd()` trả **chính fd đó** (borrowed, không dup, không được close/flags đổi). `vte_terminal_get_pty()` trả cùng object pty. |
-| Ai đọc master fd? | **VTE luôn là reader duy nhất.** Sau `vte_terminal_spawn_async` → callback `vte_terminal_set_pty()` → `connect_pty_read()` → `g_unix_fd_add_full(...)` trên master (G_IO_IN/PRI/HUP/ERR) → `pty_io_read()` vòng `read()` đến EAGAIN, đẩy vào `m_incoming_queue` → parser → screen. Không có path output nào bypass được reader này. |
-| VTE có output hook an toàn? | **KHÔNG.** Trong GTK4 KHÔNG có signal chứa raw output bytes. `contents-changed` = notification **không payload**, bị coalesce (idle `emit_pending_signals`), dành cho a11y. `text-inserted/text-scrolled/text-modified` **chỉ tồn tại ở GTK3** (`#if _VTE_GTK == 3`) và không được emit. Không có `output/received/data`/`log/tee/record` API. |
-| `get_pty()+get_fd()` + GIO watch riêng có an toàn? | **KHÔNG — race dual-reader bất hợp pháp.** `get_fd()` trả đúng fd/open-file-description mà VTE đã watch. Đọc master (O_NONBLOCK + TIOCPKT) **tiêu thụ bytes** (không peek); hai source trong cùng main loop `read()` tranh nhau, reader nào trước ăn bytes của reader kia → corrupt cả screen lẫn recorder. Đúng race mà design cấm. |
+| Who owns the master PTY fd? | `VtePty` (`vte::base::Pty::m_pty_fd`), opened with `posix_openpt(..., O_NONBLOCK|O_CLOEXEC)` + **TIOCPKT packet mode**. `vte_pty_get_fd()` returns **that same fd** (borrowed, no dup, must not be closed or have flags changed). `vte_terminal_get_pty()` returns the same pty object. |
+| Who reads the master fd? | **VTE is always the sole reader.** After `vte_terminal_spawn_async` -> callback `vte_terminal_set_pty()` -> `connect_pty_read()` -> `g_unix_fd_add_full(...)` on the master (G_IO_IN/PRI/HUP/ERR) -> `pty_io_read()` loops `read()` until EAGAIN, pushes into `m_incoming_queue` -> parser -> screen. No output path bypasses this reader. |
+| Does VTE have a safe output hook? | **NO.** In GTK4 there is NO signal carrying raw output bytes. `contents-changed` = notification **without payload**, coalesced (idle `emit_pending_signals`), for a11y. `text-inserted/text-scrolled/text-modified` **exist only in GTK3** (`#if _VTE_GTK == 3`) and are not emitted. No `output/received/data`/`log/tee/record` API. |
+| Is `get_pty()+get_fd()` plus a separate GIO watch safe? | **NO - illegal dual-reader race.** `get_fd()` returns the exact fd/open-file-description VTE already watches. Reading the master (O_NONBLOCK + TIOCPKT) **consumes bytes** (no peek); two sources in the same main loop contend for `read()`, whichever reads first steals the other's bytes -> corrupts both screen and recorder. This is exactly the race the design forbids. |
 
-### 1a. Raw byte tồn tại ở đâu?
+### 1a. Where do raw bytes exist?
 
-Chỉ có **một** chỗ sau khi read: `m_incoming_queue` được `pty_io_read()` tiêu thụ
-→ parser → screen buffer. Không có callback/emitter giữa read và parse. Do đó
-**không có raw output bytes nào ở ngoài VTE parser** trong API 0.76/0.78 public.
-Capture trước đây của Remin dùng `vte_terminal_get_text_range_format()` = snapshot
-post-parse (đã decode, mất escape/format, mất nội dung bị `clear`) — đây chính là
-nguyên nhân P0-B.
+Only **one** place after reading: `m_incoming_queue`, consumed by `pty_io_read()`
+-> parser -> screen buffer. There is no callback/emitter between read and parse. Hence
+**no raw output bytes exist outside the VTE parser** in the public 0.76/0.78 API.
+Remin's earlier capture used `vte_terminal_get_text_range_format()` = post-parse
+snapshot (already decoded, loses escape codes/format, loses content cleared by `clear`) - this is
+the root cause of P0-B.
 
 ---
 
-## 2. D1 — DECISION GATE
+## 2. D1 - DECISION GATE
 
-### Yêu cầu từ directive (D0/D1/D8)
+### Requirements from the directive (D0/D1/D8)
 
-Recorder phải đặt ở tee point **single-reader** quanh integration hiện tại
-(giữ `Shell → OS PTY → VTE → TerminalPane`), không hai reader shared master.
+The recorder must sit at a **single-reader** tee point around the current integration
+(keep `Shell -> OS PTY -> VTE -> TerminalPane`), with no two readers sharing the master.
 
-### Kết luận D1
+### D1 conclusion
 
-**KHÔNG có tee point an toàn nếu GIỮ NGUYÊN `vte_terminal_spawn_async` (VTE là
-single reader) và không có output-bytes hook.** Lựa chọn duy nhất để có bytes
-không-race là phải "làm reader chính mình":
+**There is NO safe tee point while keeping `vte_terminal_spawn_async` unchanged (VTE is the
+single reader) and having no output-bytes hook.** The only race-free way to get bytes is to
+"become the reader ourselves":
 
 ```
-tự tạo VtePty (vte_pty_new_sync / vte_pty_spawn_async — KHÔNG spawn_async của terminal)
-+ KHÔNG gọi vte_terminal_set_pty()    (nếu gọi → VTE lại cài reader của nó = dual-reader)
-+ GIO watch riêng trên vte_pty_get_fd() → đọc (xử lý TIOCPKT) → vte_terminal_feed(bytes)
+create our own VtePty (vte_pty_new_sync / vte_pty_spawn_async - NOT terminal's spawn_async)
++ DO NOT call vte_terminal_set_pty()    (if called -> VTE installs its own reader = dual-reader)
++ own GIO watch on vte_pty_get_fd() -> read (handle TIOCPKT) -> vte_terminal_feed(bytes)
 ```
 
-NHƯNG hướng đó **mất toàn bộ convenience của VTE spawn path**:
-- phải tự `vte_pty_set_size` theo resize (terminal không push được size nếu pty không đính).
-- `vte_terminal_watch_child` **hard-require** pty đã set trên terminal (`src/vtegtk.cc:4883`), nên không reap child được qua API chuẩn.
-- phải tự quản lý spawn/process-group/EOF/HUP giống như reimplement.
+BUT that direction **loses all the convenience of VTE's spawn path**:
+- must do `vte_pty_set_size` on resize yourself (terminal cannot push size if pty is not attached).
+- `vte_terminal_watch_child` **hard-requires** the pty to be set on the terminal (`src/vtegtk.cc:4883`), so you cannot reap the child via the standard API.
+- must manage spawn/process-group/EOF/HUP yourself, like a reimplementation.
 
-Đó chính là **D8 out-of-scope** (custom PTY lifecycle / process-group / SIGWINCH /
-thay spawn path) — user đã cấm.
+That is exactly **D8 out-of-scope** (custom PTY lifecycle / process-group / SIGWINCH /
+replacing the spawn path) - forbidden by the user.
 
-### Gate: STOP (không code D2 bây giờ)
+### Gate: STOP (do not code D2 now)
 
 > Perm D1: "If a safe output tee can be established around the existing VTE
-> integration → implement. If **not** → **STOP and report the exact architectural
+> integration -> implement. If **not** -> **STOP and report the exact architectural
 > constraint**."
 
-Theo khảo sát: **tee không thể lập quanh integration hiện tại mà không vi phạm D8.**
-→ Báo constraint. Chờ quyết định.
+Per the investigation: **a tee cannot be established around the current integration without violating D8.**
+-> Report the constraint. Await decision.
 
 ---
 
-## 3. Các lựa chọn (đệ trình user)
+## 3. Options (submitted to user)
 
-### (a) Snapshot-based transcript (giữ nguyên VTE spawn; KHÔNG cần PTY rewrite)
+### (a) Snapshot-based transcript (keep VTE spawn; NO PTY rewrite)
 
-- Capture theo sự kiện `contents-changed` (no-payload, coalesced, chạy trên main
-  context — không block) → gọi `vte_terminal_get_text_range_format()` và **diff** so
-  với lần trước để nối phần output mới vào transcript; ghi dấu `clear` khi thấy
-  scrollback giảm/xoá.
-- **Ưu**: zero rủi ro PTY, giữ nguyên `spawn_async`, đúng D8 hoàn toàn.
-- **Nhược**: vẫn là post-parse (không phải raw bytes); phụ thuộc VTE screen — đây
-  CHÍNH là thứ spec §4 cấm ("KHÔNG được phụ thuộc VTE current screen") và có rủi ro
-  tái hiện P0-B (capture decode/lossy). Tôi KHÔNG khuyến nghị vì vi phạm lõi spec.
+- Capture on `contents-changed` events (no-payload, coalesced, runs on the main
+  context - non-blocking) -> call `vte_terminal_get_text_range_format()` and **diff** it
+  against the previous one to append only the new output to the transcript; record a `clear`
+  marker when the scrollback shrinks/is erased.
+- **Pros**: zero PTY risk, keeps `spawn_async`, fully D8-compliant.
+- **Cons**: still post-parse (not raw bytes); depends on the VTE screen - this is
+  EXACTLY what spec section4 forbids ("must not depend on the VTE current screen") and risks
+  reproducing P0-B (lossy decode capture). NOT recommended because it violates the spec core.
 
-### (b) "Own reader → feed" (single-reader tee hợp lệ duy nhất nhưng vượt D8)
+### (b) "Own reader -> feed" (the only valid single-reader tee, but exceeds D8)
 
-- Như §2: tự VtePty + reader riêng + `vte_terminal_feed`. Có raw bytes chuẩn, sống
-  qua `clear`, giải quyết luôn P0-B.
-- **Nhược**: chính là những gì D8 liệt kê out-of-scope (PTY lifecycle, watch-child,
-  resize, SIGWINCH, EOF/HUP, process-group). Cần **explicit approval** để vượt D8.
+- As in section2: own VtePty + own reader + `vte_terminal_feed`. Gives clean raw bytes, survives
+  `clear`, also resolves P0-B.
+- **Cons**: exactly what D8 lists as out-of-scope (PTY lifecycle, watch-child,
+  resize, SIGWINCH, EOF/HUP, process-group). Requires **explicit approval** to exceed D8.
 
-### (c) Defer Phase D, làm E/F/G trước
+### (c) Defer Phase D, do E/F/G first
 
-- Window History + wire 3-mode không phụ thuộc transcript. Quay lại D sau khi
-  E/F/G xong (có thể có quyết định mới).
+- Window History + wiring the 3 modes don't depend on the transcript. Return to D after
+  E/F/G are done (a new decision may emerge).
 
 ---
 
-## 4. Transcript data model (không triển khai nếu chưa chọn hướng)
+## 4. Transcript data model (not implemented until a direction is chosen)
 
-Tham chiếu (áp dụng dù chọn (a) hay (b)) — spec §3/§15/§7, tách bạch:
+Reference (applies whether (a) or (b) is chosen) - spec section3/section15/section7, kept separate:
 
 ```text
-Per-pane (cách ly D5):
-  Pane → TranscriptChunk[] { seq, timestamp_us, kind (output|clear|interrupt), data }
+Per-pane (isolation D5):
+  Pane -> TranscriptChunk[] { seq, timestamp_us, kind (output|clear|interrupt), data }
 
-Aggregation chỉ ở query/UI:
-  Workspace → Window → Tab → Pane → Transcript[]
+Aggregation only at query/UI:
+  Workspace -> Window -> Tab -> Pane -> Transcript[]
 ```
 
-- Buffering (D4): PTY bytes → in-memory chunk buffer (ví dụ ~64KB) → flush qua
-  checkpoint/session pipeline → SQLite dedicated table (`transcripts_*`), **KHÔNG**
-  INSERT mỗi byte, KHÔNG nhét vào `scrollbacks`/`settings` generic (spec §15/§14).
-- Clear semantics (D3): `clear` = screen-state op → current screen trống, transcript
-  vẫn giữ: `ls · A · B · clear-event · pwd · /home/user`.
-- Restore (D6/D7): restore **current screen + shell context** qua `runtime_restore`
-  (đã có); transcript chỉ để **xem lại** lịch sử, KHÔNG replay hết lên VTE.
-- Naming (D2): `TerminalTranscriptRecorder`, **không gọi** ScrollbackRecorder.
+- Buffering (D4): PTY bytes -> in-memory chunk buffer (e.g. ~64KB) -> flush via
+  checkpoint/session pipeline -> SQLite dedicated table (`transcripts_*`), **NOT**
+  INSERT per byte, NOT stuffed into `scrollbacks`/`settings` generic store (spec section15/section14).
+- Clear semantics (D3): `clear` = screen-state op -> current screen empty, transcript
+  still retains: `ls | A | B | clear-event | pwd | /home/user`.
+- Restore (D6/D7): restore **current screen + shell context** via `runtime_restore`
+  (already exists); transcript is only for **reviewing** history, NOT replayed onto VTE.
+- Naming (D2): `TerminalTranscriptRecorder`, **not called** ScrollbackRecorder.
 
 ---
 
-## 5. Chưa có (blocks D2)
+## 5. Blocked (blocks D2)
 
-- Quyết định hướng (a)/(b)/(c) từ user.
-- Nếu (b): approval vượt D8 + thiết kế PTY adapter mỏng.
+- User decision on direction (a)/(b)/(c).
+- If (b): approval to exceed D8 + design of a thin PTY adapter.
 
 ---
 
-## 6. Known limitations (thực tế khảo sát)
+## 6. Known limitations (from the actual investigation)
 
-- VTE 0.76/0.78 GTK4 **không expose raw output bytes**; không có log/tee/record hook.
-- `contents-changed` không payload + coalesced → chỉ dùng được làm "trigger snapshot", không phải byte stream.
-- `text-*` signals (GTK3-only) không tồn tại ở GTK4.
-- Đọc master fd chung = race phá hỏng screen; bị cấm tuyệt đối.
+- VTE 0.76/0.78 GTK4 **does not expose raw output bytes**; no log/tee/record hook.
+- `contents-changed` has no payload and is coalesced -> usable only as a "snapshot trigger", not a byte stream.
+- `text-*` signals (GTK3-only) do not exist in GTK4.
+- Reading the shared master fd = race that corrupts the screen; absolutely forbidden.

@@ -1,16 +1,16 @@
-# Remin — Markdown Raw HTML + Page Breaks + TỌC Numbering Research
+# Remin - Markdown Raw HTML + Page Breaks + TOC Numbering Research
 
-> Research note (2026-09-11). Chưa implement — design-first, gate với user trước khi code.
-> Mục tiêu: (1) cho phép user viết raw HTML trong Markdown để ép CSS + phân trang,
-> (2) TOC có dotted leader + page number kiểu sách.
+> Research note (2026-09-11). Not yet implemented - design-first, gate with user
+> before coding. Goals: (1) let users write raw HTML in Markdown to force CSS and
+> pagination, (2) TOC with dotted leader + book-style page numbers.
 
 ---
 
-## 1. Hiện trạng (đã verify bằng code + probe)
+## 1. Current state (verified with code + probe)
 
-### 1.1 Parser md4c đã theo dõi raw HTML
+### 1.1 md4c parser already tracks raw HTML
 
-Probe `ast_probe.cpp` trên `MD_DIALECT_GITHUB` (không có `MD_FLAG_NOHTMLBLOCKS`/`NOHTMLSPANS`):
+Probe `ast_probe.cpp` on `MD_DIALECT_GITHUB` (no `MD_FLAG_NOHTMLBLOCKS`/`NOHTMLSPANS`):
 
 ```text
 # T
@@ -18,7 +18,7 @@ Hello <span style="color:red">world</span>!
 <div style="page-break-after: always;"></div>
 ```
 
-→ AST:
+-> AST:
 ```
 Paragraph children:
   Text "Hello "
@@ -29,85 +29,85 @@ Paragraph children:
 HtmlBlock "<div style="page-break-after: always;"></div>\n"   (type 5)
 ```
 
-- `MD_BLOCK_HTML` → `NodeType::HtmlBlock` (`markdown_ast.cpp:193`)
-- `MD_TEXT_HTML` → `NodeType::HtmlSpan` (`markdown_ast.cpp:324`)
+- `MD_BLOCK_HTML` -> `NodeType::HtmlBlock` (`markdown_ast.cpp:193`)
+- `MD_TEXT_HTML` -> `NodeType::HtmlSpan` (`markdown_ast.cpp:324`)
 
-⇒ **Parser giữ đủ thông tin.** Vấn đề nằm ở renderers đang drop:
+=> **The parser keeps all the information.** The renderers are what drop it:
 
-| Stage | Hành vi hiện tại |
+| Stage | Current behavior |
 |-------|------------------|
-| `markdown_html.cpp:179` | `HtmlBlock` → `return;` (drop) |
-| `markdown_html.cpp:109-113` | `HtmlSpan` → drop |
-| `markdown_layout.cpp:620` | `HtmlBlock` → `return;` (drop) |
-| `markdown_layout.cpp:134-136` | `HtmlSpan`/`HtmlBlock` trong RunBuilder → `return;` (drop) |
-| PDF draw | dựa layout blocks → HTML không có block |
+| `markdown_html.cpp:179` | `HtmlBlock` -> `return;` (drop) |
+| `markdown_html.cpp:109-113` | `HtmlSpan` -> drop |
+| `markdown_layout.cpp:620` | `HtmlBlock` -> `return;` (drop) |
+| `markdown_layout.cpp:134-136` | `HtmlSpan`/`HtmlBlock` in RunBuilder -> `return;` (drop) |
+| PDF draw | built on layout blocks -> HTML has no blocks |
 
-### 1.2 TOC hiện tại
+### 1.2 Current TOC
 
-- `[[TOC]]` → `NodeType::Toc` (`markdown_ast.cpp:345 mark_toc_nodes`).
-- Layout `case NodeType::Toc` (`markdown_layout.cpp:570`) tạo 1 `Block::TocRow` cho mỗi heading.
-- TocRow có: `toc_indent` (14pt/level), `toc_number` ("1.", "1.1."), `toc_text`, `toc_anchor`, `has_link_hit = true`, `link_href = "#anchor"`.
-- Preview click → `markdown_preview.cpp:75` hit-test → scroll tới run có `anchor` match (`markdown_preview.cpp:80-90`) ⇒ **click-to-navigate hoạt động rồi**.
-- PDF export: TocRow được vẽ như text trơn, **không có dotted leader, không có page number**.
+- `[[TOC]]` -> `NodeType::Toc` (`markdown_ast.cpp:345 mark_toc_nodes`).
+- Layout `case NodeType::Toc` (`markdown_layout.cpp:570`) creates one `Block::TocRow` per heading.
+- TocRow has: `toc_indent` (14pt/level), `toc_number` ("1.", "1.1."), `toc_text`, `toc_anchor`, `has_link_hit = true`, `link_href = "#anchor"`.
+- Preview click -> `markdown_preview.cpp:75` hit-test -> scroll to the run whose `anchor` matches (`markdown_preview.cpp:80-90`) => **click-to-navigate works**.
+- PDF export: TocRow drawn as plain text, **no dotted leader, no page number**.
 
 ---
 
-## 2. Mục tiêu feature
+## 2. Feature goals
 
-### 2.1 Raw HTML → CSS styling
+### 2.1 Raw HTML -> CSS styling
 
-Người dùng muốn viết HTML để "ép" style. Hai mức:
+Users want to write HTML to "force" styling. Two levels:
 
-**Mức A (bắt buộc cho export HTML):** pass-through các HtmlBlock/HtmlSpan ra HTML nguyên văn. Browser tự hiểu CSS. Đây là chuẩn CommonMark/GitHub — "cách phổ biến và tương thích nhất".
+**Level A (required for HTML export):** pass HtmlBlock/HtmlSpan through to the HTML verbatim. The browser understands the CSS itself - the CommonMark/GitHub standard, "the common and most compatible approach".
 
 ```html
 <div style="page-break-after: always;"></div>
 ```
-→ giữ nguyên trong `<div>`... (hoặc block div nguyên văn).
+-> kept as-is (verbatim block div).
 
-**Mức B (preview + PDF — Pango/Cairo):** Pango không parse CSS. Nên tiếp cận thực dụng:
-- **Page break markers**: nhận diện `HtmlBlock`/`HtmlSpan` chứa CSS `page-break-after: always` (hoặc `break-after: page`, `break-before: page`, `page-break-before: always`) → tạo `Block::Kind::PageBreak` đặc biệt → PDF export tách trang ngay tại đây.
-- **Các HTML khác**: có 2 lựa chọn:
-  - (i) Drop (như hiện tại) — an toàn, nhưng "ép CSS" không chạy được trong preview/PDF.
-  - (ii) Shallow-parse một tập CSS cơ bản (`color`, `font-size`, `font-weight`, `text-align`) áp lên runs. **Không khuyến nghị V1** — dễ vỡ, sai lệch giữa preview/PDF/HTML.
+**Level B (preview + PDF - Pango/Cairo):** Pango does not parse CSS, so take a pragmatic approach:
+- **Page break markers**: detect `HtmlBlock`/`HtmlSpan` containing CSS `page-break-after: always` (or `break-after: page`, `break-before: page`, `page-break-before: always`) -> create a special `Block::Kind::PageBreak` -> PDF export breaks the page there.
+- **Other HTML**: two choices:
+  - (i) Drop (as today) - safe, but "forced CSS" does not work in preview/PDF.
+  - (ii) Shallow-parse a basic CSS set (`color`, `font-size`, `font-weight`, `text-align`) applied to runs. **Not recommended for V1** - fragile, diverges between preview/PDF/HTML.
 
-> Kết luận mức B V1: **chỉ hỗ trợ page-break marker**. Các HTML khác vẫn drop trong preview/PDF (giữ hành vi hiện tại), pass-through trong HTML export. Đây là chuẩn GitHub (raw HTML chỉ hữu dụng khi export).
+> Level B V1 conclusion: **only the page-break marker is supported**. Other HTML stays dropped in preview/PDF (current behavior), pass-through in HTML export - the GitHub standard (raw HTML is only useful on export).
 
 ### 2.2 PDF TOC numbering (dotted leader + page number)
 
-Yêu cầu:
+Requirement:
 ```
-1. Tóm tắt........................................12
-2. Chi tiết......................................16
+1. Summary........................................12
+2. Details.......................................16
 ```
 
-Cần **two-pass** trong export_pdf:
-1. Layout cả doc (TOC chưa có page number).
-2. **Paginate** → biết block nào rơi vào page nào (`PageSlice` trong `markdown_pdf_export.cpp:98-145`).
-3. Map anchor → page number (1-based) qua heading blocks (`link_href="#anchor"` ⇒ anchor → page).
-4. **Re-layout** với `TocPageResolver` → mỗi TocRow nhận `toc_page`.
-5. Draw: title bên trái, dotted leader, page number canh phải.
+Needs a **two-pass** in export_pdf:
+1. Layout the whole doc (TOC without page numbers yet).
+2. **Paginate** -> know which block lands on which page (`PageSlice` in `markdown_pdf_export.cpp:98-145`).
+3. Map anchor -> page number (1-based) via heading blocks (`link_href="#anchor"`).
+4. **Re-layout** with `TocPageResolver` -> each TocRow receives `toc_page`.
+5. Draw: title left, dotted leader, page number right-aligned.
 
-Ký hiệu cấu trúc hiện có để tái dùng:
-- `Block.toc_anchor` (đã có), `Block.link_href="#anchor"` (đã có).
-- Cần thêm field: `Block.toc_has_page bool`, `Block.toc_page int` (đã đề xuất trong layout.hpp — chưa commit).
-- Paginator `PageSlice` có `first/last` index — map heading block → slice index ⇒ page = slice_index + 1.
-- Keep-with-next heading (`block_keeps_with_next`) — heading rơi cuối trang sẽ đẩy xuống page sau; page number phải khớp vị trí cuối cùng sau paginate.
+Structure to reuse:
+- `Block.toc_anchor` (existing), `Block.link_href="#anchor"` (existing).
+- New fields: `Block.toc_has_page bool`, `Block.toc_page int` (already proposed in layout.hpp - not committed).
+- `PageSlice` has `first/last` index - map heading block -> slice index => page = slice_index + 1.
+- Keep-with-next heading (`block_keeps_with_next`) - a heading at page end moves to the next page; the page number must match its final post-pagination position.
 
 ---
 
-## 3. Thiết kế chi tiết
+## 3. Detailed design
 
 ### 3.1 Page-break detection (layout)
 
-Thêm `Block::Kind::PageBreak` (hoặc dùng flag `force_break_before`):
+Add `Block::Kind::PageBreak` (or a `force_break_before` flag):
 
 ```cpp
-// Block kind mới
-PageBreak,   // height = 0, chỉ là marker
+// new Block kind
+PageBreak,   // height = 0, marker only
 ```
 
-Trong `markdown_layout.cpp`, `case NodeType::HtmlBlock:`:
+In `markdown_layout.cpp`, `case NodeType::HtmlBlock:`:
 
 ```cpp
 if (is_page_break_marker(n.text)) {
@@ -122,9 +122,9 @@ return;
 
 `is_page_break_marker(const std::string& html)`:
 - lowercase
-- tìm `page-break-after` hoặc `break-after` hoặc `page-break-before` hoặc `break-before`
-- value chứa `always` hoặc `page`
-- hoặc tag chính là `<div>`/`<section>`/`<p>`/`<span>` với style attribute
+- look for `page-break-after` or `break-after` or `page-break-before` or `break-before`
+- value contains `always` or `page`
+- or the tag is `<div>`/`<section>`/`<p>`/`<span>` with a style attribute
 
 ```cpp
 bool is_page_break_marker(const std::string& html) {
@@ -143,9 +143,9 @@ bool is_page_break_marker(const std::string& html) {
 }
 ```
 
-### 3.2 Paginator nhận biết PageBreak
+### 3.2 Paginator recognizes PageBreak
 
-Paginate hiện tại (`markdown_pdf_export.cpp:104-145`):
+Current paginate (`markdown_pdf_export.cpp:104-145`):
 
 ```cpp
 struct PageSlice { std::size_t first; std::size_t last; double start_y; };
@@ -166,32 +166,32 @@ while (cursor < n) {
 }
 ```
 
-Vòng lặp đang đẩy `last` qua từng block khớp. Với PageBreak (height = 0, y = vị trí hiện tại), marker tự khớp và bị nuốt vào page hiện tại — **không tự ngắt**. Cần chèn:
+The loop advances `last` through each matching block. With PageBreak (height = 0, y = current position) the marker matches and is swallowed into the current page - **no natural break**. Insert:
 
 ```cpp
 while (candidate < n) {
     const Block& b = blocks[candidate];
     if (b.kind == Block::Kind::PageBreak) {
         if (candidate > cursor) {
-            // ngắt trang ngay trước marker
+            // break the page right before the marker
             last = candidate - 1;
             break;
         }
-        // marker là block đầu tiên của page: cho "trôi" qua
-        // (page_top = b.y, rel==0, không chiếm chỗ, vô hại)
+        // marker is the first block of a page: let it "flow" past
+        // (page_top = b.y, rel==0, takes no space, harmless)
         last = candidate; ++candidate; continue;
     }
     ...
 }
 ```
 
-Marker image: với page hiện tại có nội dung → đóng page ngay trước marker (marker không chiếm slice nào cả, `draw` bỏ qua run rỗng). Marker nằm đầu trang → nó là `blocks[next]`, `page_top = marker.y`, `rel = 0`, chiều cao 0 → page mới tự nhiên tiếp tục ngay. Không sinh page trắng trống.
+Marker semantics: a current page that has content closes right before the marker (the marker occupies no slice; `draw` skips the empty run). A marker at the page top is `blocks[next]`, `page_top = marker.y`, `rel = 0`, height 0 -> the new page continues immediately. No blank page.
 
-**Note**: PageBreak y được set = y hiện tại tại thời điểm layout; height/margin = 0 nên không đẩy content tiếp theo; content SAU marker vẫn có y > marker.y → thuộc page sau. Đúng semantics.
+**Note**: PageBreak.y is set to the current y at layout time; height/margin = 0 so it does not push following content; content AFTER the marker has y > marker.y -> next page. Correct semantics.
 
-**Preview** (không phân trang): PageBreak là block height 0 — vô hình, không ảnh hưởng gì. Trong draw: `case PageBreak: continue;`.
+**Preview** (no pagination): PageBreak is a zero-height block - invisible, no effect. Draw: `case PageBreak: continue;`.
 
-**HTML export**: marker div được pass-through y nguyên → browser tự ngắt trang in.
+**HTML export**: the marker div passes through verbatim -> the browser breaks the page on print itself.
 
 ### 3.3 PDF TOC numbering (two-pass)
 
@@ -200,10 +200,10 @@ Marker image: với page hiện tại có nội dung → đóng page ngay trư�
 LayoutResult layout = layout_document(ast, style, content_w, resolve_image);
 if (layout.blocks.empty()) return false;
 
-// ... (hàm paginate được tách riêng ra) ...
+// ... (paginate extracted into its own function) ...
 auto pages = paginate(layout, content_top, content_bottom);
 
-// Bước 2: có TOC không?
+// Step 2: is there a TOC?
 bool has_toc = any block.kind == TocRow;
 if (has_toc) {
     // map anchor -> page
@@ -216,21 +216,21 @@ if (has_toc) {
         auto it = anchor_page.find(a);
         return it == end ? nullopt : optional(it->second);
     };
-    // RE-LAYOUT TOÀN BỘ
+    // FULL RE-LAYOUT
     layout = layout_document(ast, style, content_w, resolve_image, resolver);
     if (layout.blocks.empty()) return false;
     pages = paginate(layout, ...);
 }
 ```
 
-> **Lưu ý quan trọng**: thêm page number làm thay đổi height của TocRow (thêm runs) nhưng content_width vốn đã đủ rộng; số "12" nhỏ nên không gây wrap → height giữ nguyên ⇒ pagination của các block sau KHÔNG đổi. Vẫn an toàn RE-LAYOUT và RE-PAGINATE lại lần 2. Nếu future phát hiện shift, cần lặp đến fixed-point (small loop).
+> **Important note**: the added page number changes the TocRow height (extra runs), but content_width is already wide enough; a number like "12" does not wrap -> height stays -> pagination of later blocks does NOT change. Re-layout + re-paginate a second time is safe. If a future shift appears, iterate to a fixed point (small loop).
 
-### 3.4 Layout TocRow với page number
+### 3.4 Layout TocRow with page number
 
-Trong `markdown_layout.cpp` `case NodeType::Toc`:
+In `markdown_layout.cpp` `case NodeType::Toc`:
 
 ```cpp
-// sau khi tạo num_run + txt_run, nếu toc_pages có page:
+// after creating num_run + txt_run, if toc_pages has a page:
 if (toc_pages) {
     if (auto pg = toc_pages(h.anchor)) {
         b.toc_has_page = true;
@@ -240,18 +240,18 @@ if (toc_pages) {
         pg_run.font_family = style.base_font;
         pg_run.size_pt = style.base_font_pt;
         pg_run.color = style.text_color;
-        runs.push_back(pg_run); // thêm vào cuối
+        runs.push_back(pg_run); // append at the end
     }
 }
 ```
 
-Lưu ý: `measure_runs(b.run, avail, ...)` sẽ đo cả page number — không gây wrap vì avail lớn. Height = max line.
+Note: `measure_runs(b.run, avail, ...)` measures the page number too - no wrap since avail is large. Height = max line.
 
 ### 3.5 Draw TocRow dotted leader + page number
 
-**Draw path** (`markdown_draw.cpp`, phần text blocks):
+**Draw path** (`markdown_draw.cpp`, text blocks section):
 
-Tách riêng main-title text và page number:
+Separate the title text and the page number:
 
 ```cpp
 if (b.kind == Block::Kind::TocRow) {
@@ -260,23 +260,23 @@ if (b.kind == Block::Kind::TocRow) {
     wrap_w  = text_w;
 
     if (b.toc_has_page) {
-        // vẽ title (tất cả run trừ run cuối = page number)
-        // đo title width = measure_runs(title_runs, -1)
+        // draw title (all runs except the last = page number)
+        // measure title width = measure_runs(title_runs, -1)
         double title_w = ...;
-        // dotted leader: từ title_end + 6 tới page_x
-        double page_x = text_w + b.content_width...; // canh phải
+        // dotted leader: from title_end + 6 to page_x
+        double page_x = text_w + b.content_width...; // right-aligned
         draw_dotted_leader(cr, x0=text_x+title_w+6, x1=page_x - page_number_w - 6,
                            y=baseline);
-        // page number vẽ canh phải
+        // page number drawn right-aligned
         cr->move_to(page_x - page_number_w, text_y);
-        // layout page number show
+        // layout the page number
     } else {
-        // bình thường (preview)
+        // normal (preview)
     }
 }
 ```
 
-**Leader**: vẽ bằng text "." lặp lại hoặc Cairo dash:
+**Leader**: drawn with repeated "." text or a Cairo dash:
 
 ```cpp
 void draw_dotted_leader(cr, x0, x1, y) {
@@ -285,77 +285,77 @@ void draw_dotted_leader(cr, x0, x1, y) {
     cr->set_source_rgba(0.4, 0.4, 0.4, alpha);
     const double dot = 1.4, gap = 2.6;
     for (double x = x0; x < x1; x += dot + gap)
-        cr->rectangle(x, y, dot, 0.5);  // hoặc arc
+        cr->rectangle(x, y, dot, 0.5);  // or arc
     cr->fill();
     cr->restore();
 }
 ```
 
-Nếu free dot y = baseline - nhỏ.
+Dot bottom sits just below baseline.
 
-### 3.6 HTML TOC 
+### 3.6 HTML TOC
 
-`render_toc_html` đã có `<a href="#anchor">`. Muốn thêm số trang kiểu sách cần pass `anchor→page` custom function — nhưng HTML không phân trang nên **không làm**. Giữ nguyên (đã đẹp).
-
----
-
-## 4. Edge cases & rủi ro
-
-1. **PageBreak trong preview**: height 0, vô hình — OK. Nhưng `draw_blocks_range` cần `case PageBreak: continue;` để không draw gì.
-2. **PageBreak cuối doc**: paginate xử lý — không để phát sinh page trắng.
-3. **Nhiều TOC trong 1 doc**: mỗi [[TOC]] lặp đầy đủ headings — hiện tại đã thế, giữ.
-4. **Heading trùng anchor**: `headings()` đã dedup (`-2`, `-3`) — page map dùng `link_href.substr(1)` khớp anchor dedup. OK.
-5. **TOC page number và keep-with-next**: heading đẩy xuống page sau → map đúng vì ta map sau khi paginate lần 1. OK.
-6. **Re-layout thay đổi pagination**: (xem 3.3) nếu wrap không xảy ra thì ổn định. Kiểm tra bằng unit test 2-layout: page numbers không đổi giữa pass 1 và pass 2.
-7. **Raw HTML nguy hiểm (script)**: HTML export pass-through nguyên văn → **browser sẽ chạy**. Giống GitHub behavior. Document rõ. (Không làm sanitize V1.)
-8. **`<div>` giữa văn bản inline**: `<span>` mid-paragraph → HtmlSpan nằm trong Paragraph → layout drop (như cũ). Preview không bị lệch. OK.
+`render_toc_html` already emits `<a href="#anchor">`. Book-style page numbers would need an `anchor->page` custom function - but HTML is not paginated, so **do not do it**. Keep as-is (already good).
 
 ---
 
-## 5. Phạm vi implement (ĐÃ DUYỆT 2026-09-11)
+## 4. Edge cases & risks
 
-Decisions của user:
-- **Q1**: Pass-through nguyên văn (không sanitize) — giống GitHub.
-- **Q2**: Preview hiện **gạch ngang mờ** cho page-break marker (không phải vô hình).
-- **Q3**: Dotted-leader **cho CẢ PDF lẫn HTML export** (HTML không có số trang, chỉ dotted leader).
+1. **PageBreak in preview**: height 0, invisible - OK. But `draw_blocks_range` needs `case PageBreak: continue;`.
+2. **PageBreak at end of doc**: handled by paginate - no blank page.
+3. **Multiple TOCs per doc**: each `[[TOC]]` repeats the full heading list - already the case, keep.
+4. **Duplicate heading anchors**: `headings()` already dedups (`-2`, `-3`); page map uses `link_href.substr(1)` matching the deduped anchor. OK.
+5. **TOC page number vs keep-with-next**: a heading pushed to the next page maps correctly because mapping happens after the first paginate. OK.
+6. **Re-layout changes pagination**: (see 3.3) stable if no wrap. Verify with a 2-layout unit test: page numbers unchanged between pass 1 and pass 2.
+7. **Dangerous raw HTML (script)**: HTML export passes through verbatim -> **the browser will run it**. Same as GitHub. Document clearly. (No sanitize in V1.)
+8. **`<div>` mid-inline-text**: `<span>` mid-paragraph -> HtmlSpan inside Paragraph -> layout drops it (as before). Preview not misaligned. OK.
 
-Khi implement:
+---
 
-1. `markdown_layout.hpp`: `Block::Kind::PageBreak`; field `toc_has_page`, `toc_page` (đã thêm); `TocPageResolver` + tham số cho `layout_document` (decl đã thêm, **chưa thêm vào impl**).
+## 5. Implementation scope (APPROVED 2026-09-11)
+
+User decisions:
+- **Q1**: Verbatim pass-through (no sanitize) - same as GitHub.
+- **Q2**: Preview shows a **faint strikethrough line** for the page-break marker (not invisible).
+- **Q3**: Dotted leader for **BOTH PDF and HTML export** (HTML has no page numbers, only the leader).
+
+When implementing:
+
+1. `markdown_layout.hpp`: `Block::Kind::PageBreak`; fields `toc_has_page`, `toc_page` (already added); `TocPageResolver` + parameter for `layout_document` (decl added, **not yet in the impl**).
 2. `markdown_layout.cpp`:
-   - `is_page_break_marker(const std::string&)`: lowercase, nhận diện `page-break-after: always` / `break-after: page` / `page-break-before` / `break-before`, tag `<div>`/`<section>`/`<p>`/`<span>`.
-   - `case NodeType::HtmlBlock:` → nếu marker: `Block b; b.kind = PageBreak; b.height = 18.0; margin ~6`. **Không push run** (để draw vẽ gạch).
-   - `case NodeType::Toc:` → nếu `toc_pages` trả page: thêm run page number cuối, set `toc_has_page/toc_page`, đo lại height/content_width.
-   - signature `layout_document(..., const TocPageResolver& toc_pages = {})` đồng bộ decl+impl.
+   - `is_page_break_marker(const std::string&)`: lowercase, recognizes `page-break-after: always` / `break-after: page` / `page-break-before` / `break-before`, tags `<div>`/`<section>`/`<p>`/`<span>`.
+   - `case NodeType::HtmlBlock:` -> if marker: `Block b; b.kind = PageBreak; b.height = 18.0; margin ~6`. **Do not push a run** (so draw paints the line).
+   - `case NodeType::Toc:` -> if `toc_pages` returns a page: append the page number run, set `toc_has_page/toc_page`, re-measure height/content_width.
+   - signature `layout_document(..., const TocPageResolver& toc_pages = {})` kept in sync between decl and impl.
 3. `markdown_draw.cpp`:
-   - `case Block::Kind::PageBreak:` vẽ gạch ngang mờ (dash, `@text-muted` alpha ~0.35, đường thẳng giữa block, x từ `b.padding` tới `b.content_width`). **Preview + PDF**.
-   - TocRow: tách page-number run khỏi title → vẽ title, dotted leader từ cuối title tới gần page number, page number canh phải.
-   - `draw_dotted_leader(cr, x0, x1, baseline)` — dùng text "." lặp hoặc cairo dash.
-   - `draw_flow` + `draw_blocks_range` có PageBreak → không crash (case rõ ràng).
+   - `case Block::Kind::PageBreak:` draw a faint dashed line (`@text-muted` alpha ~0.35, mid-block, x from `b.padding` to `b.content_width`). **Preview + PDF**.
+   - TocRow: split the page-number run off the title -> draw title, dotted leader from title end to near the page number, page number right-aligned.
+   - `draw_dotted_leader(cr, x0, x1, baseline)` - repeating "." text or cairo dash.
+   - `draw_flow` + `draw_blocks_range` handle PageBreak without crash (explicit case).
 4. `markdown_pdf_export.cpp`:
-   - Tách `paginate()` helper (đọc blocks + breaks) — dễ unit test.
-   - Paginate: PageBreak block → ngắt trang (block height 18 nhưng bị đẩy sang page mới; đầu page thì trôi qua). Đảm bảo không sinh page trắng.
-   - Two-pass TOC: layout pass 1 → paginate → map anchor→page → RE-LAYOUT với resolver → re-paginate. Heading blocks có `link_href="#anchor"` sẵn (`markdown_layout.cpp:287`).
+   - Extract a `paginate()` helper (reads blocks + breaks) - unit-testable.
+   - Paginate: PageBreak block -> break the page (height 18 but pushed to the new page; at page top it flows past). No blank page.
+   - Two-pass TOC: layout pass 1 -> paginate -> map anchor->page -> RE-LAYOUT with resolver -> re-paginate. Heading blocks already have `link_href="#anchor"` (`markdown_layout.cpp:287`).
 5. `markdown_html.cpp`:
-   - `render_block`: `HtmlBlock` → emit `n.text` nguyên văn (với `<div style="page-break-after: always"></div>` → có CSS break) — `out += n.text; return;`. CHỦĐỘNG file sẽ có cả trailing newline — chấp nhận.
-   - `render_inline`: `HtmlSpan` → emit nguyên văn.
-   - `render_toc_html`: thêm dotted leader (CSS `text-align: right` + `::after` dots hoặc `<span class="toc-leader">…</span>` + số trang nếu có).
-6. Tests mới (unit): `is_page_break_marker` (4 dạng hợp lệ + âm), PageBreak trong paginate (không sinh trang trắng, ngắt đúng), TOC page number đúng (map heading→page), HtmlBlock pass-through không mất nội dung. Chạy `ctest`.
-7. Update `markdown_ast.hpp` comment: HtmlBlock "not rendered" → "emitted raw in HTML; page-break markers recognized in PDF/preview".
+   - `render_block`: `HtmlBlock` -> emit `n.text` verbatim (for `<div style="page-break-after: always"></div>` this yields the CSS break) - `out += n.text; return;`. The file will include a trailing newline (handled deliberately) - accepted.
+   - `render_inline`: `HtmlSpan` -> emit verbatim.
+   - `render_toc_html`: add dotted leader (CSS `text-align: right` + `::after` dots or `<span class="toc-leader">...</span>` + page number if present).
+6. New unit tests: `is_page_break_marker` (4 valid forms + negatives), PageBreak in paginate (no blank page, correct break), TOC page number correctness (heading->page map), HtmlBlock pass-through losing no content. Run `ctest`.
+7. Update the `markdown_ast.hpp` comment: HtmlBlock "not rendered" -> "emitted raw in HTML; page-break markers recognized in PDF/preview".
 
-## 6. Edge cases & rủi ro (đã rà)
+## 6. Edge cases & risks (reviewed)
 
-1. PageBreak trong preview: vẽ gạch mờ — user chốt OK. Không ảnh hưởng pagination.
-2. PageBreak cuối doc: không sinh trang trắng (paginate chốt page trước).
-3. Nhiều TOC: mỗi [[TOC]] kéo đủ headings — giữ nguyên.
-4. Heading trùng anchor: dedup `-2`/`-3` đã có; resolver map theo anchor dedup.
-5. keep-with-next + page number: map sau paginate lần 1 — đúng vị trí cuối.
-6. **Re-layout đổi pagination**: page number thêm run ngắn, content_width đủ → không wrap → height giữ → pagination ổn định. Verify ở test: page-number pass 1 == pass 2.
-7. Raw HTML script: pass-through (GitHub-style, user chốt). Không sanitize.
-8. `<span>` inline giữa paragraph: HtmlSpan trong Paragraph → pass-through HTML; preview/PDF drop inline.
+1. PageBreak in preview: faint line drawn - user approved. No pagination impact.
+2. PageBreak at end of doc: no blank page (paginate closes the previous page).
+3. Multiple TOCs: each `[[TOC]]` pulls the full heading list - keep as-is.
+4. Duplicate heading anchors: `-2`/`-3` dedup exists; resolver maps by the deduped anchor.
+5. keep-with-next + page number: mapped after the first paginate - correct final position.
+6. **Re-layout changes pagination**: page number adds a short run, content_width suffices -> no wrap -> height stable -> pagination stable. Verified by test: page-number pass 1 == pass 2.
+7. Raw HTML script: pass-through (GitHub-style, user approved). No sanitize.
+8. `<span>` inline mid-paragraph: HtmlSpan inside Paragraph -> pass-through in HTML; preview/PDF drop inline.
 
-## 7. Open questions — ĐÃ GIẢI QUYẾT (2026-09-11)
+## 7. Open questions - RESOLVED (2026-09-11)
 
-- **Q1**: Pass-through nguyên văn ✅
-- **Q2**: Preview hiện gạch ngang mờ ✅
-- **Q3**: Cả PDF lẫn HTML export ✅
+- **Q1**: Verbatim pass-through - approved.
+- **Q2**: Preview shows a faint strikethrough line - approved.
+- **Q3**: Both PDF and HTML export - approved.

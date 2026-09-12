@@ -1,14 +1,14 @@
-# Terminal History Semantics — Screen State / Command History / Transcript
+# Terminal History Semantics - Screen State / Command History / Transcript
 
 Date: 2026-09-06
-Status: DESIGN (đã chốt semantics theo user — chưa implement)
-Tài liệu gốc của vấn đề: `docs/problem-terminal-transcript-capture.md`
+Status: DESIGN (semantics finalized with the user; not yet implemented)
+Source problem doc: `docs/problem-terminal-transcript-capture.md`
 
 ---
 
-## 1. Vấn đề gốc đặt ra từ user
+## 1. The original problem
 
-User thao tác:
+User workflow:
 
 ```text
 $ ls
@@ -21,113 +21,114 @@ $ clear
 user@host:~$
 ```
 
-Sau đó thoát Remin, mở lại:
+After exiting Remin and reopening:
 
-- **Câu hỏi 1**: `clear` có làm mất lịch sử Remin không?
-- **Câu hỏi 2**: chúng ta có lưu toàn bộ log kể cả khi đã `clear` không? Hay chỉ lưu
-  những gì thật sự hiện trên màn hình pane?
-- **Câu hỏi 3**: Remin không phải bash nên không có kiểu `bash_history` — không xem
-  lại được lệnh một cách tổng quát, chỉ ấn lên/xuống (↑↓) được. Có cách xử lý vấn
-  đề này không?
+- Question 1: does `clear` erase the Remin history?
+- Question 2: do we save the full log even after `clear`, or only what is actually
+  visible on the pane screen?
+- Question 3: Remin is not bash, so there is no `bash_history`; commands cannot be
+  reviewed generically, only via Up/Down (up/down arrow keys). Is there a way to
+  handle this?
 
-**Đáp án chốt của user:**
+User's finalized answer:
 
-> `clear` không phải là "xóa lịch sử Remin". Nó chỉ là một thao tác thay đổi trạng
-> thái hiển thị của terminal.
+> `clear` is not "deleting Remin history." It is only an operation that changes the
+> terminal's display state.
 
 ---
 
-## 2. Ba khái niệm TÁCH BẠCH (semantics đã chốt)
+## 2. Three strictly separated concepts (finalized semantics)
 
-Remin không gọi tất cả mọi thứ là "history". Có 3 khái niệm riêng:
+Remin does not call everything "history." There are 3 distinct concepts:
 
-### 2.1 Screen State ("màn hình hiện tại của pane")
+### 2.1 Screen State ("the pane's current screen")
 
 ```text
 current terminal-visible context
 ```
 
-- Bị ảnh hưởng bởi `clear`.
-- Là trạng thái hiển thị **mới nhất** được restore sau khởi động lại.
-- Ví dụ sau `clear` thì screen state = prompt trống `user@host:~$`.
+- Affected by `clear`.
+- The **most recent** display state restored after a restart.
+- After `clear`, screen state = empty prompt `user@host:~$`.
 
-### 2.2 Command History ("những lệnh user đã nhập")
+### 2.2 Command History ("commands the user has entered")
 
 ```text
 canonical per-pane sequence of committed commands
 ```
 
-- **`clear` KHÔNG xóa cái này.**
-- Sống sót qua restart.
-- Là nguồn cho History UI / search / provenance.
-- ↑↓ (navigation readline) **vẫn là shell-owned** — Remin không giả lập readline.
+- `clear` does **NOT** erase this.
+- Survives restart.
+- The source for History UI / search / provenance.
+- Up/Down (readline navigation) **remains shell-owned** - Remin does not emulate readline.
 
-### 2.3 Terminal Transcript ("những gì terminal đã từng render")
+### 2.3 Terminal Transcript ("what the terminal once rendered")
 
 ```text
 historical terminal output available to Remin
 ```
 
-- Độc lập với command history.
-- `clear` không nhất thiết xóa transcript lịch sử đã persist.
-- **KHÔNG nhất thiết replay lại trên màn hình hiện tại sau restore.**
+- Independent of command history.
+- `clear` does not necessarily erase persisted historical transcript.
+- **Not necessarily replayed on the current screen after restore.**
 
-### 2.4 Bảng tóm tắt
+### 2.4 Summary table
 
-| Khái niệm | Thay đổi bởi `clear` | Restore sau restart | Phục vụ |
-|-----------|----------------------|---------------------|---------|
-| Screen State | Có (clear → prompt trống) | Có — restore màn hình mới nhất | màn hình pane |
-| Command History | Không | Có — ↑↓ của shell + History UI | shell nav, search, provenance |
-| Terminal Transcript | Không cần thiết | Tuỳ loại — lưu riêng | History viewer, log đầu ra |
+| Concept | Changed by `clear` | Restored after restart | Serves |
+|---------|--------------------|------------------------|--------|
+| Screen State | Yes (clear -> empty prompt) | Yes - restore most recent screen | pane screen |
+| Command History | No | Yes - shell Up/Down + History UI | shell nav, search, provenance |
+| Terminal Transcript | Not necessarily | Type-dependent - stored separately | History viewer, output log |
 
-**`clear` là một screen-state operation, KHÔNG phải history-deletion operation.**
+**`clear` is a screen-state operation, NOT a history-deletion operation.**
 
 ---
 
-## 3. Vì sao không dựa vào `~/.bash_history` / HISTFILE
+## 3. Why not rely on `~/.bash_history` / HISTFILE
 
-Remin không phải shell, nhưng bên dưới vẫn có bash/zsh/fish thật:
+Remin is not a shell, but a real bash/zsh/fish runs underneath:
 
 ```text
 Remin
-  ↓
+  v
 VTE
-  ↓
+  v
 PTY
-  ↓
+  v
 bash (zsh/fish)
 ```
 
-Bash vẫn có history của nó, nhưng Remin **không nên dùng `~/.bash_history` làm
-nguồn canonical**, vì:
+Bash has its own history, but Remin **should not use `~/.bash_history` as the
+canonical source**, because:
 
-- user có thể dùng zsh / fish
-- `HISTFILE` có thể bị tắt
-- history có thể flush theo policy riêng của shell
-- nhiều pane có thể cùng shell type → lịch sử lẫn lộn
-- history scope không phản ánh Remin pane identity
+- the user may use zsh / fish
+- `HISTFILE` may be disabled
+- history may flush according to the shell's own policy
+- multiple panes can share a shell type -> mixed-up history
+- history scope does not reflect Remin pane identity
 
-**Canonical của Remin = `Pane.command_history[]`.**
+**Remin's canonical source = `Pane.command_history[]`.**
 
-Shell history (HISTFILE) chỉ là **runtime integration**, không phải nguồn dữ liệu.
+Shell history (HISTFILE) is only **runtime integration**, not a data source.
 
 ---
 
-## 4. Làm sao xem "toàn bộ lệnh" khi không có bash_history?
+## 4. How to view "all commands" without bash_history
 
-Đây chính là chỗ Remin tốt hơn terminal bình thường.
+This is where Remin beats a normal terminal.
 
-Sidebar **History** KHÔNG đọc `~/.bash_history`. Nó query chính cấu trúc Workspace:
+The **History** sidebar does NOT read `~/.bash_history`. It queries the Workspace
+structure itself:
 
 ```text
 Workspace
- └── Windows
-     └── Tabs
-         └── Panes
-             └── command_history[]
+ '-- Windows
+     '-- Tabs
+         '-- Panes
+             '-- command_history[]
 ```
 
-**Search ví dụ:** `nmap`
+**Example search:** `nmap`
 
 ```text
 Window: GitLab Audit
@@ -138,47 +139,47 @@ nmap -sCV 10.10.10.10
 nmap -p- 10.10.10.10
 ```
 
-**↑↓ thì vẫn giao cho shell** — hành vi shell tự nhiên, không mô phỏng readline.
-Remin đồng thời ghi nhận command đã commit để canonical history riêng.
+**Up/Down is left to the shell** - natural shell behavior, no readline emulation.
+Remin simultaneously records committed commands for its own canonical history.
 
 ---
 
-## 5. Hai luồng chạy song song (command recorder)
+## 5. Two parallel flows (command recorder)
 
 ```text
 User input
-   ↓
+   v
 PTY
-   ↓
+   v
 bash/zsh/fish
-   ↓
+   v
 VTE
 
-                        └── Remin command recorder
-                            (ghi lại command đã commit vào command_history[])
+                       '-- Remin command recorder
+                           (records committed commands into command_history[])
 ```
 
-Điều phải TRÁNH: đừng làm ↑↓ bằng cách Remin tự lấy `Pane.command_history[]`
-rồi feed ngược lại terminal. Shell đã có readline/history navigation rồi; Remin
-chỉ theo dõi và lưu lại.
+What to AVOID: implementing Up/Down by having Remin pull from
+`Pane.command_history[]` and feed it back into the terminal. The shell already has
+readline/history navigation; Remin only observes and stores.
 
 ---
 
-## 6. Kiến trúc đề xuất — Screen / Journal
+## 6. Proposed architecture - Screen / Journal
 
-Thay vì lấy VTE scrollback làm duy nhất một nguồn history, ta có:
+Instead of treating VTE scrollback as the single history source, we have:
 
 ```text
                     TerminalPane
-                         │
-              ┌──────────┴──────────┐
-              │                     │
+                         |
+              .---------------------.
+              |                     |
         Screen/VTE               Journal
-              │                     │
+              |                     |
          current view        terminal events/log
 ```
 
-**Ví dụ:**
+**Example:**
 
 ```text
 $ ls
@@ -191,36 +192,36 @@ $ pwd
 /home/user
 ```
 
-| Lớp | Nội dung |
-|-----|----------|
-| Screen snapshot cuối | `$ pwd` · `/home/user` |
-| Command history | `ls` · `clear` · `pwd` |
-| Transcript | `ls` · `a` · `b` · `clear` · `pwd` · `/home/user` |
+| Layer | Content |
+|-------|---------|
+| Last screen snapshot | `$ pwd`  |  `/home/user` |
+| Command history | `ls`  |  `clear`  |  `pwd` |
+| Transcript | `ls`  |  `a`  |  `b`  |  `clear`  |  `pwd`  |  `/home/user` |
 
-**Sau restart:**
+**After restart:**
 
-- Pane hiển thị: `$ pwd` / `/home/user`
-- ↑↓: `pwd` → `clear` → `ls`
-- History viewer: `10:32:01 ls` · `10:32:04 clear` · `10:32:07 pwd`
+- Pane displays: `$ pwd` / `/home/user`
+- Up/Down: `pwd` -> `clear` -> `ls`
+- History viewer: `10:32:01 ls`  |  `10:32:04 clear`  |  `10:32:07 pwd`
 
-**Và điều này giải quyết luôn `clear`:** nếu lưu nguyên transcript, thì `clear`
-chỉ là một **event** (`CLEAR`), không phải "DELETE EVERYTHING BEFORE HERE".
+**This also solves `clear`:** if the full transcript is stored, `clear` is just an
+**event** (`CLEAR`), not "DELETE EVERYTHING BEFORE HERE".
 
 ---
 
-## 7. TerminalJournal (future — append-only)
+## 7. TerminalJournal (future - append-only)
 
 ```text
 TerminalJournal
-├── INPUT
-├── OUTPUT
-├── RESIZE
-├── CLEAR
-├── SIGNAL
-└── ...
+|-- INPUT
+|-- OUTPUT
+|-- RESIZE
+|-- CLEAR
+|-- SIGNAL
+'-- ...
 ```
 
-Không cần làm full event journal trong V1. V1 có thể là:
+A full event journal is not needed for V1. V1 can be:
 
 ```text
 current_screen
@@ -230,25 +231,25 @@ command_history
 captured_scrollback
 ```
 
-Sau đó nâng cấp lên journal khi cần retention vượt quá scrollback VTE.
+Upgrade to a journal later when retention needs exceed VTE scrollback.
 
 ---
 
-## 8. Checkpoint behavior (chốt)
+## 8. Checkpoint behavior (finalized)
 
 ```text
-current screen state  → restore current screen
-command history       → restore per-pane history
-transcript            → retain separately when supported
+current screen state  -> restore current screen
+command history       -> restore per-pane history
+transcript            -> retain separately when supported
 ```
 
-- `clear` chỉ thay đổi **screen state**; command history + transcript sống sót.
-- Restore hiển thị **màn hình đúng như lần cuối user chủ động để lại**, không tự
-  dựng lại `$ ls ... $ clear` sau một screen đã bị clear.
+- `clear` only changes **screen state**; command history + transcript survive.
+- Restore shows the **screen exactly as the user last left it**, without rebuilding
+  `$ ls ... $ clear` behind a screen that was already cleared.
 
 ---
 
-## 9. Acceptance test (bắt buộc pass)
+## 9. Acceptance test (must pass)
 
 Pane A:
 
@@ -262,13 +263,13 @@ $ printf 'AFTER_CLEAR\n'
 AFTER_CLEAR
 ```
 
-**Sau restart:**
+**After restart:**
 
 ```text
 Screen:   $ printf 'AFTER_CLEAR\n'
           AFTER_CLEAR
 
-↑↓:       printf 'AFTER_CLEAR\n'
+^v:       printf 'AFTER_CLEAR\n'
           clear
           printf 'BEFORE_CLEAR\n'
 
@@ -279,53 +280,54 @@ History UI:  BEFORE_CLEAR
 
 ---
 
-## 10. Hiểu lầm quan trọng cần tránh
+## 10. Important misunderstanding to avoid
 
-> VTE scrollback không nên được coi là "toàn bộ lịch sử làm việc" của pane.
+> VTE scrollback should not be considered the "entire working history" of a pane.
 
-Nó chỉ là phần terminal emulator còn giữ/đang hiển thị. Remin cần một lớp
-state/history của riêng nó — chính lớp đó làm Remin khác terminal emulator
-bình thường.
+It is only the part the terminal emulator still holds/displays. Remin needs its own
+state/history layer - that layer is what makes Remin different from a plain
+terminal emulator.
 
 ---
 
-## 11. Trạng thái hiện tại của code (liên quan)
+## 11. Current code status (relevant)
 
-- `PaneState` hiện có: `scrollback`, `cwd`, `cols`, `rows`, `shell`,
+- `PaneState` currently has: `scrollback`, `cwd`, `cols`, `rows`, `shell`,
   `command_history`, `interrupted_command` (`src/core/pane/pane.hpp`).
-- `command_history` được ghi qua `WorkspaceCore::add_command_to_pane` (cap 1000).
-- `TerminalPane::capture_scrollback()` (`terminal_pane.cpp:188`) dùng
-  `vte_terminal_get_text_range_format` để lấy VTE scrollback — **đây là nguồn
-  "captured screen", KHÔNG phải transcript canonical.**
-- **CAPTURE FIDELITY hiện FAILING**: blob ~10KB nhưng gần như blank + prompt
-  (xem `docs/problem-terminal-transcript-capture.md`). Chưa xác nhận VTE có trả
-  thêm scrollback sau khi `clear` hay không.
+- `command_history` is written via `WorkspaceCore::add_command_to_pane` (cap 1000).
+- `TerminalPane::capture_scrollback()` (`terminal_pane.cpp:188`) uses
+  `vte_terminal_get_text_range_format` to get VTE scrollback - **this is the
+  "captured screen" source, NOT the canonical transcript.**
+- **CAPTURE FIDELITY is currently FAILING**: blob ~10KB but almost blank + prompt
+  (see `docs/problem-terminal-transcript-capture.md`). Whether VTE returns more
+  scrollback after `clear` is unconfirmed.
 
-### Mở rộng model đề xuất (để phù hợp semantics mới)
+### Proposed model extension (to match the new semantics)
 
 ```text
 PaneState
-├── terminal
-│   ├── transcript            (text VTE còn giữ — hiện là captured scrollback)
-│   ├── cols
-│   ├── rows
-│   └── viewport marker       (V1: bottom/prompt nếu không offset chính xác)
-├── shell
-│   ├── executable
-│   ├── cwd
-│   └── command_history[]     (↑/↓ per-pane + History UI)
-└── lifecycle
-    └── interrupted_command
+|-- terminal
+|   |-- transcript            (text VTE still holds - currently captured scrollback)
+|   |-- cols
+|   |-- rows
+|   '-- viewport marker       (V1: bottom/prompt if no exact offset)
+|-- shell
+|   |-- executable
+|   |-- cwd
+|   '-- command_history[]     (per-pane Up/Down + History UI)
+'-- lifecycle
+    '-- interrupted_command
 ```
 
 ---
 
-## 12. Câu hỏi kỹ thuật treo (cần xác minh bằng test)
+## 12. Open technical questions (must be verified by test)
 
-1. Sau `clear`, VTE còn giữ các dòng trước clear trong scrollback buffer không?
-   - Nếu CÓ → captured scrollback vẫn chứa output cũ (đúng transcript).
-   - Nếu KHÔNG → Remin phải có journal/tab riêng để giữ transcript; VTE scrollback
-     chỉ là screen state.
-2. Current capture (row range `-(rows + 10000)..rows`) trả toàn bộ hay chỉ vùng
-   hiển thị? (bằng chứng hiện tại nghiêng về "chỉ capture được ít hơn toàn bộ".)
-3. Cần thêm bucket `transcript` riêng hay tái sử dụng scrollback với semantics mới?
+1. After `clear`, does VTE keep pre-clear lines in the scrollback buffer?
+   - If YES -> captured scrollback still contains old output (correct transcript).
+   - If NO -> Remin must keep its own journal/tab to retain transcript; VTE scrollback
+     is only screen state.
+2. Does the current capture (row range `-(rows + 10000)..rows`) return the whole
+   buffer or only the visible region? (current evidence suggests it captures less
+   than the whole.)
+3. Is a separate `transcript` bucket needed, or reuse scrollback with new semantics?

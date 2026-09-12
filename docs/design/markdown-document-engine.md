@@ -1,70 +1,72 @@
-# Design — Remin Markdown Document Engine (MD4C → Document Model → Native Cairo)
+# Design - Remin Markdown Document Engine (MD4C -> Document Model -> Native Cairo)
 
 Date: 2026-09-09
-Status: DESIGN — đã chốt kiến trúc với user (không WebKit). Đang implement theo
-phases phía dưới. Doc này ghi lại **YÊU CẦU** + **GIẢI PHÁP ENGINE** (cùng một nguồn).
+Status: DESIGN - architecture decided with user (no WebKit). Implementation in
+progress by phases below. This doc records the REQUIREMENTS + ENGINE SOLUTION
+in one source.
 
 ---
 
-## 0. Mục tiêu
+## 0. Goals
 
-Remin Editor/Markdown milestone (12 tính năng) chạy trên **một pipeline duy nhất**,
-không phụ thuộc trình duyệt:
+The Remin Editor/Markdown milestone (12 features) runs on a **single pipeline**
+with no browser dependency:
 
 ```text
         Markdown Source
-              │
-              ▼
+              |
+              v
             MD4C              (CommonMark + extensions)
-              │
-              ▼
-   ┌─────────────────────┐
-   │ Remin Document Model│   (semantic, KHÔNG theo HTML)
-   │                     │
-   │ heading/paragraph/  │
-   │ span/link/image/    │
-   │ list/table/quote/   │
-   │ code/toc/footnote/  │
-   │ admonition/pagebreak│
-   └─────────┬───────────┘
-             │
-             ▼
-  ┌────────────────────┐
-  │ Remin Style Engine │  ("Remin Document Style" — CSS-like subset)
-  └─────────┬──────────┘
-            │
-            ▼
-  ┌────────────────────┐
-  │ Remin Layout Engine│  (Pango measure → line breaking / page breaking)
-  │                    │
-  │  Display List      │  (DrawCommand: Text/Rect/Line/Image)
-  └─────────┬──────────┘
-          ↓            ↓
+              |
+              v
+   +---------------------+
+   | Remin Document Model|   (semantic, NOT HTML-shaped)
+   |                     |
+   | heading/paragraph/  |
+   | span/link/image/    |
+   | list/table/quote/   |
+   | code/toc/footnote/  |
+   | admonition/pagebreak|
+   +---------+-----------+
+             |
+             v
+  +--------------------+
+  | Remin Style Engine |  ("Remin Document Style" - CSS-like subset)
+  +---------+----------+
+            |
+            v
+  +--------------------+
+  | Remin Layout Engine|  (Pango measure -> line breaking / page breaking)
+  |                    |
+  |  Display List      |  (DrawCommand: Text/Rect/Line/Image)
+  +---------+----------+
+          |            |
+          v            v
   GTK/Cairo Preview    Pango/Cairo PDF
   (Gtk::DrawingArea)   (Cairo::PdfSurface)
 ```
 
-**Nguyên tắc sống còn**: Preview và PDF **không được có hai layout khác nhau**.
-Một Display List, một hàm `draw(display_list, cairo_ctx)` — surface khác nhau
-thôi (screen vs PDF). "Giống nhau" = cùng layout/rendering pipeline, không hứa
-pixel-perfect ở mọi PDF viewer.
+**Cardinal rule**: Preview and PDF must **not** have two different layouts.
+One Display List, one `draw(display_list, cairo_ctx)` function - only the
+surface differs (screen vs PDF). "Sames" = same layout/rendering pipeline, no
+promise of pixel-perfect output in every PDF viewer.
 
 ---
 
-## 1. Quyết định kiến trúc (chốt với user)
+## 1. Architecture decisions (agreed with user)
 
-| Quyết định | Giá trị | Lý do |
+| Decision | Value | Why |
 |---|---|---|
-| Không WebKit | ❌ | Gọn, tự chủ, 1 binary + assets, không kéo WebProcess/JS Core/ICU/… |
-| Không Python / Pandoc / WeasyPrint | ❌ | Không runtime ngoài; PDF render nội bộ. |
-| MD4C | ✅ | Parser nhỏ, CommonMark + tables/tasklists/strikethrough/permissive autolinks. |
-| Document Model | ✅ | Semantic (heading/paragraph/…), KHÔNG thiết kế theo DOM. |
-| Layout Engine + Display List | ✅ | Preview/PDF/export chia cùng layout. |
-| GTK/Cairo preview | ✅ | `Gtk::ScrolledWindow → Gtk::DrawingArea`, Cairo + Pango. |
-| PDF = Cairo::PdfSurface | ✅ | Pagination/header/footer/TOC tự xây trên Display List. |
-| Static friendly | ✅ | md4c embed-able; Cairo static possible; Pango static heavy (runtime vẫn cần font/glib…) |
+| No WebKit | no | Compact, self-contained, 1 binary + assets, no WebProcess/JS Core/ICU/... |
+| No Python / Pandoc / WeasyPrint | no | No external runtime; PDF rendered internally. |
+| MD4C | yes | Small parser, CommonMark + tables/tasklists/strikethrough/permissive autolinks. |
+| Document Model | yes | Semantic (heading/paragraph/...), NOT designed around DOM. |
+| Layout Engine + Display List | yes | Preview/PDF/export share the same layout. |
+| GTK/Cairo preview | yes | `Gtk::ScrolledWindow -> Gtk::DrawingArea`, Cairo + Pango. |
+| PDF = Cairo::PdfSurface | yes | Pagination/header/footer/TOC built on Display List ourselves. |
+| Static friendly | yes | md4c embeddable; Cairo static possible; Pango static heavy (runtime still needs font/glib...) |
 
-Dependency footprint cuối:
+Final dependency footprint:
 
 ```text
 core document pipeline:  MD4C + GLib/GTK + PangoCairo + Cairo
@@ -72,41 +74,41 @@ core document pipeline:  MD4C + GLib/GTK + PangoCairo + Cairo
 
 ---
 
-## 2. YÊU CẦU (milestone 12 tính năng)
+## 2. Requirements (milestone, 12 features)
 
-1. **Image paste**: Ctrl+V trong note editor, clipboard có ảnh → lưu
-   `assets/asset-NNN.png` (scan 001↑) → chèn ref `![alt](assets/asset-003.png)`.
-2. **Full Markdown preview** (native): headings 1–6, paragraph, bold/italic/
+1. **Image paste**: Ctrl+V in the note editor, clipboard has image -> save
+   `assets/asset-NNN.png` (scan 001 up) -> insert ref `![alt](assets/asset-003.png)`.
+2. **Full Markdown preview** (native): headings 1-6, paragraph, bold/italic/
    strikethrough, inline code, fenced code, links, images (local/relative/
-   absolute/data URI), lists (order/nested), task lists, blockquote, hr, tables
-   (align), TOC, footnote (nếu md4c version hỗ trợ).
-3. **Custom CSS**: "Remin Document Style" — CSS-like subset (colors, font, size,
-   margin, padding, border, background, alignment, page). KHÔNG full CSS engine.
-4. **CSS setting**: chọn file `.css`/`.rcss` trong Settings; Reset về default;
-   preview + PDF + HTML export cùng dùng file đó (preview/PDF parse subset, HTML
-   export nhúng nguyên text).
-5. **Preview toolbar**: [Sync Scroll] + [Export HTML] + [Export PDF] (giữ trong
-   `preview_host` header hiện có).
-6. **HTML export**: `render_html_body()` từ cùng AST → 1 file .html tự đứng
-   (nhúng CSS, image refs → file:// hoặc relative), mở Save dialog.
-7. **PDF export**: `Cairo::PdfSurface`, pagination A4/letter, header/footer,
-   page number `{page}/{pages}`, TOC page, images embed.
+   absolute/data URI), lists (ordered/nested), task lists, blockquote, hr,
+   tables (alignment), TOC, footnote (if the md4c version supports it).
+3. **Custom CSS**: "Remin Document Style" - CSS-like subset (colors, font, size,
+   margin, padding, border, background, alignment, page). NOT a full CSS engine.
+4. **CSS setting**: pick a `.css`/`.rcss` file in Settings; Reset to default;
+   preview + PDF + HTML export all use that file (preview/PDF parse the subset,
+   HTML export embeds the raw text).
+5. **Preview toolbar**: [Sync Scroll] + [Export HTML] + [Export PDF] (kept in
+   the existing `preview_host` header).
+6. **HTML export**: `render_html_body()` from the same AST -> 1 self-contained
+   .html file (embedded CSS, image refs -> file:// or relative), opens a Save dialog.
+7. **PDF export**: `Cairo::PdfSurface`, A4/letter pagination, header/footer,
+   page number `{page}/{pages}`, TOC page, embedded images.
 8. **Print header/footer**: left / center / right + tokens `{page}{pages}{date}
    {time}{title}{author}{filename}`.
-9. **TOC**: `[[TOC]]` = Remin extension → auto TOC (nested, đánh số 1 / 1.1),
+9. **TOC**: `[[TOC]]` = Remin extension -> auto TOC (nested, numbered 1 / 1.1),
    toc_max_depth.
 10. **Page numbering**: footer `Page N of M` + tokens.
-11. **Document model**: một semantic AST duy nhất (md4c parse 1 lần), mọi nơi đọc
-    cùng model. Image asset mapping, print config per note (JSON blob).
-12. **Testing**: unit tests cho parse/ast/html/style/layout/document/pdf + toàn bộ
-    ctest suite vẫn pass.
+11. **Document model**: one single semantic AST (md4c parses once), everything
+    reads the same model. Image asset mapping, per-note print config (JSON blob).
+12. **Testing**: unit tests for parse/ast/html/style/layout/document/pdf and the
+    whole ctest suite still passes.
 
 ---
 
-## 3. Document Model (semantic, không theo HTML)
+## 3. Document Model (semantic, not HTML-shaped)
 
-Trạng thái hiện tại: `src/gui/markdown/markdown_ast.{hpp,cpp}` — md4c callbacks →
-`Node` tree (arena → value):
+Current state: `src/gui/markdown/markdown_ast.{hpp,cpp}` - md4c callbacks ->
+`Node` tree (arena -> value):
 
 ```cpp
 enum class NodeType {
@@ -118,47 +120,47 @@ enum class NodeType {
 };
 ```
 
-- Một parse duy nhất (md4c / MD_DIALECT_GITHUB), node tree semantic.
-- `[[TOC]]` được nhận diện thành node `Toc`.
-- `headings()` → flatten + anchor deterministic dedup (intro, intro-2…), dùng cho
-  TOC + link #anchor.
-- Đã có renderer HTML (`markdown_html.*`) cho export.
+- Single parse (md4c / MD_DIALECT_GITHUB), semantic node tree.
+- `[[TOC]]` is recognized as a `Toc` node.
+- `headings()` -> flatten + deterministic anchor dedup (intro, intro-2, ...),
+  used for TOC and `#anchor` links.
+- HTML renderer already exists (`markdown_html.*`) for export.
 
-Tiến tới (nếu md4c version support): footnote/comment/admonition/highlight/
-sup/sub → thêm NodeType + parser flag tương ứng. **KHÔNG hứa math renderer**
-(riêng engine, xem §8).
+Future (if the md4c version supports it): footnote/comment/admonition/highlight/
+sup/sub -> add the corresponding NodeType + parser flag. **No promise of a math
+renderer** (separate engine, see section 8).
 
 ---
 
 ## 4. Remin Style Engine ("Remin Document Style")
 
-Trạng thái: `src/gui/markdown/markdown_style.hpp` (đang implement parser).
+State: `src/gui/markdown/markdown_style.hpp` (parser under implementation).
 
-- CSS-like subset parser: `selector { prop: value; }`, selector nhiều tên, value
-  có unit (`12pt`, `18mm`, `0.5cm`, `16px`, số).
+- CSS-like subset parser: `selector { prop: value; }`, multiple selector names,
+  values with units (`12pt`, `18mm`, `0.5cm`, `16px`, plain numbers).
 - Selectors: `document, h1..h6, p, code, pre, blockquote, a, ul, ol, li, table,
   th, td, tr, hr, .toc, .toc-title, .toc-link, page`.
 - Props: color, background(-color), font-family, font-size, font-weight,
   font-style, text-decoration(strike/underline), margin[+-top/bottom/left/right],
   padding, border, border-left, border-color, border-width, line-height,
   page{size|width|height|margin}.
-- Palette token `@text @accent @bg @surface @border @text-muted
-  @red @orange @amber @green @blue` → resolve theo theme lúc parse →
-  preview/PDF tự theo dark mode mà không sửa file.
+- Palette tokens `@text @accent @bg @surface @border @text-muted
+  @red @orange @amber @green @blue` -> resolved against the theme at parse time ->
+  preview/PDF follow dark mode without modifying the file.
 - Builtin `default_style(palette)`; `apply_style(css, base, palette)`.
-- Không parse sai → crash; mọi unknown bị bỏ qua.
+- A parse failure must not crash; every unknown is ignored.
 
-Định nghĩa: đây là **Remin Style Sheet**, KHÔNG phải CSS engine (không flexbox/
+Definition: this is a **Remin Style Sheet**, NOT a CSS engine (no flexbox/
 grid/position/animation/DOM).
 
 ---
 
-## 5. Layout Engine → Display List
+## 5. Layout Engine -> Display List
 
-**`src/gui/markdown/markdown_layout.*`** (đang implement).
+**`src/gui/markdown/markdown_layout.*`** (under implementation).
 
-Đầu vào: `MarkdownAst + StyleSheet + content_width (+ page_height cho PDF)`.
-Pango đo & wrap; kết quả là **block boxes** với draw-able primitives:
+Input: `MarkdownAst + StyleSheet + content_width (+ page_height for PDF)`.
+Pango measures & wraps; the result is **block boxes** with drawable primitives:
 
 ```cpp
 struct DrawText   { std::string text; double x,y; std::string font; double size_pt;
@@ -171,140 +173,147 @@ struct DrawCmd    { enum Kind { Text, Rect, Line, Image } kind; DrawText t; Draw
 
 struct BlockBox {
     enum Kind { Paragraph, Heading, Quote, Code, List, Table, Hr, Image, Toc } kind;
-    double y, height;                 // trong flow (xét margin trước/sau)
+    double y, height;                 // in flow (margins applied before/after)
     double margin_before, margin_after;
     std::vector<DrawCmd> cmds;
-    bool splittable;                  // paragraph/code/… cut được giữa page
-    // dùng cho page breaker:
-    ... bounding region để clip/translate khi tách dòng
+    bool splittable;                  // paragraph/code/... can be cut between pages
+    // for the page breaker:
+    ... bounding region to clip/translate when splitting lines
 };
 ```
 
-- **Inline**: text runs (bold/italic/strike/underline/color/bg) biểu diễn bằng
-  Pango attr list trên 1 layout/paragraph; link ghi vị trí (Underline + màu
-  accent). Image inline → block Image (đơn giản hóa V1, ghi nhận).
-- **Tables**: grid, col width theo content + available, align, header bg, border.
-- **Sticky keep rules**: heading keep-with-next, không để heading trơ cuối trang.
-- **Preview**: layout 1 flow liên tục (không ngắt trang), width = widget width.
-- **PDF**: width = content_width + **page breaking** (line-granular cho splittable,
-  keep cho heading/listitem/table-row).
+- **Inline**: text runs (bold/italic/strike/underline/color/bg) represented as a
+  Pango attr list on one layout/paragraph; links record their position
+  (Underline + accent color). Inline image -> block Image (V1 simplification,
+  acknowledged).
+- **Tables**: grid, column width from content + available, alignment, header bg,
+  border.
+- **Sticky keep rules**: heading keeps-with-next, no orphan heading at page end.
+- **Preview**: a single continuous flow (no page breaks), width = widget width.
+- **PDF**: width = content_width + **page breaking** (line-granular for
+  splittable, keep for heading/listitem/table-row).
 
-Display List chung → **cùng code draw** cho cả preview lẫn PDF (§6).
+Shared Display List -> **the same draw code** for preview and PDF (section 6).
 
 ---
 
 ## 6. Draw (shared Cairo)
 
-**`src/gui/markdown/markdown_draw.*`** — `draw_blocks(cr, blocks, ...)`.
+**`src/gui/markdown/markdown_draw.*`** - `draw_blocks(cr, blocks, ...)`.
 
-- PangoCairo vẽ text (create_layout trên cr đang vẽ → wrap khớp layout).
-- HtmlDest TOC/heading anchors vẽ như text (với số + indent).
-- Hình: `cairo_set_source_surface` (load GdkPixbuf → Cairo Surface); scale giữ
-  tỷ lệ, giới hạn chiều rộng.
-- Code block: nền + border; quote: border-trái + nền nhạt padding.
-- Được gọi bởi: `MarkdownPreview::on_draw` (screen cr) và
-  `markdown_pdf_export` (PDF cr). **Code path giống nhau.**
+- PangoCairo draws text (create_layout on the current cr -> wrap matches layout).
+- HtmlDest TOC/heading anchors drawn as text (with number + indent).
+- Images: `cairo_set_source_surface` (load GdkPixbuf -> Cairo surface); scale
+  preserving aspect ratio, bounded by width.
+- Code block: background + border; quote: left border + light background padding.
+- Called by: `MarkdownPreview::on_draw` (screen cr) and `markdown_pdf_export`
+  (PDF cr). **Same code path.**
 
 ---
 
 ## 7. Native GTK Preview
 
-**`src/gui/note/markdown_preview.*`** — rewrite (giữ public API để
-`NoteTabView` không đổi):
+**`src/gui/note/markdown_preview.*`** - rewrite (keep the public API so
+`NoteTabView` does not change):
 
 ```text
 Gtk::ScrolledWindow
- └── Gtk::DrawingArea        (Cairo renderer, không GtkLabel nữa)
+  `-- Gtk::DrawingArea        (Cairo renderer, no more GtkLabel)
 ```
 
-Public API giữ nguyên:
+Public API unchanged:
 ```cpp
 MarkdownPreview();  void render(const std::string&);
 void set_scroll_fraction(double);   vadjustment();
 + void set_style_path(const std::string&);   // user CSS (subset)
-+ void set_dark(bool);                          // đổi palette, re-layout
++ void set_dark(bool);                          // change palette, re-layout
 ```
 
-- Scrolling native GTK → scroll sync dùng `vadjustment()` như cũ.
-- Click link: GestureClick hit-test trên Display List link rect → mở browser
-  (xdg-open / Gtk show-uri). *(phase sau)*
-- Light-first, dark mode = palette đổi + re-render (không reload WebView).
+- Native GTK scrolling -> scroll sync uses `vadjustment()` as before.
+- Link click: GestureClick hit-test on the Display List link rect -> open in
+  browser (xdg-open / Gtk show-uri). *(later phase)*
+- Light-first, dark mode = palette switch + re-render (no WebView reload).
 
 ---
 
 ## 8. PDF Export
 
-**`src/gui/markdown/markdown_pdf_export.*`** — `Cairo::PdfSurface`.
+**`src/gui/markdown/markdown_pdf_export.*`** - `Cairo::PdfSurface`.
 
-- Page geometry: `page.size` (a4/letter hoặc width/height), `page.margin`.
-- Pipeline: AST → StyleSheet(+user) → LayoutEngine (paginate với content_height)
-  → TOC 2 pass (nếu show_toc) → draw từng page:
+- Page geometry: `page.size` (a4/letter or width/height), `page.margin`.
+- Pipeline: AST -> StyleSheet(+user) -> LayoutEngine (paginate with
+  content_height) -> TOC 2 pass (if show_toc) -> draw each page:
   - page background
   - header (left/center/right, tokens)
   - content
   - footer (left/center/right, `{page}/{pages}`)
-- TOC page đầu (optional): các heading level ≤ max_toc_depth, số trang, dấu chấm
-  lề; links nội bộ dùng `cairo_pdf_surface_add_outline` / annotation.
-- Images: embed vào PDF (cairo image surface per image).
-- Code block split line-granular; heading keep-with-next.
-- Pass 1 = layout không TOC để biết tổng `{pages}`; pass 2 = render TOC + số trang.
+- Optional TOC page first: headings at level <= max_toc_depth, page numbers,
+  dotted leaders; internal links via `cairo_pdf_surface_add_outline` / annotation.
+- Images: embedded into the PDF (cairo image surface per image).
+- Code block split line-granular; heading keeps-with-next.
+- Pass 1 = layout without TOC to know the total `{pages}`; pass 2 = render TOC +
+  page numbers.
 
-Tokens header/footer: `{page} {pages} {date} {time} {title} {author} {filename}`.
+Header/footer tokens: `{page} {pages} {date} {time} {title} {author} {filename}`.
 
-**Không dùng**: PrintOperation screenshot, WeasyPrint, wkhtmltopdf.
+**Does not use**: PrintOperation screenshot, WeasyPrint, wkhtmltopdf.
 
 ---
 
-## 9. Feature matrix (md4c 0.4.8 trên máy hiện tại)
+## 9. Feature matrix (md4c 0.4.8 on the current machine)
 
 | Feature | md4c | Remin |
 |---|---:|---:|
-| H1–H6, paragraph, bold/italic, inline & fenced code, links, images, ordered/unordered/nested lists, tasklist, blockquote, hr, tables, strikethrough | ✅ | ✅ (layout + draw) |
-| permissive wikipedia/wikilink/underline extension | ✅ flag | ⚠️ renderer đơn giản |
-| footnote / highlight / sup / sub / admonition | ❌ (0.4.8) | chờ md4c version có flag — ko chặn milestone |
-| math (`$...$`) | ✅ nhận diện syntax | ⚠️ cần math renderer riêng (ngoài milestone) |
-| TOC ([[TOC]]), heading IDs, text colors, background, custom theme, custom stylesheet, page size, margins, page break, header/footer, page numbers, left/center/right, PDF, clickable links, image scaling, watermark, cover page | parser cấp heading | ✅ Remin layout/display list |
+| H1-H6, paragraph, bold/italic, inline & fenced code, links, images, ordered/unordered/nested lists, tasklist, blockquote, hr, tables, strikethrough | yes | yes (layout + draw) |
+| permissive wikipedia/wikilink/underline extension | yes flag | partial (simple renderer) |
+| footnote / highlight / sup / sub / admonition | no (0.4.8) | waits for an md4c version with the flag - not a milestone blocker |
+| math (`$...$`) | yes (syntax recognized) | needs a separate math renderer (outside milestone) |
+| TOC ([[TOC]]), heading IDs, text colors, background, custom theme, custom stylesheet, page size, margins, page break, header/footer, page numbers, left/center/right, PDF, clickable links, image scaling, watermark, cover page | parser at heading level | yes - Remin layout/display list |
 
 ---
 
 ## 10. Static linking (notes)
 
-- **md4c**: dễ nhúng source (`md4c.c/h`) hoặc `libmd4c.a`.
-- **Cairo**: static OK (`pkg-config --static --libs cairo` xem chain trên máy build).
-- **Pango**: build/static theo chain (glib, harfbuzz, freetype, fontconfig) —
-  khả thi nhưng vẫn cần font/backend runtime; không phải "binary độc lập 100%".
-- **GTK**: app GTK4 nên vẫn cần glib/gio runtime; **không WebKit** giảm footprint
-  khổng lồ (ko WebProcess/JS Core/libsoup/ICU…).
+- **md4c**: easy to embed the source (`md4c.c/h`) or `libmd4c.a`.
+- **Cairo**: static OK (`pkg-config --static --libs cairo` to see the chain on the
+  build machine).
+- **Pango**: build/static per chain (glib, harfbuzz, freetype, fontconfig) -
+  feasible but still needs font/backend at runtime; not "100% standalone binary".
+- **GTK**: a GTK4 app still needs glib/gio runtime; **no WebKit** removes a
+  huge footprint (no WebProcess/JS Core/libsoup/ICU...).
 
-Quyết định dài hạn: đặt mục tiêu **1 binary + vài assets**, không bắt user cài
-thêm runtime browser.
+Long-term decision: target **1 binary + a few assets**, no extra browser runtime
+to install.
 
 ---
 
 ## 11. Implementation gating (phases)
 
-Hướng đi (mỗi phase có build + test trước khi qua):
+Direction (each phase has a build + tests before moving on):
 
-- Phase A: ✅ Document Model (`markdown_ast`) + HTML body renderer
+- Phase A: done - Document Model (`markdown_ast`) + HTML body renderer
   (`markdown_html`) + document wrapper/assets/print config (`markdown_document`).
-- Phase B: ⏳ Style Engine (`markdown_style`) — parser + defaults + palettes.
-- Phase C: ⏳ Layout Engine (`markdown_layout`) → BlockBox + Display List;
+- Phase B: pending - Style Engine (`markdown_style`) - parser + defaults + palettes.
+- Phase C: pending - Layout Engine (`markdown_layout`) -> BlockBox + Display List;
   page breaker.
-- Phase D: ⏳ Draw layer (`markdown_draw`) + rewrite `MarkdownPreview` (DrawingArea).
-- Phase E: ⏳ NoteEditor paste-image + NoteTabView toolbar/export + assets + sync
-  scroll + Settings CSS + SessionController keys.
-- Phase F: ⏳ PDF export (`markdown_pdf_export`): header/footer/TOC/pagination
-  token.
-- Phase G: ⏳ Tests (ast/html/style/layout/document/pdf) + golden accept + AGENTS.md.
+- Phase D: pending - Draw layer (`markdown_draw`) + rewrite `MarkdownPreview`
+  (DrawingArea).
+- Phase E: pending - NoteEditor paste-image + NoteTabView toolbar/export + assets
+  + sync scroll + Settings CSS + SessionController keys.
+- Phase F: pending - PDF export (`markdown_pdf_export`): header/footer/TOC/
+  pagination tokens.
+- Phase G: pending - Tests (ast/html/style/layout/document/pdf) + golden accept
+  + AGENTS.md.
 
-**Acceptance tổng**: preview render đẹp bằng Cairo (không WebKit); PDF xuất ra
-cùng layout; 12 tính năng đủ; toàn bộ ctest cũ + mới pass; app chạy clean.
+**Overall acceptance**: preview renders cleanly with Cairo (no WebKit); PDF
+exports with the same layout; all 12 features complete; all old + new ctest pass;
+app runs clean.
 
 ---
 
-## 12. Non-goals (giữ ranh giới)
+## 12. Non-goals (keep the boundary)
 
-- Không full CSS engine (flex/grid/position/animation/DOM/JS).
-- Không math renderer đẹp (cần engine riêng nếu muốn LaTeX thật).
-- Không syntax highlighter đậm (thêm sau như layer độc lập).
-- Không WebKit/Python/Pandoc/WeasyPrint trong core document pipeline.
+- No full CSS engine (flex/grid/position/animation/DOM/JS).
+- No fancy math renderer (a separate engine would be needed for true LaTeX).
+- No heavy syntax highlighting (add later as an independent layer).
+- No WebKit/Python/Pandoc/WeasyPrint in the core document pipeline.
