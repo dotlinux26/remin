@@ -19,7 +19,7 @@
   A <strong>Linux-native terminal workspace application with a persistent GTK4 GUI,
   integrated terminal sessions, command history, and Markdown notes</strong>
   that saves, restores, and carries your terminal workspace — tabs, panes,
-  command history, notes, and scrollback — across time and machines.
+  command history, notes, and scrollback — across restarts and workspace transfers.
 </p>
 
 <p align="center">
@@ -247,18 +247,23 @@ Linux-first, MIT.
 
 ## Build
 
-Requirements: CMake ≥ 3.24, a C++20 compiler, and the GTK/VTE dev packages
-(`gtkmm-4.0`, `vte-2.91-gtk4`, `libadwaita-1`, `librsvg2-dev`).
+Requirements: CMake ≥ 3.24, a C++20 compiler, GTK4/gtkmm4, libadwaita-1, librsvg2-dev,
+and the build dependencies required to build the Remin-patched VTE 0.76.
 
-Scrollback restore relies on a small snapshot API layered on pristine VTE 0.76
-(reproducible via `scripts/build-vte.sh` — see
-[the VTE extension](docs/patches/vte/README.md)). Build Remin against that
-patched VTE:
+**Remin must be built against the Remin-patched VTE 0.76. A stock system VTE
+is not sufficient.**
+
+Build the patched VTE first:
 
 ```bash
 scripts/build-vte.sh                 # builds vte-0.76.0-patched/
-PKG_CONFIG_PATH=vte-0.76.0-patched/build/meson-uninstalled \
-LD_LIBRARY_PATH=vte-0.76.0-patched/build/src \
+```
+
+Then configure Remin against that patched VTE build:
+
+```bash
+export PKG_CONFIG_PATH=vte-0.76.0-patched/build/meson-uninstalled
+export LD_LIBRARY_PATH=vte-0.76.0-patched/build/src
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
