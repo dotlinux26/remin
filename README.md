@@ -293,6 +293,15 @@ src/
 - [`docs/decisions/`](docs/decisions/) — ADRs
 - [`docs/usage/`](docs/usage/) — user guides
 
+## Sponsoring
+
+Remin is open source and developed independently. If Remin is useful to you
+and you'd like to support its continued development — maintenance, bug fixes,
+documentation, cross-platform packaging — you can sponsor the project through
+GitHub Sponsors.
+
+[![Sponsor](https://img.shields.io/github/sponsors/dotlinux26?style=flat&logo=githubsponsors)](https://github.com/sponsors/dotlinux26)
+
 ## License
 
 MIT

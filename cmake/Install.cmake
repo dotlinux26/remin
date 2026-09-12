@@ -24,9 +24,8 @@ endfunction()
 # Install the app icon into the hicolor theme + a launcher .desktop entry.
 function(remin_install_app_icon resources_dir)
   # Themed icons (GTK taskbar / window icon via icon_name, incl. tab markers).
-  install(FILES ${resources_dir}/icons/hicolor/index.theme
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor
-  )
+  # Do NOT install index.theme — it is provided by the hicolor-icon-theme package
+  # (declared in Depends); installing it causes a file conflict.
   install(DIRECTORY ${resources_dir}/icons/hicolor/scalable/apps/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
     FILES_MATCHING PATTERN "*.svg"
