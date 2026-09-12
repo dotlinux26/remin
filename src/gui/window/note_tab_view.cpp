@@ -270,8 +270,12 @@ void NoteTabView::toggle_preview() {
     preview_host->append(*preview_header);
     preview_host->append(*preview_);
 
-    // Initial render.
-    preview_->render(editor_->text());
+    // Initial render - defer to idle so the split pane has allocated the canvas
+    // at its real width before the first layout is measured. Relaying out at a
+    // stale width is what made the first open render off-center until a second
+    // toggle/refresh.
+    Glib::signal_idle().connect_once(
+        [this] { if (preview_) preview_->render(editor_->text()); });
     // Remove editor from content_host before reparenting it into the paned.
     set_content(*content_split_);
     content_split_->set_start_child(*editor_);

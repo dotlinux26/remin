@@ -11,6 +11,13 @@
 
 namespace remin::markdown {
 
+// Code fence language badge metrics (shared by layout + draw so the reserved
+// space always matches the drawn badge).
+inline constexpr double kCodeBadgeFontPt = 7.5;
+inline constexpr double kCodeBadgePad = 4.0;    // inset from block edges
+inline constexpr double kCodeBadgeGap = 4.0;    // text below the badge
+inline constexpr double kCodeBadgeLinePt = kCodeBadgeFontPt * 1.4;
+
 // Layout Engine: MarkdownAst + StyleSheet -> ordered flow of Blocks with
 // measured Pango heights. The same flow feeds the GTK preview (continuous,
 // page_height_pt == 0) and the Cairo PDF exporter (paginated). Text is stored
@@ -61,6 +68,7 @@ struct Block {
     // Code block
     bool is_code = false;
     std::string code_lang;
+    double badge_room = 0.0;      // extra top inset inside the code box for the badge
 
     // List marker + hanging-indent width (pt, relative to block origin)
     std::string marker;            // "• ", "1. ", "☐ ", "☑ "
@@ -85,6 +93,8 @@ struct Block {
     bool is_table = false;
     std::vector<Row> rows;
     std::vector<double> col_widths;
+    double table_center_x = 0.0;  // offset to center the table in the content area
+    double cell_pad = 0.0;        // cell inner padding (layout/draw agreement)
 
     // Toc
     double toc_indent = 0.0;

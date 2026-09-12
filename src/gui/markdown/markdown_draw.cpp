@@ -175,11 +175,14 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
         const Block& b = blocks[idx];
         const double y = b.y;
 
-        // Block background / quote bar.
+        // Block background / quote bar. Tables are centered via
+        // table_center_x, so any block-level box must share that offset too
+        // (otherwise the outline stays at x=0 while the grid is shifted).
+        const double box_x = b.is_table ? b.table_center_x : 0.0;
         if (b.has_bg) {
             cr->save();
             set_color(cr, b.bg);
-            cr->rectangle(0.0, y, b.content_width + 2.0 * b.padding,
+            cr->rectangle(box_x, y, b.content_width + 2.0 * b.padding,
                           b.height + (b.border_w > 0 ? 0.0 : 0.0));
             cr->fill();
             cr->restore();
@@ -188,7 +191,7 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
             cr->save();
             set_color(cr, b.outer_border);
             cr->set_line_width(b.border_w);
-            cr->rectangle(0.0, y, b.content_width + 2.0 * b.padding, b.height);
+            cr->rectangle(box_x, y, b.content_width + 2.0 * b.padding, b.height);
             cr->stroke();
             cr->restore();
         }
@@ -226,11 +229,14 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                 }
                 continue;
             case Block::Kind::Table: {
-                // Table grid + cells.
+                // Table grid + cells. All geometry is shifted by the centering
+                // offset computed during layout (shared by preview + PDF).
+                const double off_x = b.table_center_x;
+                const double pad = b.cell_pad > 0.0 ? b.cell_pad : 3.0;
+                const double table_w = b.content_width;
                 double row_y = y;
-                const double pad = 3.0;
                 for (const Block::Row& row : b.rows) {
-                    double col_x = 0.0;
+                    double col_x = off_x;
                     for (std::size_t c = 0; c < row.cells.size() && c < b.col_widths.size();
                          ++c) {
                         const Block::Cell& cell = row.cells[c];
@@ -244,9 +250,9 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                             cr->restore();
                         }
                         if (!cell.run.empty()) {
-                            const auto m = measure_runs(cell.run, cw, style);
+                            const auto m = measure_runs(cell.run, cw - 2.0 * pad, style);
                             auto layout = Pango::Layout::create(cr);
-                            apply_styled_runs(*layout, cell.run, cw, style);
+                            apply_styled_runs(*layout, cell.run, cw - 2.0 * pad, style);
                             const double tx = text_x_for_align(cell, col_x, cw, m.width, pad);
                             cr->save();
                             cr->move_to(tx, row_y + pad);
@@ -257,25 +263,39 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
                     }
                     row_y += row.height;
                 }
-                // Grid lines.
+                // Grid: outer box + row separators + column separators.
                 cr->save();
                 set_color(cr, b.outer_border);
                 cr->set_line_width(1.0);
                 row_y = y;
                 for (const Block::Row& row : b.rows) {
-                    cr->move_to(0.0, row_y);
-                    cr->line_to(b.content_width, row_y);
+                    cr->move_to(off_x, row_y);
+                    cr->line_to(off_x + table_w, row_y);
                     row_y += row.height;
                 }
-                cr->move_to(0.0, row_y);
-                cr->line_to(b.content_width, row_y);
-                double col_x = 0.0;
+                cr->move_to(off_x, row_y);
+                cr->line_to(off_x + table_w, row_y);
+                // Vertical strokes: left edge, each column separator, right edge.
+                // Drawn on top of the header fill so every band gets a full,
+                // uniform border (the generic block outline is disabled for
+                // tables).
+                double col_x = off_x;
                 for (double cw : b.col_widths) {
-                    col_x += cw;
                     cr->move_to(col_x, y);
                     cr->line_to(col_x, row_y);
+                    col_x += cw;
                 }
+                cr->move_to(col_x, y);
+                cr->line_to(col_x, row_y);
                 cr->stroke();
+                // Emphasize the header underline (below the first table row).
+                if (!b.rows.empty()) {
+                    const double header_bottom = y + b.rows.front().height;
+                    cr->set_line_width(1.6);
+                    cr->move_to(off_x, header_bottom);
+                    cr->line_to(off_x + table_w, header_bottom);
+                    cr->stroke();
+                }
                 cr->restore();
                 continue;
             }
@@ -307,12 +327,12 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
 
         if (b.kind == Block::Kind::Code || b.kind == Block::Kind::Quote) {
             text_x = b.padding;
-            text_y = y + b.padding;
+            text_y = y + b.padding + (b.kind == Block::Kind::Code ? b.badge_room : 0.0);
         }
         // Code fence language badge (top-right corner).
         if (b.kind == Block::Kind::Code && !b.code_lang.empty()) {
-            const double badge_pad = 4.0;
-            const double badge_font_pt = 7.5;
+            const double badge_pad = kCodeBadgePad;
+            const double badge_font_pt = kCodeBadgeFontPt;
             auto badge_layout = Pango::Layout::create(cr);
             Pango::FontDescription fd(style.base_font);
             fd.set_absolute_size(static_cast<int>(badge_font_pt * PANGO_SCALE));
@@ -321,7 +341,6 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
             int bw, bh;
             badge_layout->get_pixel_size(bw, bh);
             const double badge_w = static_cast<double>(bw) + 2.0 * badge_pad;
-            const double badge_h = static_cast<double>(bh) + 2.0 * badge_pad;
             const double badge_x = b.content_width + 2.0 * b.padding - badge_w - badge_pad;
             const double badge_y = y + badge_pad;
             // Badge text only (no background).

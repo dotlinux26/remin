@@ -104,6 +104,66 @@ int main() {
         check(saw_header, "header cells flagged");
     }
 
+    // --- inline code spans emit monospace runs: md4c stores the code body in
+    // --- node.text with no child Text nodes (regression) ---
+    {
+        const auto ast = MarkdownAst::parse("subnet `10.0.0.0/24` ok\n");
+        const auto r = layout_document(ast, style, content_w, {});
+        bool saw_code = false, saw_plain = false;
+        for (const auto& b : r.blocks)
+            for (const auto& run : b.run) {
+                if (run.font_family == "monospace" &&
+                    run.text.find("10.0.0.0/24") != std::string::npos)
+                    saw_code = true;
+                if (run.text.find("ok") != std::string::npos) saw_plain = true;
+            }
+        check(saw_code, "inline code span emitted as monospace run");
+        check(saw_plain, "surrounding text still emitted");
+    }
+
+    // --- inline code inside table cells uses the same RunBuilder path ---
+    {
+        const auto ast = MarkdownAst::parse("| A | B |\n|---|---|\n| `10.0.0.0/24` | x |\n");
+        const auto r = layout_document(ast, style, content_w, {});
+        bool saw_code = false;
+        for (const auto& b : r.blocks)
+            for (const auto& row : b.rows)
+                for (const auto& cell : row.cells)
+                    for (const auto& run : cell.run)
+                        if (run.font_family == "monospace" &&
+                            run.text.find("10.0.0.0/24") != std::string::npos)
+                            saw_code = true;
+        check(saw_code, "inline code span in table cell");
+    }
+
+    // --- table column min width honors the widest unbreakable word, and a
+    // --- overflowing table stays left-aligned (no phantom centering band) ---
+    {
+        const auto ast = MarkdownAst::parse(
+            "| Severity | Risk |\n|---|---|\n| High | RCE |\n");
+        const auto r = layout_document(ast, style, 40.0, {});
+        const Block* table = nullptr;
+        int sev_col = -1;
+        for (const auto& b : r.blocks)
+            if (b.kind == Block::Kind::Table) {
+                table = &b;
+                if (!b.rows.empty())
+                    for (std::size_t c = 0; c < b.rows.front().cells.size(); ++c)
+                        for (const auto& run : b.rows.front().cells[c].run)
+                            if (run.text.find("Severity") != std::string::npos)
+                                sev_col = static_cast<int>(c);
+            }
+        check(table, "table present for min-width test");
+        if (table && sev_col >= 0) {
+            StyledText word{"Severity", "", 11.0, 400, false, false, false,
+                            {}, {}, false, "", ""};
+            const auto m = measure_runs({word}, -1.0, style);
+            check(table->col_widths[sev_col] >= m.width + 2.0 * table->cell_pad,
+                  "column at least widest word + cell padding");
+            check(table->table_center_x == 0.0, "overflowing table not centered");
+        }
+    }
+
     // --- [[TOC]] expands to toc rows with anchors ---
     {
         const auto ast = MarkdownAst::parse("[[TOC]]\n\n# Intro\n## Deep\n");

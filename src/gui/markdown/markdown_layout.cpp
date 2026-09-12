@@ -131,7 +131,12 @@ void RunBuilder::emit(const Node& n) {
             bg_ = code.background.valid ? code.background : b;
             underline_ = false;
             strike_ = false;
-            for (const Node& ch : n.children) emit(ch);
+            // md4c stores the code body in `text` with no child Text nodes.
+            if (n.text.empty()) {
+                for (const Node& ch : n.children) emit(ch);
+            } else {
+                push(n.text);
+            }
             font_ = f;
             size_pt_ = s;
             color_ = c;
@@ -291,6 +296,20 @@ void build_cell_run(const Node& cell, const StyleSheet& style, std::vector<Style
                  style.color_for(StyleSelector::Table));
     }
     for (const Node& c : cell.children) rb.emit(c);
+}
+
+// Width of the widest *word* (unbreakable token) across a cell's runs, i.e. the
+// column's minimum width: Pango only breaks on spaces, so a column narrower
+// than this would split words mid-way (the "Severit/ty" effect). We force each
+// token onto its own line by turning spaces into newlines and measuring — the
+// widest resulting line is exactly the widest token.
+double widest_word_width(const std::vector<StyledText>& runs, const StyleSheet& style) {
+    std::vector<StyledText> copy = runs;
+    for (StyledText& r : copy) {
+        for (char& ch : r.text)
+            if (ch == ' ' || ch == '\t') ch = '\n';
+    }
+    return measure_runs(copy, -1.0, style).width;
 }
 
 } // namespace
@@ -522,6 +541,14 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                 b.padding = pbox.padding_pt;
                 b.margin_before = pbox.margin_top_pt;
                 b.margin_after = pbox.margin_bottom_pt;
+                // Reserve room at the top for the language badge so the first
+                // code line never collides with it.
+                b.badge_room = 0.0;
+                if (!b.code_lang.empty()) {
+                    const double badge_bottom = kCodeBadgePad + kCodeBadgeLinePt;
+                    b.badge_room = std::max(0.0,
+                        badge_bottom + kCodeBadgeGap - pbox.padding_pt);
+                }
                 const double inner = content_width_pt - 2.0 * b.padding;
                 StyledText code_run;
                 code_run.text = n.text;
@@ -533,8 +560,8 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                 b.run = {code_run};
                 const auto m = measure_runs(b.run, inner, style);
                 b.content_width = inner;
-                b.height = m.height + 2.0 * b.padding;
-                b.baseline = m.baseline_pt + b.padding;
+                b.height = m.height + pbox.padding_pt + pbox.padding_pt + b.badge_room;
+                b.baseline = m.baseline_pt + pbox.padding_pt + b.badge_room;
                 b.y = y + b.margin_before;
                 y = b.y + b.height + b.margin_after;
                 push_block(std::move(b));
@@ -634,7 +661,13 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                 b.margin_before = tbox.margin_top_pt;
                 b.margin_after = tbox.margin_bottom_pt;
                 b.outer_border = style.box_for(StyleSelector::Table).border_color;
-                b.border_w = style.box_for(StyleSelector::Table).border_width_pt;
+                // The table draws its own complete 1.0pt box in
+                // draw_blocks_range (left/right edges + separators, on top of
+                // the header fill), so the generic block outline is disabled
+                // for tables. Drawing the outer box only via the generic path
+                // left the left edge hidden under the header fill and thinner
+                // than the double-stroked right edge.
+                b.border_w = 0.0;
                 b.bg = style.bg_color_for(StyleSelector::TableHeader);
 
                 // Build cell runs once.
@@ -662,29 +695,44 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                 if (cells.empty()) return;
                 if (col_count == 0) return;
 
-                // Natural (unwrapped) column widths.
-                std::vector<double> natural(col_count, 40.0);
+                // ---- column widths (RFC 1942 / CSS table auto-layout) ----
+                // Pass 1: min = widest unbreakable word, max = widest line.
+                const double cpad = 5.0;
+                b.cell_pad = cpad;
+                std::vector<double> min_w(col_count, 0.0), max_w(col_count, 0.0);
                 for (auto& row : cells) {
-                    for (std::size_t c = 0; c < row.size(); ++c)
-                        if (c < col_count) {
-                            const auto m = measure_runs(row[c].runs, -1.0, style);
-                            natural[c] = std::max(natural[c], m.width + 4.0);
-                        }
+                    for (std::size_t c = 0; c < row.size() && c < col_count; ++c) {
+                        const auto m = measure_runs(row[c].runs, -1.0, style);
+                        max_w[c] = std::max(max_w[c], m.width);
+                        min_w[c] = std::max(min_w[c], widest_word_width(row[c].runs, style));
+                    }
                 }
-                double total_nat = 0.0;
-                for (double v : natural) total_nat += v;
-                std::vector<double> col_w(col_count,
-                                          content_width_pt / static_cast<double>(col_count));
-                if (total_nat <= content_width_pt) {
-                    col_w = natural;  // becomes natural widths
-                } else if (total_nat > 0.0) {
+                for (std::size_t c = 0; c < col_count; ++c) {
+                    max_w[c] += 2.0 * cpad;
+                    min_w[c] += 2.0 * cpad;
+                }
+                double sum_max = 0.0, sum_min = 0.0;
+                for (std::size_t c = 0; c < col_count; ++c) {
+                    sum_max += max_w[c];
+                    sum_min += min_w[c];
+                }
+                std::vector<double> col_w(col_count, 0.0);
+                if (sum_max <= content_width_pt) {
+                    col_w = max_w;  // whole table fits at natural size
+                } else if (sum_min >= content_width_pt) {
+                    col_w = min_w;  // cannot shrink without splitting words
+                } else {
+                    // Pass 2: stretch each column from its min by a share of the
+                    // remaining space proportional to its elasticity (max-min).
+                    const double space = content_width_pt - sum_min;
+                    const double elastic = sum_max - sum_min;
                     for (std::size_t c = 0; c < col_count; ++c)
-                        col_w[c] = natural[c] / total_nat * content_width_pt;
+                        col_w[c] = min_w[c] + (max_w[c] - min_w[c]) *
+                                              (elastic > 0.0 ? space / elastic : 0.0);
                 }
                 b.col_widths = col_w;
 
-                // Cell padding from table box.
-                const double pad = 3.0;
+                // Cell heights from wrapped measurements; rows share the tallest cell.
                 for (std::size_t r = 0; r < cells.size(); ++r) {
                     Block::Row row;
                     for (std::size_t c = 0; c < col_count; ++c) {
@@ -694,14 +742,12 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                             cell.align = cells[r][c].align;
                             cell.header = cells[r][c].header;
                         }
-                        cell.run.reserve(cell.run.size());
-                        const auto m = measure_runs(cell.run, col_w[c], style);
-                        cell.height = m.height + 2.0 * pad;
+                        const auto m = measure_runs(cell.run, col_w[c] - 2.0 * cpad, style);
+                        cell.height = m.height + 2.0 * cpad;
                         row.cells.push_back(std::move(cell));
                     }
                     double row_h = row.cells.empty() ? 0.0 : row.cells[0].height;
-                    for (const auto& cell : row.cells)
-                        row_h = std::max(row_h, cell.height);
+                    for (const auto& cell : row.cells) row_h = std::max(row_h, cell.height);
                     row.height = row_h;
                     b.rows.push_back(std::move(row));
                 }
@@ -709,7 +755,13 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                 double total = 0.0;
                 for (const auto& row : b.rows) total += row.height;
                 b.height = total;
-                b.baseline = 4.0;
+                b.baseline = cpad * 0.5;
+                // Center the table block itself within the content area; the
+                // draw layer shifts all table geometry by table_center_x.
+                double table_w = 0.0;
+                for (double cw : b.col_widths) table_w += cw;
+                b.content_width = table_w;
+                b.table_center_x = std::max(0.0, (content_width_pt - table_w) / 2.0);
                 b.y = y + b.margin_before;
                 y = b.y + b.height + b.margin_after;
                 push_block(std::move(b));
