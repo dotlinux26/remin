@@ -16,9 +16,10 @@
 </p>
 
 <p align="center">
-  A <strong>Linux-native CLI workspace application</strong> that saves, restores,
-  and carries your terminal workspace — tabs, panes, command history, notes,
-  and scrollback — across time and machines.
+  A <strong>Linux-native terminal workspace application with a persistent GTK4 GUI,
+  integrated terminal sessions, command history, and Markdown notes</strong>
+  that saves, restores, and carries your terminal workspace — tabs, panes,
+  command history, notes, and scrollback — across time and machines.
 </p>
 
 <p align="center">
@@ -119,7 +120,7 @@ remin gui
 - **Directory tree** — VS Code-style panel with live filter, context menu,
   and open-in-editor
 - **Linux PTY** — `forkpty()` through a `PTYProvider` abstraction
-- **Single binary** — `remin`, one build, three frontends (GUI / CLI / IPC)
+- **Single binary** — one shared workspace engine with a V1 GUI frontend; CLI and IPC interfaces are included in the architecture but are not yet the complete user-facing workspace workflow
 - **Text-first UI** — no icon soup; navigate by words, spacing, and keyboard
 
 ## Technical Highlights
