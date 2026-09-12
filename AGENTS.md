@@ -291,7 +291,7 @@ Design: `docs/design/workspace-persistence-pipeline.md` (đã gate). Không Wind
   `snapshot_has_pending_data`, dead `get_bytes()`, non-transactional restore,
   no upper-bounds on rows/cols, cwd/file-uri/title chưa trong format (v4). KHÔNG
   tích hợp vào Remin trong phase này.
-- `scripts/build-vte.sh` + `VTE_MANIFEST` + `docs/vte-p0g-reproducibility.md` —
+- `scripts/build-vte.sh` + `VTE_MANIFEST` + `docs/development/notes/vte-p0g-reproducibility.md` —
   **P0-G REPRODUCIBILITY & EXTERNAL-CONSUMER (chốt 2026-09-08,
   `READY_FOR_INTEGRATION`)**: full pipeline tái tạo (pristine→apply→build→verify→test);
   `scripts/build-vte.sh` reproduces 7 gates end-to-end; `VTE_MANIFEST` pins
@@ -319,7 +319,7 @@ Design: `docs/design/workspace-persistence-pipeline.md` (đã gate). Không Wind
   **Artifact chốt**: `patches/vte-0.76.0/` (0001-0004 + SERIES.md + SHA256SUMS) — verify
   `pristine + series == working patched tree` byte-for-byte, SHA256SUMS khớp. Restore thực tế
   trên GUI đã xác nhận OK (2026-09-08).
-- `docs/problem-terminal-transcript-capture.md` — **P0-B CAPTURE FIDELITY FAILING**:
+- `docs/development/notes/problem-terminal-transcript-capture.md` — **P0-B CAPTURE FIDELITY FAILING**:
   blob scrollback tồn tại (~10KB) nhưng nội dung gần như blank + prompt, thiếu
   output thật. PHẢI chứng minh capture chứa marker deterministic
   (`printf 'REMIN_CAPTURE_A\n'` / `ls` / `printf 'REMIN_CAPTURE_B\n'`) trước khi
