@@ -9,6 +9,9 @@
 #include <chrono>
 #include <cstring>
 #include <cstdlib>
+#include <signal.h>
+#include <sys/wait.h>
+#include <thread>
 
 namespace remin::gui {
 
@@ -136,9 +139,10 @@ void TerminalPane::spawn_shell(const std::string& cwd) {
 }
 
 void TerminalPane::on_spawned_trampoline(VteTerminal*, GPid pid,
-                                         GError*, gpointer user_data) {
+                                          GError*, gpointer user_data) {
     auto* self = static_cast<TerminalPane*>(user_data);
     self->shell_pid_ = static_cast<long>(pid);
+    self->process_group_id_ = getpgid(pid);
 }
 
 std::string TerminalPane::resolve_capture_cwd() const {
@@ -384,6 +388,47 @@ gboolean TerminalPane::on_key_pressed(GtkEventControllerKey*, guint keyval,
         default:
             return FALSE;
     }
+}
+
+// Graceful termination for orderly shutdown: sends SIGHUP to this pane's
+// process group, waits for the tracked shell child to exit (up to 2s deadline),
+// then SIGKILLs the same PGID if needed. Returns true if exited gracefully.
+bool TerminalPane::terminate_and_wait() {
+    if (process_group_id_ <= 0) return true;
+
+    // Send SIGHUP to this pane's process group only
+    kill(-process_group_id_, SIGHUP);
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+
+    while (std::chrono::steady_clock::now() < deadline) {
+        int status;
+        pid_t result = waitpid(static_cast<pid_t>(shell_pid_), &status, WNOHANG);
+        if (result == shell_pid_) {
+            // Shell child exited
+            shell_pid_ = 0;
+            process_group_id_ = 0;
+            return true;
+        }
+        if (result == -1 && errno == ECHILD) {
+            // No child process
+            shell_pid_ = 0;
+            process_group_id_ = 0;
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // Timeout: force kill the process group
+    kill(-process_group_id_, SIGKILL);
+
+    // Reap the tracked child
+    int status;
+    waitpid(static_cast<pid_t>(shell_pid_), &status, 0);
+
+    shell_pid_ = 0;
+    process_group_id_ = 0;
+    return false;
 }
 
 } // namespace remin::gui

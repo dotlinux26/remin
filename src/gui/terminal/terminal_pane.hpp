@@ -58,6 +58,12 @@ public:
     // shell in the captured cwd (design §5.2). Snapshot restore runs BEFORE
     // spawn. (Declaration above as runtime_restore)
 
+    // -- Graceful termination for orderly shutdown (design §7) --
+    // Sends SIGHUP to this pane's process group, waits for the shell child
+    // to exit (up to 2s deadline), then SIGKILLs the same PGID if needed.
+    // Returns true if exited gracefully within deadline.
+    bool terminate_and_wait();
+
     // The short title shown in the tab strip.
     [[nodiscard]] const char* title() const { return title_.c_str(); }
 
@@ -127,6 +133,7 @@ private:
     mutable std::string cached_cwd_;
     std::string title_;
     long shell_pid_{0};
+    pid_t process_group_id_{0};
     VteTerminal* vte_{nullptr};
     Gtk::Widget* widget_{nullptr};
     std::function<void()> on_input_;
