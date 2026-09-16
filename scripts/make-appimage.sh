@@ -19,7 +19,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CACHE="${REMIN_APPIMAGE_CACHE:-$HOME/.cache/remin-appimage}"
 mkdir -p "$CACHE"
 
-VER="1.0.0"
+VER="$(awk '/^  VERSION /{print $2; exit}' "$ROOT/CMakeLists.txt")"
+[ -n "$VER" ] || { echo "can't derive version from CMakeLists.txt"; exit 1; }
 ARCH="x86_64"
 OUT="${2:-"$ROOT/Remin-$VER-linux-$ARCH.AppImage"}"
 STAGE_DIR="${1:-}"
