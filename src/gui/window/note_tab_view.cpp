@@ -481,7 +481,23 @@ void NoteTabView::export_pdf() {
         meta.footer_left = "{title}";
         meta.footer_center = "";
         meta.footer_right = "{page} / {pages}";
-        if (!remin::markdown::export_pdf(d.ast(), remin::markdown::default_style(remin::markdown::light_palette()), asset_resolver, target, meta)) {
+
+        // Same style pipeline as the preview: user stylesheet (if any) merged
+        // on top of the built-in default, themed to match the active theme.
+        const std::string css_path = controller_->markdown_css_path();
+        const remin::markdown::ReminPalette pal =
+            controller_->theme_dark() ? remin::markdown::dark_palette()
+                                      : remin::markdown::light_palette();
+        remin::markdown::StyleSheet style = remin::markdown::default_style(pal);
+        if (!css_path.empty()) {
+            std::ifstream ifs(css_path);
+            if (ifs) {
+                std::stringstream ss;
+                ss << ifs.rdbuf();
+                style = remin::markdown::apply_style(ss.str(), style, pal);
+            }
+        }
+        if (!remin::markdown::export_pdf(d.ast(), style, asset_resolver, target, meta)) {
             g_warning("remin: could not export PDF to %s", target.c_str());
         }
     });

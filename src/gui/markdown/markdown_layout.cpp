@@ -453,6 +453,22 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
         push_block(std::move(b));
     };
 
+    // A thematic break (---, ***, ___, or a raw <hr> block): one horizontal
+    // rule spanning the full content width, styled by the `hr` CSS selector.
+    auto emit_hr_block = [&]() {
+        Block b;
+        b.kind = Block::Kind::Hr;
+        const BoxStyle hbox = style.box_for(StyleSelector::Hr);
+        b.margin_before = hbox.any_set ? hbox.margin_top_pt : 10.0;
+        b.margin_after = hbox.any_set ? hbox.margin_bottom_pt : 10.0;
+        b.height = 1.5;
+        b.color = style.hr_color;  // NOLINT (field reused for stroke color)
+        b.content_width = content_width_pt;
+        b.y = y + b.margin_before;
+        y = b.y + b.height + b.margin_after;
+        push_block(std::move(b));
+    };
+
     // ---- recursive block emitter ------------------------------------------
     std::function<void(const Node&)> emit_node;
     emit_node = [&](const Node& n) {
@@ -567,18 +583,9 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                 push_block(std::move(b));
                 return;
             }
-            case NodeType::ThematicBreak: {
-                Block b;
-                b.kind = Block::Kind::Hr;
-                b.margin_before = 10.0;
-                b.margin_after = 10.0;
-                b.height = 1.5;
-                b.color = style.hr_color;  // NOLINT (field reused for stroke color)
-                b.y = y + b.margin_before;
-                y = b.y + b.height + b.margin_after;
-                push_block(std::move(b));
+            case NodeType::ThematicBreak:
+                emit_hr_block();
                 return;
-            }
             case NodeType::List: {
                 int ordinal = n.start;
                 for (const Node& li : n.children) {
@@ -588,7 +595,7 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                     const bool task = li.task;
                     if (task) {
                         b.kind = Block::Kind::TaskItem;
-                        b.marker = li.checked ? "\u2611 " : "\u2610 ";  // ☑ / ☐
+                        b.marker = li.checked ? "\u25A0 " : "\u25A1 ";  // ■ checked / □ unchecked
                     } else if (n.ordered) {
                         b.kind = Block::Kind::OlItem;
                         b.marker = std::to_string(ordinal++) + ". ";
@@ -891,6 +898,14 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                     const auto tag = parse_html_tag(t);
                     if (tag && tag->consumed == t.size() &&
                         is_block_level_tag(tag->name)) {
+                        if (tag->name == "hr" && !tag->closing) {
+                            // Raw <hr> is a void element (never has a closing
+                            // tag), not a wrapper for the following markdown.
+                            // Render it as a thematic break so it matches the
+                            // `---` / `***` / `___` rule in preview and PDF.
+                            emit_hr_block();
+                            return;
+                        }
                         if (tag->closing) {
                             // Case A close: pop the wrapper if one is open.
                             if (!block_ctx.empty()) block_ctx.pop_back();

@@ -26,6 +26,7 @@ private:
     void on_color_background_changed();
     void save_color_profile();
     void on_markdown_css_changed();
+    void on_markdown_css_template();
     void update_markdown_css_label();
 
     SessionController* controller_{nullptr};

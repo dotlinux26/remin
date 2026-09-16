@@ -12,6 +12,24 @@ namespace remin::markdown {
 
 namespace {
 
+// Rounded rectangle path (Cairo has no built-in rounded rect). Used for code
+// blocks so the native preview/PDF match the border-radius of HTML export.
+constexpr double kPi = 3.14159265358979323846;
+void rounded_rect(const Cairo::RefPtr<Cairo::Context>& cr, double x, double y,
+                  double w, double h, double r) {
+    r = std::min(r, std::min(w, h) / 2.0);
+    cr->move_to(x + r, y);
+    cr->line_to(x + w - r, y);
+    cr->arc(x + w - r, y + r, r, -kPi / 2.0, 0.0);
+    cr->line_to(x + w, y + h - r);
+    cr->arc(x + w - r, y + h - r, r, 0.0, kPi / 2.0);
+    cr->line_to(x + r, y + h);
+    cr->arc(x + r, y + h - r, r, kPi / 2.0, kPi);
+    cr->line_to(x, y + r);
+    cr->arc(x + r, y + r, r, kPi, 3.0 * kPi / 2.0);
+    cr->close_path();
+}
+
 // Copy a GdkPixbuf into an ARGB32 Cairo image surface at its current size.
 // The pixel channel order (RGBA on disk) is swapped to Cairo's BGRA with
 // premultiplied alpha so `paint()` composes correctly.
@@ -182,8 +200,13 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
         if (b.has_bg) {
             cr->save();
             set_color(cr, b.bg);
-            cr->rectangle(box_x, y, b.content_width + 2.0 * b.padding,
-                          b.height + (b.border_w > 0 ? 0.0 : 0.0));
+            if (b.kind == Block::Kind::Code) {
+                rounded_rect(cr, box_x, y, b.content_width + 2.0 * b.padding,
+                             b.height, 2.0);
+            } else {
+                cr->rectangle(box_x, y, b.content_width + 2.0 * b.padding,
+                              b.height + (b.border_w > 0 ? 0.0 : 0.0));
+            }
             cr->fill();
             cr->restore();
         }
@@ -191,7 +214,12 @@ void draw_blocks_range(const Cairo::RefPtr<Cairo::Context>& cr,
             cr->save();
             set_color(cr, b.outer_border);
             cr->set_line_width(b.border_w);
-            cr->rectangle(box_x, y, b.content_width + 2.0 * b.padding, b.height);
+            if (b.kind == Block::Kind::Code) {
+                rounded_rect(cr, box_x, y, b.content_width + 2.0 * b.padding,
+                             b.height, 2.0);
+            } else {
+                cr->rectangle(box_x, y, b.content_width + 2.0 * b.padding, b.height);
+            }
             cr->stroke();
             cr->restore();
         }

@@ -1,0 +1,113 @@
+/* markdown-custom.example.css — Remin Markdown stylesheet template.
+ *
+ * Wiring:  Settings → Markdown → pick this file (after you copied it and
+ * renamed it) to style the note preview, the PDF export, and the HTML
+ * export with ONE file.
+ *
+ * The file is read by TWO engines that each ignore what they do not
+ * understand, so it is safe to keep both sections below together:
+ *
+ *   1. "Native (preview + PDF)"   — the Remin stylesheet subset. Uses
+ *      palette tokens (@text, @accent, @bg, ...) that follow light/dark
+ *      mode automatically. Supported selectors: document, h1-h6, p, code,
+ *      pre, blockquote, a, ul/ol, li, table, th, td, tr, hr, .toc,
+ *      .toc-title, .toc-link, img, page.
+ *   2. "HTML export"              — plain CSS (a browser styles the exported
+ *      .html). Has no access to Remin palette tokens, so the same colors
+ *      are written out literally via CSS variables (light + dark).
+ *
+ * Copy this file, uncomment / tweak any rules, then select it in Settings.
+ * Deleting a section restores that part to the built-in defaults.
+ */
+
+/* ====================================================================== */
+/* 1. Native — note preview + PDF export (Remin stylesheet subset)         */
+/*                                                                         */
+/*  - colors: @text @text-muted @accent @bg @surface @border @code-bg      */
+/*            @quote-bg  @red @orange @green @blue                         */
+/*  - sizes : px, pt, mm, cm, in (one value per unit)                      */
+/*  - properties: color, background(-color), font-family, font-size,       */
+/*            font-weight, font-style, text-decoration, line-height,       */
+/*            margin(-top/bottom/left/right), padding, border,             */
+/*            border-left(-width), border-width                            */
+/* ====================================================================== */
+
+/* document { color:@text; background:@bg; font-family:sans; font-size:11pt; line-height:1.55; } */
+
+/* h1 { font-size:21pt; font-weight:700; margin-top:18pt; margin-bottom:9pt; color:@text; } */
+/* h2 { font-size:16.5pt; font-weight:700; margin-top:14pt; margin-bottom:7pt; } */
+/* h3 { font-size:13.5pt; font-weight:700; margin-top:12pt; margin-bottom:5pt; } */
+/* h4 { font-size:12pt; font-weight:700; } */
+/* h5 { font-size:11pt; font-weight:700; } */
+/* h6 { font-size:11pt; font-weight:700; } */
+
+/* p     { margin-top:4pt; margin-bottom:4pt; } */
+/* a     { color:@accent; text-decoration:underline; } */
+/* code  { font-family:monospace; font-size:10pt; background:@code-bg; } */
+/* pre   { font-family:monospace; font-size:10pt; background:@code-bg;   */
+/*          padding:8pt; margin-top:8pt; margin-bottom:8pt; }            */
+/*        (the built-in default darkens @code-bg to 97% for the block)  */
+
+/* blockquote { background:@quote-bg; border-left:3pt; padding:8pt; margin-top:6pt; margin-bottom:6pt; } */
+
+/* ul, ol { margin-top:4pt; margin-bottom:4pt; } */
+/* li     { margin-top:1pt; margin-bottom:1pt; } */
+
+/* table  { border:1pt; margin-top:8pt; margin-bottom:8pt; } */
+/* th     { background:@surface; padding:3pt; font-weight:700; } */
+/* td     { padding:3pt; } */
+
+/* hr     { color:@border; margin-top:10pt; margin-bottom:10pt; } */
+
+/* img    { } */
+
+/* page   { size:a4; margin:18mm; } */   /* PDF page geometry only */
+
+/* ====================================================================== */
+/* 2. HTML export — plain CSS for the exported .html file                  */
+/*                                                                         */
+/* This section is optional. Without it the HTML export falls back to the  */
+/* built-in stylesheet; if you want to override headings, code, tables,    */
+/* etc. in the exported file, tweak it here (browsers ignore section 1).   */
+/* ====================================================================== */
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --text: #202124;
+    --text-muted: #6b7076;
+    --accent: #2563eb;
+    --bg: #ffffff;
+    --surface: #f8f9fb;
+    --border: #d4d8e0;
+    --code-bg: #f0f1f3;
+    --quote-bg: #f2f5fb;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #e8eaed;
+    --text-muted: #9aa0a6;
+    --accent: #8ab4f8;
+    --bg: #1e1f24;
+    --surface: #26272d;
+    --border: #3c4043;
+    --code-bg: #2c2d33;
+    --quote-bg: #262a33;
+  }
+}
+
+/* body { margin:0; padding:24px 28px; font-size:15px; line-height:1.5;
+          color:var(--text); background:var(--bg);
+          font-family:system-ui, "Segoe UI", "Noto Sans", sans-serif; } */
+/* h1, h2, h3, h4, h5, h6 { margin:1.2em 0 0.5em; font-weight:600; line-height:1.3; } */
+/* p { margin:0.6em 0; } */
+/* a { color:var(--accent); text-decoration:none; } */
+/* code { font-family:"JetBrains Mono","Fira Code",monospace; font-size:0.9em; padding:0.1em 0.35em; border-radius:4px; background:var(--code-bg); } */
+/* pre { background:var(--code-block-bg); border-radius:2px; padding:12px 14px; overflow-x:auto; } */
+/* blockquote { margin:0.8em 0; padding:0.3em 1em; border-left:4px solid var(--accent); background:var(--quote-bg); color:var(--text-muted); } */
+/* hr { border:none; border-top:1px solid var(--border); margin:1.6em 0; } */
+/* table { border-collapse:collapse; margin:1em 0; width:100%; } */
+/* th, td { border:1px solid var(--border); padding:6px 12px; text-align:left; } */
+/* th { background:var(--surface); } */
+/* ul, ol { padding-left:1.6em; } */

@@ -15,6 +15,7 @@
     --surface: #f8f9fb;
     --border: #d4d8e0;
     --code-bg: #f0f1f3;
+    --code-block-bg: #e9eaec;
     --quote-bg: #f2f5fb;
     --ok: #1f9d55;
     --error: #ba1a1a;
@@ -30,6 +31,7 @@
     --surface: #26272d;
     --border: #3c4043;
     --code-bg: #2c2d33;
+    --code-block-bg: #2b2c31;
     --quote-bg: #262a33;
     --ok: #81c995;
     --error: #f28b82;
@@ -71,9 +73,8 @@ code {
 }
 
 pre {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: var(--code-block-bg);
+  border-radius: 2px;
   padding: 12px 14px;
   overflow-x: auto;
 }
@@ -119,8 +120,8 @@ tr:nth-child(even) td { background: color-mix(in srgb, var(--surface) 50%, trans
 ul, ol { padding-left: 1.6em; }
 li { margin: 0.2em 0; }
 
-.task-list-item::marker { content: "☐ "; }
-.task-list-item[data-checked]::marker { content: "☑ "; }
+.task-list-item::marker { content: "□ "; }
+.task-list-item[data-checked]::marker { content: "■ "; }
 
 /* TOC: flex row so the leader dots fill the remaining width. */
 .toc-row { display: flex; align-items: baseline; }

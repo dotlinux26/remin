@@ -13,6 +13,11 @@ namespace remin::markdown {
 // the path is missing/unreadable so callers can fall back to the builtin.
 [[nodiscard]] std::string read_user_css(const std::string& path);
 
+// The documented starting point for a custom stylesheet
+// (resources/styles/markdown-custom.example.css when installed; a short
+// embedded note otherwise). Used by Settings > Markdown > "New from template".
+[[nodiscard]] std::string markdown_template_css();
+
 // Wrap a rendered HTML body (from markdown_html) plus a stylesheet into a
 // complete, self-contained document for the preview pane.
 [[nodiscard]] std::string build_html_document(const std::string& body,

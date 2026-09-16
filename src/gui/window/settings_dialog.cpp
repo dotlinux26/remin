@@ -1,9 +1,13 @@
 #include "gui/window/settings_dialog.hpp"
 
+#include "gui/markdown/markdown_css.hpp"
+
 #include <adwaita.h>
 #include <giomm/settings.h>
 #include <gtkmm.h>
 #include <gdk/gdk.h>
+
+#include <fstream>
 
 namespace remin::gui {
 
@@ -121,20 +125,37 @@ void SettingsDialog::setup_markdown_page() {
     title->set_halign(Gtk::Align::START);
     page->append(*title);
 
-    // Custom CSS path
-    auto* css_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
-    css_box->set_halign(Gtk::Align::START);
+    auto* subtitle = Gtk::make_managed<Gtk::Label>(
+        "One CSS file styles the note preview, the PDF export, and the HTML "
+        "export. Start from the built-in template, tweak it, then select it here.");
+    subtitle->set_wrap(true);
+    subtitle->set_xalign(0.0f);
+    subtitle->set_halign(Gtk::Align::START);
+    subtitle->add_css_class("dim-label");
+    page->append(*subtitle);
 
-    auto* css_label = Gtk::make_managed<Gtk::Label>("Custom CSS stylesheet:");
+    // Stylesheet row: current path + Browse / Reset.
+    auto* css_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+    css_box->set_halign(Gtk::Align::FILL);
+    css_box->set_hexpand(true);
+
+    auto* css_label = Gtk::make_managed<Gtk::Label>("Stylesheet:");
     css_label->set_valign(Gtk::Align::CENTER);
     css_box->append(*css_label);
 
     markdown_css_path_label_ = Gtk::make_managed<Gtk::Label>("");
     markdown_css_path_label_->set_valign(Gtk::Align::CENTER);
     markdown_css_path_label_->add_css_class("monospace");
+    markdown_css_path_label_->set_ellipsize(Pango::EllipsizeMode::END);
+    markdown_css_path_label_->set_xalign(0.0f);
+    markdown_css_path_label_->set_hexpand(true);
     css_box->append(*markdown_css_path_label_);
 
-    markdown_css_choose_btn_ = Gtk::make_managed<Gtk::Button>("Choose…");
+    auto* spacer = Gtk::make_managed<Gtk::Box>();
+    spacer->set_size_request(6, 1);
+    css_box->append(*spacer);
+
+    markdown_css_choose_btn_ = Gtk::make_managed<Gtk::Button>("Browse…");
     markdown_css_choose_btn_->signal_clicked().connect(
         [this]() { on_markdown_css_changed(); });
     css_box->append(*markdown_css_choose_btn_);
@@ -151,11 +172,32 @@ void SettingsDialog::setup_markdown_page() {
 
     page->append(*css_box);
 
+    // Template row: generate a copy to edit.
+    auto* tmpl_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+    tmpl_box->set_halign(Gtk::Align::START);
+
+    auto* tmpl_btn = Gtk::make_managed<Gtk::Button>("New from template…");
+    tmpl_btn->signal_clicked().connect([this]() { on_markdown_css_template(); });
+    tmpl_box->append(*tmpl_btn);
+
+    auto* tmpl_note = Gtk::make_managed<Gtk::Label>(
+        "Saves a commented copy of the built-in stylesheet for you to edit.");
+    tmpl_note->set_wrap(true);
+    tmpl_note->set_xalign(0.0f);
+    tmpl_note->add_css_class("dim-label");
+    tmpl_box->append(*tmpl_note);
+
+    page->append(*tmpl_box);
+
     // Hint
     auto* hint = Gtk::make_managed<Gtk::Label>(
-        "Select a custom CSS file to style the Markdown preview and HTML/PDF export. "
-        "Leave empty to use the built-in theme-aware stylesheet.");
+        "Preview + PDF (Remin subset): document, h1–h6, p, a, code, pre, "
+        "blockquote, ul/ol, li, table, th, td, hr, img, page. "
+        "Colors: @text, @text-muted, @accent, @bg, @surface, @border, "
+        "@code-bg, @quote-bg, @red, @orange, @green, @blue. "
+        "HTML export reads the same file as plain CSS (browser section).");
     hint->set_wrap(true);
+    hint->set_xalign(0.0f);
     hint->set_halign(Gtk::Align::START);
     hint->add_css_class("dim-label");
     page->append(*hint);
@@ -320,10 +362,53 @@ void SettingsDialog::update_markdown_css_label() {
     if (!controller_ || !markdown_css_path_label_) return;
     const std::string path = controller_->markdown_css_path();
     if (path.empty()) {
-        markdown_css_path_label_->set_text("(using built-in stylesheet)");
+        markdown_css_path_label_->set_text("(built-in stylesheet)");
     } else {
         markdown_css_path_label_->set_text(path);
     }
+}
+
+void SettingsDialog::on_markdown_css_template() {
+    auto* root = get_root();
+    auto* win = dynamic_cast<Gtk::Window*>(root);
+    if (!win || !controller_) return;
+
+    auto dialog = Gtk::make_managed<Gtk::FileChooserDialog>(
+        *win, "Save Markdown stylesheet…", Gtk::FileChooser::Action::SAVE);
+    dialog->add_button("Cancel", Gtk::ResponseType::CANCEL);
+    dialog->add_button("Save", Gtk::ResponseType::OK);
+    dialog->set_modal(true);
+    dialog->set_current_name("markdown-remin.css");
+
+    auto filter = Gtk::FileFilter::create();
+    filter->set_name("CSS files");
+    filter->add_pattern("*.css");
+    dialog->add_filter(filter);
+
+    dialog->signal_response().connect([this, dialog](int response) {
+        if (response != Gtk::ResponseType::OK) {
+            dialog->close();
+            return;
+        }
+        const auto file = dialog->get_file();
+        dialog->close();
+        if (!file) return;
+        const auto path = file->get_path();
+        if (path.empty() || !controller_) return;
+
+        const std::string css = remin::markdown::markdown_template_css();
+        std::ofstream out(path, std::ios::binary);
+        if (!out) {
+            g_warning("remin: could not write stylesheet template to %s", path.c_str());
+            return;
+        }
+        out.write(css.data(), static_cast<std::streamsize>(css.size()));
+
+        controller_->set_markdown_css_path(path);
+        update_markdown_css_label();
+    });
+    dialog->set_transient_for(*win);
+    dialog->present();
 }
 
 void SettingsDialog::on_markdown_css_changed() {

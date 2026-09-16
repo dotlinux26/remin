@@ -21,7 +21,7 @@ const char* kFallbackCss = R"(body {
 }
 h1, h2, h3, h4, h5, h6 { line-height: 1.2; margin: 1.4em 0 0.5em; }
 code { background: #f0f1f3; border-radius: 4px; padding: 0.15em 0.35em; }
-pre { background: #f6f8fa; border: 1px solid #e0e3e7; border-radius: 6px; padding: 0.75em 1em; overflow: auto; }
+pre { background: #e9eaec; border-radius: 2px; padding: 0.75em 1em; overflow: auto; }
 pre code { background: none; padding: 0; }
 blockquote { border-left: 4px solid #d0d7de; margin: 0; padding-left: 1em; color: #59636e; }
 table { border-collapse: collapse; width: 100%; }
@@ -50,6 +50,37 @@ std::string read_user_css(const std::string& path) {
     std::ostringstream ss;
     ss << in.rdbuf();
     return ss.str();
+}
+
+// Short note used when the curated template resource is not reachable (e.g.
+// running from a build tree). The full template ships with the installed
+// resources at share/remin/resources/styles/markdown-custom.example.css.
+const char* kFallbackTemplateCss = R"(/* Remin Markdown stylesheet template.
+ *
+ * The full, commented template ships with the installed app at
+ *   share/remin/resources/styles/markdown-custom.example.css
+ * (Settings > Markdown > "New from template" creates a copy for you).
+ *
+ * Quick reference for the note preview + PDF export (Remin subset):
+ *   document { color:@text; font-family:sans; font-size:11pt; line-height:1.55; }
+ *   h1 { font-size:21pt; font-weight:700; margin-top:18pt; margin-bottom:9pt; }
+ *   pre  { font-family:monospace; font-size:10pt; background:@surface; padding:8pt; }
+ *   hr   { color:@border; margin-top:10pt; margin-bottom:10pt; }
+ *   page { size:a4; margin:18mm; }
+ * Palette tokens: @text @text-muted @accent @bg @surface @border
+ *                 @code-bg @quote-bg @red @orange @green @blue
+ */
+)";
+
+std::string markdown_template_css() {
+    const std::string path = gui::resource_path("styles/markdown-custom.example.css");
+    std::ifstream in(path);
+    if (in) {
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    }
+    return kFallbackTemplateCss;
 }
 
 std::string build_html_document(const std::string& body, const std::string& css,

@@ -85,6 +85,18 @@ Color named_color(const std::string& name) {
     return {};
 }
 
+// Scale an existing color's RGB by `factor` (keeps alpha/valid unchanged).
+// Used to derive the code-block background (slightly darker than inline code)
+// from the shared code-bg palette token.
+Color darkened(const Color& c, float factor) {
+    Color out = c;
+    if (!out.valid) return out;
+    out.r *= factor;
+    out.g *= factor;
+    out.b *= factor;
+    return out;
+}
+
 bool parse_color(const std::string& raw, const ReminPalette& palette, Color& out) {
     const std::string v = trim(lower(raw));
     if (v.empty()) return false;
@@ -221,14 +233,12 @@ StyleSheet default_style(const ReminPalette& p) {
     TextStyle pre;
     pre.font_family = "monospace";
     pre.font_size_pt = 10.0;
-    pre.background = p.surface;
+    pre.background = darkened(p.code_bg, 0.97f);
     s.text[static_cast<int>(StyleSelector::Pre)] = pre;
     BoxStyle pre_box;
     pre_box.margin_top_pt = 8.0;
     pre_box.margin_bottom_pt = 8.0;
     pre_box.padding_pt = 8.0;
-    pre_box.border_width_pt = 1.0;
-    pre_box.border_color = p.border;
     pre_box.any_set = true;
     s.box[static_cast<int>(StyleSelector::Pre)] = pre_box;
 
@@ -401,6 +411,17 @@ void parse_declarations(const std::string& body, StyleSheet& s,
                 }
                 continue;
             }
+        }
+
+        if (sel == StyleSelector::Hr) {
+            // `hr { color: ... }` drives the stroke color of the rule. Like
+            // standard CSS, other properties (margin, padding, border) go to
+            // the box slots — margins are used by the ThematicBreak layout.
+            if (name == "color") {
+                if (parse_color(value, palette, doc->hr_color)) continue;
+            }
+            set_box_value(name, value, b);
+            continue;
         }
 
         if (name == "color") { if (parse_color(value, palette, t.color)) {} }

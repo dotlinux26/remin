@@ -64,13 +64,29 @@ int main() {
             check(b.y + b.height <= result.total_height + 1e-6, "block within flow");
             y = b.y;
         }
-        bool saw_heading = false, saw_quoteish = false, saw_hr = false;
+        bool saw_heading = false, saw_hr = false;
         for (const auto& b : result.blocks) {
             saw_heading = saw_heading || b.kind == Block::Kind::Heading;
             saw_hr = saw_hr || b.kind == Block::Kind::Hr;
+            if (b.kind == Block::Kind::Hr) {
+                check(b.content_width == content_w, "hr spans full content width");
+            }
         }
         check(saw_heading, "heading block present");
         check(saw_hr, "thematic break block present");
+    }
+
+    // --- raw <hr> HTML block maps to the same thematic break as `---` ---
+    {
+        const auto ast = MarkdownAst::parse("Line one.\n\n<hr>\n\nLine two.\n");
+        const auto result = layout_document(ast, style, content_w, {});
+        bool saw_hr = false;
+        for (const auto& b : result.blocks)
+            if (b.kind == Block::Kind::Hr) {
+                saw_hr = true;
+                check(b.content_width == content_w, "hr block spans content width");
+            }
+        check(saw_hr, "raw <hr> renders as a thematic break");
     }
 
     // --- list markers keep text inside content width ---
