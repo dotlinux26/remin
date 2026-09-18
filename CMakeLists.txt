@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(remin
-  VERSION 1.0.2
+  VERSION 1.0.3
   DESCRIPTION "Remin - Remember your work. Linux-native CLI workspace application."
   LANGUAGES CXX C
 )

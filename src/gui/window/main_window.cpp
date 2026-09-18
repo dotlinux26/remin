@@ -670,6 +670,9 @@ void MainWindow::restore_workspace() {
                     view->set_file_saved_callback([this](const std::filesystem::path& p) {
                         if (directory_panel_) directory_panel_->on_note_saved(p);
                     });
+                    view->set_file_added_callback([this](const std::filesystem::path& p) {
+                        if (directory_panel_) directory_panel_->on_note_saved(p);
+                    });
                     // Restore note state: convert core NoteTabState to NoteTabView::State
                     NoteTabView::State note_view_state;
                     note_view_state.content = tab.note_state->content;
@@ -1611,6 +1614,9 @@ void MainWindow::new_note_tab() {
     view->set_file_saved_callback([this](const std::filesystem::path& saved) {
         if (directory_panel_) directory_panel_->on_note_saved(saved);
     });
+    view->set_file_added_callback([this](const std::filesystem::path& p) {
+        if (directory_panel_) directory_panel_->on_note_saved(p);
+    });
     auto idx = static_cast<int>(tabs_.size());
     tabs_.push_back(std::unique_ptr<TabView>(view));
     note_tabs_.push_back(view);
@@ -2491,6 +2497,9 @@ void MainWindow::open_note_from_path(const std::filesystem::path& path) {
     });
     view->set_file_saved_callback([this](const std::filesystem::path& saved) {
         if (directory_panel_) directory_panel_->on_note_saved(saved);
+    });
+    view->set_file_added_callback([this](const std::filesystem::path& p) {
+        if (directory_panel_) directory_panel_->on_note_saved(p);
     });
     auto idx = static_cast<int>(tabs_.size());
     tabs_.push_back(std::unique_ptr<TabView>(view));

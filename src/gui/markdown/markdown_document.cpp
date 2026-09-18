@@ -57,18 +57,14 @@ std::optional<std::string> MarkdownDocument::save_pasted_image(
     if (png_bytes.empty() || png_bytes.size() > 32 * 1024 * 1024)
         return std::nullopt;
 
-    // Shared image directory: ~/remin-image/
-    const char* home = std::getenv("HOME");
-    if (!home) return std::nullopt;
-    std::filesystem::path shared_dir = std::filesystem::path(home) / "remin-image";
+    if (asset_dir_.empty()) return std::nullopt;
 
     std::error_code ec;
-    std::filesystem::create_directories(shared_dir, ec);
+    std::filesystem::create_directories(asset_dir_, ec);
     if (ec) return std::nullopt;
 
-    // Next free number scanning only "asset-NNN.png" names.
     int next = 1;
-    for (const auto& entry : std::filesystem::directory_iterator(shared_dir, ec)) {
+    for (const auto& entry : std::filesystem::directory_iterator(asset_dir_, ec)) {
         if (ec) return std::nullopt;
         const std::string name = entry.path().filename().string();
         static const std::regex kAsset(R"(^asset-(\d{3})\.png$)");
@@ -81,30 +77,19 @@ std::optional<std::string> MarkdownDocument::save_pasted_image(
 
     char file_name[32];
     std::snprintf(file_name, sizeof(file_name), "asset-%03d.png", next);
-    const std::filesystem::path target = shared_dir / file_name;
+    const std::filesystem::path target = asset_dir_ / file_name;
     std::ofstream out(target, std::ios::binary);
     if (!out) return std::nullopt;
     out.write(png_bytes.data(), static_cast<std::streamsize>(png_bytes.size()));
     out.close();
     if (!out) return std::nullopt;
 
-    // Return custom URI scheme for shared images.
-    return std::string("remin://images/") + file_name;
+    return std::string(file_name);
 }
 
 std::optional<std::filesystem::path> MarkdownDocument::resolve_asset(
     const std::string& ref) const {
     if (ref.empty()) return std::nullopt;
-
-    // remin://images/asset-XXX.png -> ~/remin-image/asset-XXX.png
-    if (ref.rfind("remin://images/", 0) == 0) {
-        const char* home = std::getenv("HOME");
-        if (!home) return std::nullopt;
-        std::filesystem::path p = std::filesystem::path(home) / "remin-image" / ref.substr(15);
-        std::error_code ec;
-        if (std::filesystem::exists(p, ec)) return std::filesystem::canonical(p, ec);
-        return std::nullopt;
-    }
 
     // Non-local schemes (http:, https:, data:) are not files.
     const std::string scheme = "://";
@@ -131,7 +116,7 @@ std::optional<std::filesystem::path> MarkdownDocument::resolve_asset(
         if (std::filesystem::exists(p, ec)) return std::filesystem::canonical(p, ec);
         return std::nullopt;
     }
-    // Relative to note_dir
+    // Relative to note_dir (e.g., asset-003.png)
     if (!note_dir_.empty()) {
         std::filesystem::path p = note_dir_ / ref;
         if (std::filesystem::exists(p, ec)) return std::filesystem::canonical(p, ec);

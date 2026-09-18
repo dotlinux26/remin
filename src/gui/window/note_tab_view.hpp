@@ -101,6 +101,10 @@ public:
     // The saved file path lets the host reconcile only the affected directory.
     void set_file_saved_callback(std::function<void(const std::filesystem::path&)> cb) { on_file_saved_ = std::move(cb); }
 
+    // Fired after a new file is added to the note directory (e.g. pasted image).
+    // Hosts can refresh the directory tree here.
+    void set_file_added_callback(std::function<void(const std::filesystem::path&)> cb) { on_file_added_ = std::move(cb); }
+
     // --- Runtime state capture/restore (design §7) ---
     // Capture current note state for checkpoint persistence.
     struct State {
@@ -147,6 +151,7 @@ private:
     Gtk::Box* content_host_{nullptr};
     std::function<void()> on_save_state_;
     std::function<void(const std::filesystem::path&)> on_file_saved_;
+    std::function<void(const std::filesystem::path&)> on_file_added_;
 
     bool sync_scroll_{false};
     bool syncing_{false};

@@ -339,13 +339,17 @@ void NoteTabView::on_image_paste(const std::string& png_bytes) {
     doc->set_source(editor_->text());
     std::filesystem::path note_root = note_root_dir();
     doc->set_note_dir(note_root);
-    doc->set_asset_dir(note_root / "assets");
+    doc->set_asset_dir(note_root);
 
     auto asset_ref = doc->save_pasted_image(png_bytes);
     if (!asset_ref) return;
 
     std::string markdown_ref = "![](" + *asset_ref + ")";
     editor_->insert_text_at_cursor(markdown_ref);
+
+    // Notify host about new file in the directory (for tree refresh)
+    std::filesystem::path new_file = note_root / *asset_ref;
+    if (on_file_added_) on_file_added_(new_file);
 
     // Re-render preview if open
     if (preview_) {
