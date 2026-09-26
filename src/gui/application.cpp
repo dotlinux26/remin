@@ -107,9 +107,15 @@ void Application::on_activate() {
 }
 
 bool Application::on_autosave_tick() {
-    if (session_->autosaver() && session_->autosaver()->due()) {
-        bool ok = session_->autosaver()->flush();
-        if (window_) window_->show_autosave_badge(ok);
+    try {
+        if (session_->autosaver() && session_->autosaver()->due()) {
+            bool ok = session_->autosaver()->flush();
+            if (window_) window_->show_autosave_badge(ok);
+        }
+    } catch (const std::exception& e) {
+        g_warning("remin: autosave_tick exception: %s", e.what());
+    } catch (...) {
+        g_warning("remin: autosave_tick unknown exception");
     }
     return true;
 }

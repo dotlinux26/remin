@@ -279,13 +279,29 @@ void NoteEditor::on_paste_done() {
 }
 
 bool NoteEditor::on_highlight_tick() {
-    if (highlight_pending_) refresh_match_highlight();
+    if (highlight_pending_) {
+        try {
+            refresh_match_highlight();
+        } catch (const std::exception& e) {
+            g_warning("remin: highlight_tick exception: %s", e.what());
+        } catch (...) {
+            g_warning("remin: highlight_tick unknown exception");
+        }
+    }
     highlight_pending_ = false;
     return false;
 }
 
 bool NoteEditor::on_preview_tick() {
-    if (preview_pending_ && on_preview_) on_preview_(text());
+    if (preview_pending_ && on_preview_) {
+        try {
+            on_preview_(text());
+        } catch (const std::exception& e) {
+            g_warning("remin: preview_tick exception: %s", e.what());
+        } catch (...) {
+            g_warning("remin: preview_tick unknown exception");
+        }
+    }
     preview_pending_ = false;
     return false;
 }

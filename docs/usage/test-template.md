@@ -19,6 +19,29 @@ between **2026-08-15** and **2026-09-01**.
 > **Scope:** External attack surface, internal network segmentation,
 > Active Directory, cloud tenants (AWS/Azure), and CI/CD pipelines.
 
+![](asset-001.png)
+
+![](asset-002.png)
+
+![](asset-003.png)
+
+![](asset-004.png)
+
+![](asset-005.png)
+
+![](asset-006.png)
+
+![](asset-007.png)
+
+<hr>
+
+---
+
+***
+
+___
+
+
 ### 1.1 Key Findings at a Glance
 
 | Severity | Count | Status |
