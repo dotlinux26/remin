@@ -64,13 +64,25 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
 
     // Change tracking (activity signal -> autosaver + live preview debounce).
     buffer_changed_signal_id_ = g_signal_connect(source_buffer_, "changed", G_CALLBACK(+[](GtkTextBuffer*, gpointer self) {
-        static_cast<NoteEditor*>(self)->on_buffer_changed();
+        try {
+            static_cast<NoteEditor*>(self)->on_buffer_changed();
+        } catch (const std::exception& e) {
+            g_warning("remin: buffer_changed signal exception: %s", e.what());
+        } catch (...) {
+            g_warning("remin: buffer_changed signal unknown exception");
+        }
     }), this);
 
     // VS Code-style HTML tag auto-close: when the user types '>', look back for
     // an unclosed opening tag and insert the matching closing tag.
     auto_close_signal_id_ = g_signal_connect(source_buffer_, "changed", G_CALLBACK(+[](GtkTextBuffer*, gpointer self) {
-        static_cast<NoteEditor*>(self)->on_auto_close_after_change();
+        try {
+            static_cast<NoteEditor*>(self)->on_auto_close_after_change();
+        } catch (const std::exception& e) {
+            g_warning("remin: auto_close signal exception: %s", e.what());
+        } catch (...) {
+            g_warning("remin: auto_close signal unknown exception");
+        }
     }), this);
 
     // Handle paste from context menu (right-click -> Paste) to skip auto-close.
@@ -79,11 +91,23 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     // insert (too late for context-menu paste on its own).
     g_signal_connect(source_view_, "paste-clipboard",
                      G_CALLBACK(+[](GtkTextView*, gpointer self) {
-                         static_cast<NoteEditor*>(self)->on_paste_done();
+                         try {
+                             static_cast<NoteEditor*>(self)->on_paste_done();
+                         } catch (const std::exception& e) {
+                             g_warning("remin: paste-clipboard signal exception: %s", e.what());
+                         } catch (...) {
+                             g_warning("remin: paste-clipboard signal unknown exception");
+                         }
                      }),
                      this);
     g_signal_connect(source_buffer_, "paste-done", G_CALLBACK(+[](GtkTextBuffer*, GdkClipboard*, gpointer self) {
-        static_cast<NoteEditor*>(self)->on_paste_done();
+        try {
+            static_cast<NoteEditor*>(self)->on_paste_done();
+        } catch (const std::exception& e) {
+            g_warning("remin: paste-done signal exception: %s", e.what());
+        } catch (...) {
+            g_warning("remin: paste-done signal unknown exception");
+        }
     }), this);
 
     // Search context used by the shared MainWindow find bar. Enable
@@ -107,9 +131,15 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     set_theme(adw_style_manager_get_dark(adw_style_manager_get_default()));
     color_scheme_signal_id_ = g_signal_connect(adw_style_manager_get_default(), "notify::color-scheme",
                      G_CALLBACK(+[](GObject*, GParamSpec*, gpointer self) {
-                         static_cast<NoteEditor*>(self)->set_theme(
-                             adw_style_manager_get_dark(
-                                 adw_style_manager_get_default()));
+                         try {
+                             static_cast<NoteEditor*>(self)->set_theme(
+                                 adw_style_manager_get_dark(
+                                     adw_style_manager_get_default()));
+                         } catch (const std::exception& e) {
+                             g_warning("remin: color-scheme signal exception: %s", e.what());
+                         } catch (...) {
+                             g_warning("remin: color-scheme signal unknown exception");
+                         }
                      }),
                      this);
 
@@ -126,7 +156,14 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     key_ctrl->signal_key_pressed().connect(
         sigc::slot<bool(unsigned int, unsigned int, Gdk::ModifierType)>(
             [this](unsigned int keyval, unsigned int keycode, Gdk::ModifierType mods) -> bool {
-                return on_key_pressed(keyval, keycode, mods);
+                try {
+                    return on_key_pressed(keyval, keycode, mods);
+                } catch (const std::exception& e) {
+                    g_warning("remin: key_pressed signal exception: %s", e.what());
+                } catch (...) {
+                    g_warning("remin: key_pressed signal unknown exception");
+                }
+                return false;
             }),
         false);
     scroller_->add_controller(key_ctrl);
@@ -134,7 +171,15 @@ NoteEditor::NoteEditor(std::function<void()> on_change)
     // Repaint only the visible search highlights when the view scrolls.
     if (auto vadj = scroller_->get_vadjustment()) {
         vadj->signal_value_changed().connect(
-            sigc::mem_fun(*this, &NoteEditor::on_scroll_changed));
+            [this]() {
+                try {
+                    on_scroll_changed();
+                } catch (const std::exception& e) {
+                    g_warning("remin: vadj value_changed signal exception: %s", e.what());
+                } catch (...) {
+                    g_warning("remin: vadj value_changed signal unknown exception");
+                }
+            });
     }
 }
 

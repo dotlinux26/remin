@@ -217,14 +217,17 @@ void RunBuilder::emit(const Node& n) {
 }
 
 // Heading anchors: same slugify pipeline as the AST module so link targets
-// line up between preview, HTML and PDF.
-std::string heading_anchor(const Node& n, const MarkdownAst& ast) {
-    // The AST already assigns anchors in document order (duplicates deduped).
+// line up between preview, HTML and PDF. The AST assigns an anchor to every
+// heading in document order, deduplicating repeated text with -2/-3 suffixes.
+// Layout visits headings in that same order, so the running sequence index
+// maps 1:1 onto ast.headings() — matching by text alone would hand every
+// repeated heading the first anchor (duplicate DEST names) and crash cairo's
+// PDF tag handling.
+std::string heading_anchor(const Node& n, const MarkdownAst& ast,
+                           size_t seq) {
     const auto headings = ast.headings();
-    const std::string flat = inline_plain_text(n);
-    for (const auto& h : headings)
-        if (h.text == flat) return h.anchor;
-    return slugify_heading(flat);
+    if (seq < headings.size()) return headings[seq].anchor;
+    return slugify_heading(inline_plain_text(n));
 }
 
 // Rough inline width (pt) of a marker string using base font metrics.
@@ -358,6 +361,7 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
                               bool render_toc) {
     LayoutResult res;
     std::vector<Block>& blocks = res.blocks;
+    size_t heading_seq_ = 0;  // running heading index, matches ast.headings()
 
     const auto push_block = [&](Block b) {
         blocks.push_back(std::move(b));
@@ -434,7 +438,7 @@ LayoutResult layout_document(const MarkdownAst& ast, const StyleSheet& style,
         apply_block_ctx(rb);
         rb.set_weight(style.text[static_cast<int>(sel)].weight > 0
                           ? style.text[static_cast<int>(sel)].weight : 400);
-        rb.set_anchor(heading_anchor(h, ast));
+        rb.set_anchor(heading_anchor(h, ast, heading_seq_++));
         for (const Node& c : h.children) rb.emit(c);
         b.run = std::move(runs);
         if (b.run.empty()) return;

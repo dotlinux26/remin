@@ -12,7 +12,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${1:-$ROOT}"
-VER="1.0.4"
+VER="1.0.5"
 ARCH="amd64"
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 ROOTFS="$STAGE/root"

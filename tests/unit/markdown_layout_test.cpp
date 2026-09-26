@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -319,6 +320,50 @@ int main() {
         const auto ast = MarkdownAst::parse("# x\n");
         check(!export_pdf(ast, style, {}, std::filesystem::path("/nonexistent-dir/x.pdf"), {}),
               "export to unwritable path returns false");
+    }
+
+    // --- multiple headings with the SAME text get unique DEST anchors ---
+    // --- (regression: matching by text returned the first anchor for every  ---
+    // --- occurrence, so cairo PDF emitted duplicate named destinations and   ---
+    // --- threw CAIRO_STATUS_TAG_ERROR during export_pdf->finish())          ---
+    {
+        const auto ast = MarkdownAst::parse(
+            "# Alpha\n"
+            "\n"
+            "## Batch 1\n"
+            "## Mô tả\n"
+            "## Mô tả\n"
+            "## Mô tả\n");
+        const auto r = layout_document(ast, style, content_w, {});
+        std::vector<std::string> hrefs;
+        for (const auto& b : r.blocks)
+            if (b.kind == Block::Kind::Heading && b.has_link_hit)
+                hrefs.push_back(b.link_href);
+        check(hrefs.size() >= 4, "four heading blocks with links");
+        const bool all_unique =
+            std::set<std::string>(hrefs.begin(), hrefs.end()).size() == hrefs.size();
+        check(all_unique, "repeated heading text yields unique anchors");
+        bool saw_dedup = false;
+        for (const auto& h : hrefs)
+            if (h == "#m-t-2" || h == "#m-t-3") saw_dedup = true;
+        check(saw_dedup, "deduplicated -2/-3 anchors present");
+
+        // export_pdf must complete without throwing on this document
+        char tmpl[] = "/tmp/remin_pdf_dup_XXXXXX";
+        char* dirp = mkdtemp(tmpl);
+        const std::filesystem::path out =
+            std::filesystem::path(dirp) / "dup.pdf";
+        bool threw = false, ok = false;
+        try {
+            PdfPageMeta meta;
+            meta.title = "Dup";
+            ok = export_pdf(ast, style, {}, out, meta);
+        } catch (const std::exception&) {
+            threw = true;
+        }
+        check(!threw, "export_pdf no throw on duplicate headings");
+        check(ok, "export_pdf succeeded on duplicate headings");
+        std::filesystem::remove_all(dirp);
     }
 
     if (fails == 0) {
